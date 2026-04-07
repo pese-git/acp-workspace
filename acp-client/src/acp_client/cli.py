@@ -40,7 +40,7 @@ def run_client() -> None:
             parser.error("--params для session/load должен содержать массив mcpServers")
 
         response, updates = asyncio.run(
-            client.load_session(
+            client.load_session_parsed(
                 session_id=session_id,
                 cwd=cwd,
                 mcp_servers=[item for item in mcp_servers if isinstance(item, dict)],
@@ -49,7 +49,8 @@ def run_client() -> None:
         )
         payload: dict[str, Any] = {
             "response": response.to_dict(),
-            "updates": updates,
+            # Для CLI выводим типизированные updates в JSON-совместимом формате.
+            "updates": [update.model_dump() for update in updates],
         }
         print(json.dumps(payload, indent=2, ensure_ascii=False))
         return

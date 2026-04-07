@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from aiohttp import ClientSession, WSMsgType
 
-from .messages import ACPMessage
+from .messages import ACPMessage, SessionUpdateNotification, parse_session_update_notification
 
 
 class ACPClient:
@@ -88,3 +88,30 @@ class ACPClient:
             on_update=updates.append,
         )
         return response, updates
+
+    async def load_session_parsed(
+        self,
+        *,
+        session_id: str,
+        cwd: str,
+        mcp_servers: list[dict[str, Any]] | None = None,
+        transport: Literal["http", "ws"] = "ws",
+    ) -> tuple[ACPMessage, list[SessionUpdateNotification]]:
+        # Типизированный helper: возвращает только валидные `session/update` события.
+        raw_response, raw_updates = await self.load_session(
+            session_id=session_id,
+            cwd=cwd,
+            mcp_servers=mcp_servers,
+            transport=transport,
+        )
+
+        parsed_updates: list[SessionUpdateNotification] = []
+        for raw_update in raw_updates:
+            if not isinstance(raw_update, dict):
+                continue
+            parsed = parse_session_update_notification(raw_update)
+            if parsed is None:
+                continue
+            parsed_updates.append(parsed)
+
+        return raw_response, parsed_updates

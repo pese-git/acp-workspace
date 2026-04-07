@@ -96,6 +96,37 @@ class ACPMessage(BaseModel):
         return payload
 
 
+class SessionUpdatePayload(BaseModel):
+    # Дискриминатор типа события в `session/update`.
+    sessionUpdate: str
+    # Дальнейшие поля зависят от конкретного типа update.
+    model_config = ConfigDict(extra="allow")
+
+
+class SessionUpdateParams(BaseModel):
+    # Идентификатор сессии, к которой относится update.
+    sessionId: str
+    # Полезная нагрузка update-события.
+    update: SessionUpdatePayload
+    model_config = ConfigDict(extra="forbid")
+
+
+class SessionUpdateNotification(BaseModel):
+    # Notification всегда в формате JSON-RPC 2.0.
+    jsonrpc: Literal["2.0"] = "2.0"
+    # Для данного помощника принимаем только `session/update`.
+    method: Literal["session/update"]
+    params: SessionUpdateParams
+    model_config = ConfigDict(extra="forbid")
+
+
+def parse_session_update_notification(payload: dict[str, Any]) -> SessionUpdateNotification | None:
+    # Если это не `session/update`, возвращаем None для удобной фильтрации.
+    if payload.get("method") != "session/update":
+        return None
+    return SessionUpdateNotification.model_validate(payload)
+
+
 def parse_json_params(value: str | None) -> dict[str, Any]:
     # CLI принимает params строкой; здесь приводим к JSON-объекту для ACP запроса.
     if value is None:

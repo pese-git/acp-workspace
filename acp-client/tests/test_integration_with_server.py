@@ -120,6 +120,62 @@ async def test_load_session_helper_collects_replay_updates() -> None:
 
 
 @pytest.mark.asyncio
+async def test_load_session_parsed_returns_typed_updates() -> None:
+    async def handle_ws_request(request: web.Request) -> web.WebSocketResponse:
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        async for message in ws:
+            payload = json.loads(message.data)
+            assert payload["method"] == "session/load"
+            await ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "session/update",
+                    "params": {
+                        "sessionId": "sess_2",
+                        "update": {
+                            "sessionUpdate": "session_info_update",
+                            "updatedAt": "2026-04-07T00:00:00Z",
+                        },
+                    },
+                }
+            )
+            await ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": payload["id"],
+                    "result": None,
+                }
+            )
+            break
+        return ws
+
+    port = _get_free_port()
+    app = web.Application()
+    app.router.add_get("/acp/ws", handle_ws_request)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="127.0.0.1", port=port)
+    await site.start()
+
+    try:
+        client = ACPClient(host="127.0.0.1", port=port)
+        response, updates = await client.load_session_parsed(
+            session_id="sess_2",
+            cwd="/tmp",
+            mcp_servers=[],
+            transport="ws",
+        )
+        assert response.result is None
+        assert len(updates) == 1
+        assert updates[0].params.sessionId == "sess_2"
+        assert updates[0].params.update.sessionUpdate == "session_info_update"
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
 async def test_ws_client_receives_updates() -> None:
     async def handle_ws_request(request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse()

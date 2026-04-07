@@ -28,6 +28,8 @@ class SessionState:
     tool_call_counter: int = 0
     # Реестр созданных tool calls и их состояний.
     tool_calls: dict[str, ToolCallState] = field(default_factory=dict)
+    # Набор доступных slash-команд для `available_commands_update`.
+    available_commands: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -194,6 +196,7 @@ class ACPProtocol:
             cwd=cwd,
             mcp_servers=[server for server in mcp_servers if isinstance(server, dict)],
             config_values=config_values,
+            available_commands=self._build_default_commands(),
         )
         return ACPMessage.response(
             request_id,
@@ -293,6 +296,18 @@ class ACPProtocol:
                     "update": {
                         "sessionUpdate": "config_option_update",
                         "configOptions": self._build_config_options(session.config_values),
+                    },
+                },
+            )
+        )
+        notifications.append(
+            ACPMessage.notification(
+                "session/update",
+                {
+                    "sessionId": session_id,
+                    "update": {
+                        "sessionUpdate": "available_commands_update",
+                        "availableCommands": session.available_commands,
                     },
                 },
             )
@@ -445,6 +460,20 @@ class ACPProtocol:
                 session_id=session_id,
                 title=session.title if title_changed else None,
                 updated_at=session.updated_at,
+            )
+        )
+
+        # Команды можно динамически менять между запросами; отправляем текущий snapshot.
+        notifications.append(
+            ACPMessage.notification(
+                "session/update",
+                {
+                    "sessionId": session_id,
+                    "update": {
+                        "sessionUpdate": "available_commands_update",
+                        "availableCommands": session.available_commands,
+                    },
+                },
             )
         )
 
@@ -783,3 +812,16 @@ class ACPProtocol:
                 },
             },
         )
+
+    def _build_default_commands(self) -> list[dict[str, Any]]:
+        # Базовый список slash-команд для демонстрации протокольного update.
+        return [
+            {
+                "name": "status",
+                "description": "Показать состояние текущей сессии",
+            },
+            {
+                "name": "mode",
+                "description": "Показать и изменить режим сессии",
+            },
+        ]

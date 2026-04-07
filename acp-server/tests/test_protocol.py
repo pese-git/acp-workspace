@@ -47,12 +47,14 @@ def test_session_prompt_sends_update() -> None:
 
     assert outcome.response is not None
     assert outcome.response.result == {"stopReason": "end_turn"}
-    assert len(outcome.notifications) == 2
-    assert outcome.notifications[0].method == "session/update"
-    assert outcome.notifications[0].params is not None
-    assert outcome.notifications[0].params["update"]["sessionUpdate"] == "agent_message_chunk"
-    assert outcome.notifications[1].params is not None
-    assert outcome.notifications[1].params["update"]["sessionUpdate"] == "session_info_update"
+    update_types = [
+        notification.params["update"]["sessionUpdate"]
+        for notification in outcome.notifications
+        if notification.params is not None
+    ]
+    assert "agent_message_chunk" in update_types
+    assert "session_info_update" in update_types
+    assert "available_commands_update" in update_types
 
 
 def test_session_list_returns_created_session() -> None:
@@ -236,3 +238,4 @@ def test_session_load_replays_history_and_config() -> None:
     assert "agent_message_chunk" in replay_updates
     assert "config_option_update" in replay_updates
     assert "session_info_update" in replay_updates
+    assert "available_commands_update" in replay_updates
