@@ -361,13 +361,36 @@ def test_runtime_capabilities_are_session_scoped_after_reinitialize() -> None:
             },
         )
     )
-    assert first_prompt.response is not None
     first_updates = [
         notification.params["update"]["sessionUpdate"]
         for notification in first_prompt.notifications
-        if notification.params is not None
+        if notification.method == "session/update"
+        and isinstance(notification.params, dict)
+        and isinstance(notification.params.get("update"), dict)
     ]
     assert "tool_call" in first_updates
+    if first_prompt.response is None:
+        permission_requests = [
+            notification
+            for notification in first_prompt.notifications
+            if notification.method == "session/request_permission" and notification.id is not None
+        ]
+        assert len(permission_requests) == 1
+        permission_result = protocol.handle_client_response(
+            ACPMessage.response(
+                permission_requests[0].id,
+                {
+                    "outcome": {
+                        "outcome": "selected",
+                        "optionId": "allow_once",
+                    }
+                },
+            )
+        )
+        assert len(permission_result.followup_responses) == 1
+        assert permission_result.followup_responses[0].result == {"stopReason": "end_turn"}
+    else:
+        assert first_prompt.response.result == {"stopReason": "end_turn"}
 
     second_prompt = protocol.handle(
         ACPMessage.request(
@@ -382,7 +405,9 @@ def test_runtime_capabilities_are_session_scoped_after_reinitialize() -> None:
     second_updates = [
         notification.params["update"]["sessionUpdate"]
         for notification in second_prompt.notifications
-        if notification.params is not None
+        if notification.method == "session/update"
+        and isinstance(notification.params, dict)
+        and isinstance(notification.params.get("update"), dict)
     ]
     assert "tool_call" not in second_updates
 
