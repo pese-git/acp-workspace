@@ -689,7 +689,7 @@ class PermissionOption(BaseModel):
 
     optionId: str
     name: str
-    kind: str
+    kind: Literal["allow_once", "allow_always", "reject_once", "reject_always"]
     model_config = ConfigDict(extra="allow")
 
 

@@ -968,8 +968,8 @@ async def test_ws_client_handles_permission_request() -> None:
 
             permission_response = await ws.receive_json()
             assert permission_response["id"] == "perm_1"
-            assert permission_response["result"]["outcome"] == "selected"
-            assert permission_response["result"]["optionId"] == "allow_once"
+            assert permission_response["result"]["outcome"]["outcome"] == "selected"
+            assert permission_response["result"]["outcome"]["optionId"] == "allow_once"
 
             await ws.send_json(
                 {

@@ -468,13 +468,21 @@ def test_permission_selected_completes_prompt_turn() -> None:
         if notification.method == "session/request_permission"
     )
     assert permission_request.id is not None
+    assert permission_request.params is not None
+    options = permission_request.params["options"]
+    assert isinstance(options, list)
+    assert any(
+        isinstance(option, dict) and option.get("kind") == "reject_once" for option in options
+    )
 
     resolved = protocol.handle_client_response(
         ACPMessage.response(
             permission_request.id,
             {
-                "outcome": "selected",
-                "optionId": "allow_once",
+                "outcome": {
+                    "outcome": "selected",
+                    "optionId": "allow_once",
+                },
             },
         )
     )
@@ -508,7 +516,10 @@ def test_permission_cancelled_finishes_turn_with_cancelled() -> None:
     assert permission_request.id is not None
 
     resolved = protocol.handle_client_response(
-        ACPMessage.response(permission_request.id, {"outcome": "cancelled"})
+        ACPMessage.response(
+            permission_request.id,
+            {"outcome": {"outcome": "cancelled"}},
+        )
     )
     assert len(resolved.followup_responses) == 1
     assert resolved.followup_responses[0].result == {"stopReason": "cancelled"}

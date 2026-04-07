@@ -1019,7 +1019,10 @@ class ACPProtocol:
         """Применяет решение по permission-request к активному prompt-turn.
 
         Пример использования:
-            outcome = protocol._resolve_permission_response("perm_1", {"outcome": "selected"})
+            outcome = protocol._resolve_permission_response(
+                "perm_1",
+                {"outcome": {"outcome": "selected", "optionId": "allow_once"}},
+            )
         """
 
         session = self._find_session_by_permission_request_id(permission_request_id)
@@ -1031,7 +1034,7 @@ class ACPProtocol:
 
         session_id = session.session_id
         notifications: list[ACPMessage] = []
-        outcome_value = result.get("outcome") if isinstance(result, dict) else None
+        outcome_value = self._extract_permission_outcome(result)
         if outcome_value != "selected":
             self._update_tool_call_status(session, tool_call_id, "cancelled")
             notifications.append(
@@ -1138,6 +1141,32 @@ class ACPProtocol:
                 return session
         return None
 
+    def _extract_permission_outcome(self, result: Any) -> str | None:
+        """Извлекает outcome из `session/request_permission` response.
+
+        Поддерживает текущий ACP shape (`{"outcome": {"outcome": ...}}`) и
+        legacy-вариант (`{"outcome": ...}`) для обратной совместимости.
+
+        Пример использования:
+            outcome = protocol._extract_permission_outcome(
+                {"outcome": {"outcome": "selected", "optionId": "allow_once"}},
+            )
+        """
+
+        if not isinstance(result, dict):
+            return None
+
+        nested_outcome = result.get("outcome")
+        if isinstance(nested_outcome, dict):
+            raw_value = nested_outcome.get("outcome")
+            if isinstance(raw_value, str):
+                return raw_value
+
+        # Legacy fallback для старых клиентов.
+        if isinstance(nested_outcome, str):
+            return nested_outcome
+        return None
+
     def _build_permission_options(self) -> list[dict[str, Any]]:
         """Возвращает demo-набор вариантов для `session/request_permission`.
 
@@ -1152,9 +1181,9 @@ class ACPProtocol:
                 "kind": "allow_once",
             },
             {
-                "optionId": "reject",
+                "optionId": "reject_once",
                 "name": "Reject",
-                "kind": "reject",
+                "kind": "reject_once",
             },
         ]
 

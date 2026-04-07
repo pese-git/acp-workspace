@@ -1,4 +1,5 @@
 import pytest
+from pydantic import ValidationError
 
 from acp_client.messages import (
     ACPMessage,
@@ -193,6 +194,27 @@ def test_parse_request_permission_request() -> None:
     assert isinstance(parsed, RequestPermissionRequest)
     assert parsed.id == "perm_1"
     assert parsed.params.options[0].optionId == "allow_once"
+
+
+def test_parse_request_permission_request_rejects_unknown_option_kind() -> None:
+    payload = {
+        "jsonrpc": "2.0",
+        "id": "perm_1",
+        "method": "session/request_permission",
+        "params": {
+            "sessionId": "sess_1",
+            "toolCall": {"toolCallId": "call_001"},
+            "options": [
+                {
+                    "optionId": "reject",
+                    "name": "Reject",
+                    "kind": "reject",
+                }
+            ],
+        },
+    }
+    with pytest.raises(ValidationError):
+        parse_request_permission_request(payload)
 
 
 def test_parse_plan_update() -> None:
@@ -423,3 +445,23 @@ def test_parse_structured_session_update_for_session_state_updates() -> None:
         assert notification is not None
         parsed = parse_structured_session_update(notification)
         assert isinstance(parsed, expected_type)
+
+
+def test_parse_structured_session_update_rejects_invalid_current_mode_shape() -> None:
+    notification = parse_session_update_notification(
+        {
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": "sess_1",
+                "update": {
+                    "sessionUpdate": "current_mode_update",
+                    "modeId": "ask",
+                },
+            },
+        }
+    )
+    assert notification is not None
+
+    with pytest.raises(ValidationError):
+        parse_structured_session_update(notification)

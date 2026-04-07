@@ -254,10 +254,16 @@ class ACPClient:
 
         selected_option_id = on_permission(payload) if on_permission is not None else None
         if selected_option_id is None:
-            return {"outcome": "cancelled"}
+            return {
+                "outcome": {
+                    "outcome": "cancelled",
+                }
+            }
         return {
-            "outcome": "selected",
-            "optionId": selected_option_id,
+            "outcome": {
+                "outcome": "selected",
+                "optionId": selected_option_id,
+            }
         }
 
     async def load_session(

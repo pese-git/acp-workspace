@@ -133,8 +133,10 @@ async def test_ws_prompt_with_permission_selection_finishes_with_end_turn() -> N
                                 "jsonrpc": "2.0",
                                 "id": payload["id"],
                                 "result": {
-                                    "outcome": "selected",
-                                    "optionId": "allow_once",
+                                    "outcome": {
+                                        "outcome": "selected",
+                                        "optionId": "allow_once",
+                                    },
                                 },
                             }
                         )
