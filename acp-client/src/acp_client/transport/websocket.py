@@ -10,22 +10,33 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from typing import Any, TypeAlias
+from typing import Any
 
 import structlog
 from aiohttp import ClientSession, WSMsgType
 
-from ..handlers import build_permission_result, handle_server_fs_request, handle_server_terminal_request
-from ..messages import ACPMessage, AuthenticateResult, InitializeResult, parse_authenticate_result, parse_initialize_result, parse_request_permission_request
+from ..handlers import (
+    build_permission_result,
+    handle_server_fs_request,
+    handle_server_terminal_request,
+)
+from ..messages import (
+    ACPMessage,
+    AuthenticateResult,
+    InitializeResult,
+    parse_authenticate_result,
+    parse_initialize_result,
+    parse_request_permission_request,
+)
 
-PermissionHandler: TypeAlias = Callable[[dict[str, Any]], str | None]
-FsReadHandler: TypeAlias = Callable[[str], str]
-FsWriteHandler: TypeAlias = Callable[[str, str], str | None]
-TerminalCreateHandler: TypeAlias = Callable[[str], str]
-TerminalOutputHandler: TypeAlias = Callable[[str], str]
-TerminalWaitHandler: TypeAlias = Callable[[str], int | tuple[int | None, str | None]]
-TerminalReleaseHandler: TypeAlias = Callable[[str], None]
-TerminalKillHandler: TypeAlias = Callable[[str], bool]
+type PermissionHandler = Callable[[dict[str, Any]], str | None]
+type FsReadHandler = Callable[[str], str]
+type FsWriteHandler = Callable[[str, str], str | None]
+type TerminalCreateHandler = Callable[[str], str]
+type TerminalOutputHandler = Callable[[str], str]
+type TerminalWaitHandler = Callable[[str], int | tuple[int | None, str | None]]
+type TerminalReleaseHandler = Callable[[str], None]
+type TerminalKillHandler = Callable[[str], bool]
 
 
 async def await_ws_response(

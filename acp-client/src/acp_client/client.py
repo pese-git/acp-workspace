@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, TypeAlias
+from typing import Any
 
 import structlog
 
@@ -9,7 +9,6 @@ from .helpers import (
     extract_plan_updates,
     extract_structured_updates,
     extract_tool_call_updates,
-    pick_auth_method_id,
 )
 from .messages import (
     ACPMessage,
@@ -32,16 +31,14 @@ from .messages import (
 )
 from .transport import ACPClientWSSession
 
-from typing import TypeAlias
-
-PermissionHandler: TypeAlias = Callable[[dict[str, Any]], str | None]
-FsReadHandler: TypeAlias = Callable[[str], str]
-FsWriteHandler: TypeAlias = Callable[[str, str], str | None]
-TerminalCreateHandler: TypeAlias = Callable[[str], str]
-TerminalOutputHandler: TypeAlias = Callable[[str], str]
-TerminalWaitHandler: TypeAlias = Callable[[str], int | tuple[int | None, str | None]]
-TerminalReleaseHandler: TypeAlias = Callable[[str], None]
-TerminalKillHandler: TypeAlias = Callable[[str], bool]
+type PermissionHandler = Callable[[dict[str, Any]], str | None]
+type FsReadHandler = Callable[[str], str]
+type FsWriteHandler = Callable[[str, str], str | None]
+type TerminalCreateHandler = Callable[[str], str]
+type TerminalOutputHandler = Callable[[str], str]
+type TerminalWaitHandler = Callable[[str], int | tuple[int | None, str | None]]
+type TerminalReleaseHandler = Callable[[str], None]
+type TerminalKillHandler = Callable[[str], bool]
 
 
 class ACPClient:

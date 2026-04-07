@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 from ..messages import ACPMessage, JsonRpcError
 
 if TYPE_CHECKING:
-    from . import (
+    from ..client import (
         TerminalCreateHandler,
         TerminalKillHandler,
         TerminalOutputHandler,
