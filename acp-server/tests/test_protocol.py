@@ -112,6 +112,34 @@ def test_prompt_with_plan_marker_emits_plan_update() -> None:
     assert isinstance(plan_updates[0].params["update"].get("entries"), list)
 
 
+def test_prompt_with_plan_slash_command_emits_plan_update() -> None:
+    protocol = ACPProtocol()
+
+    new_session = protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
+    assert new_session.response is not None
+    assert isinstance(new_session.response.result, dict)
+    session_id = new_session.response.result["sessionId"]
+
+    outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "/plan собрать шаги"}],
+            },
+        )
+    )
+
+    assert outcome.response is not None
+    assert any(
+        notification.params is not None
+        and notification.params["update"].get("sessionUpdate") == "plan"
+        for notification in outcome.notifications
+    )
+
+
 def test_session_new_returns_modes_state() -> None:
     protocol = ACPProtocol()
     created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
@@ -336,6 +364,44 @@ def test_deferred_prompt_can_be_completed_without_cancel() -> None:
     completed_response = protocol.complete_active_turn(session_id, stop_reason="end_turn")
     assert completed_response is not None
     assert completed_response.result == {"stopReason": "end_turn"}
+
+
+def test_prompt_with_tool_pending_slash_command_defers_turn() -> None:
+    protocol = ACPProtocol()
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    # Переключаемся в mode=code, чтобы не уходить в permission-flow и проверить defer tool-call.
+    updated = protocol.handle(
+        ACPMessage.request(
+            "session/set_config_option",
+            {
+                "sessionId": session_id,
+                "configId": "mode",
+                "value": "code",
+            },
+        )
+    )
+    assert updated.response is not None
+
+    outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "/tool-pending выполнить"}],
+            },
+        )
+    )
+
+    assert outcome.response is None
+    assert any(
+        notification.params is not None
+        and notification.params["update"].get("sessionUpdate") == "tool_call"
+        for notification in outcome.notifications
+    )
 
 
 def test_permission_selected_completes_prompt_turn() -> None:

@@ -98,6 +98,22 @@ class ActiveTurnState:
 
 
 @dataclass(slots=True)
+class PromptDirectives:
+    """Нормализованные флаги поведения prompt-turn из пользовательского ввода.
+
+    Используются для постепенного ухода от marker-based demo-логики к
+    более явным протокольным триггерам (например, slash-команды).
+
+    Пример использования:
+        directives = PromptDirectives(request_tool=True, keep_tool_pending=False)
+    """
+
+    request_tool: bool = False
+    keep_tool_pending: bool = False
+    publish_plan: bool = False
+
+
+@dataclass(slots=True)
 class ProtocolOutcome:
     """Результат обработки входящего ACP-сообщения.
 
@@ -698,6 +714,7 @@ class ACPProtocol:
                 text_blocks.append(block["text"])
         text_preview = text_blocks[0] if text_blocks else "Prompt received"
         prompt_for_title = text_preview.strip()
+        directives = self._extract_prompt_directives(text_preview)
 
         # Все промежуточные события отправляются через `session/update`.
         notifications: list[ACPMessage] = []
@@ -718,7 +735,7 @@ class ACPProtocol:
         )
         notifications.append(update)
 
-        if "[plan]" in text_preview:
+        if directives.publish_plan:
             # В demo-режиме публикуем пример плана для клиентских UI.
             plan_entries = [
                 {
@@ -753,7 +770,7 @@ class ACPProtocol:
 
         # В режиме `ask` эмулируем обязательный permission-request перед tool call.
         should_request_permission = (
-            "[tool]" in text_preview and session.config_values.get("mode", "ask") == "ask"
+            directives.request_tool and session.config_values.get("mode", "ask") == "ask"
         )
         if should_request_permission:
             tool_call_id = self._create_tool_call(
@@ -796,7 +813,8 @@ class ACPProtocol:
             tool_notifications = self._build_tool_call_updates(
                 session=session,
                 session_id=session_id,
-                prompt_text=text_preview,
+                prompt_requests_tool=directives.request_tool,
+                leave_running=directives.keep_tool_pending,
             )
             notifications.extend(tool_notifications)
 
@@ -842,7 +860,7 @@ class ACPProtocol:
             )
         )
 
-        should_defer_completion = "[tool-pending]" in text_preview or should_request_permission
+        should_defer_completion = directives.keep_tool_pending or should_request_permission
         if should_defer_completion:
             # Для незавершенных tool-call оставляем prompt-request «в полете».
             # Финальный response будет отправлен позже (автозавершение или cancel).
@@ -1371,28 +1389,59 @@ class ACPProtocol:
             )
         return None
 
+    def _extract_prompt_directives(self, text_preview: str) -> PromptDirectives:
+        """Извлекает служебные флаги turn из текстового preview prompt.
+
+        В первую очередь поддерживаются slash-команды (`/plan`, `/tool`,
+        `/tool-pending`). Для обратной совместимости сохраняется fallback на
+        старые маркеры (`[plan]`, `[tool]`, `[tool-pending]`).
+
+        Пример использования:
+            directives = protocol._extract_prompt_directives("/tool /plan")
+        """
+
+        normalized_tokens = {
+            token.strip().lower()
+            for token in text_preview.replace("\n", " ").split(" ")
+            if token.strip()
+        }
+
+        has_plan_directive = "/plan" in normalized_tokens or "[plan]" in text_preview
+        has_tool_directive = "/tool" in normalized_tokens or "[tool]" in text_preview
+        has_pending_directive = (
+            "/tool-pending" in normalized_tokens or "[tool-pending]" in text_preview
+        )
+
+        return PromptDirectives(
+            request_tool=has_tool_directive or has_pending_directive,
+            keep_tool_pending=has_pending_directive,
+            publish_plan=has_plan_directive,
+        )
+
     def _build_tool_call_updates(
         self,
         *,
         session: SessionState,
         session_id: str,
-        prompt_text: str,
+        prompt_requests_tool: bool,
+        leave_running: bool,
     ) -> list[ACPMessage]:
         """Генерирует demo-последовательность `tool_call`/`tool_call_update`.
 
-        Включается маркером `[tool]` в тексте prompt и используется как
-        каркас для протокольной совместимости и тестов.
+        Включается явными флагами, вычисленными на этапе анализа prompt.
+        Нужен как каркас для протокольной совместимости и тестов.
 
         Пример использования:
             updates = protocol._build_tool_call_updates(
                 session=state,
                 session_id="sess_1",
-                prompt_text="run [tool]",
+                prompt_requests_tool=True,
+                leave_running=False,
             )
         """
 
-        # Демо-режим: tool-call генерируется только по явному маркеру в тексте.
-        if "[tool]" not in prompt_text:
+        # Если turn не требует вызова инструмента, update-события не генерируем.
+        if not prompt_requests_tool:
             return []
 
         tool_call_id = self._create_tool_call(
@@ -1415,9 +1464,6 @@ class ACPProtocol:
             },
         )
 
-        # Маркер нужен для тестирования ветки отмены незавершенного tool call.
-        should_leave_running = "[tool-pending]" in prompt_text
-
         in_progress = ACPMessage.notification(
             "session/update",
             {
@@ -1431,7 +1477,7 @@ class ACPProtocol:
         )
         self._update_tool_call_status(session, tool_call_id, "in_progress")
 
-        if should_leave_running:
+        if leave_running:
             return [created, in_progress]
 
         completed_content = [
