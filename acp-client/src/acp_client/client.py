@@ -528,3 +528,51 @@ class ACPClient:
                 continue
             structured.append(parsed)
         return response, structured
+
+    async def set_config_option_with_updates(
+        self,
+        *,
+        session_id: str,
+        config_id: str,
+        value: str,
+        transport: Literal["http", "ws"] = "ws",
+    ) -> tuple[ACPMessage, list[StructuredSessionUpdate]]:
+        """Меняет config option и возвращает typed update-события из WS-потока.
+
+        Для HTTP-транспорта список updates обычно пустой, так как notification-
+        поток в этом режиме не передается отдельными сообщениями.
+
+        Пример использования:
+            response, updates = await client.set_config_option_with_updates(
+                session_id="sess_1",
+                config_id="mode",
+                value="code",
+                transport="ws",
+            )
+        """
+
+        raw_updates: list[dict[str, Any]] = []
+        response = await self.request(
+            method="session/set_config_option",
+            params={
+                "sessionId": session_id,
+                "configId": config_id,
+                "value": value,
+            },
+            transport=transport,
+            on_update=raw_updates.append,
+        )
+
+        parsed_updates: list[StructuredSessionUpdate] = []
+        for raw in raw_updates:
+            if not isinstance(raw, dict):
+                continue
+            notification = parse_session_update_notification(raw)
+            if notification is None:
+                continue
+            parsed = parse_structured_session_update(notification)
+            if parsed is None:
+                continue
+            parsed_updates.append(parsed)
+
+        return response, parsed_updates

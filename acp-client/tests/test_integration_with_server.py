@@ -699,6 +699,86 @@ async def test_ws_client_receives_updates() -> None:
 
 
 @pytest.mark.asyncio
+async def test_set_config_option_with_updates_returns_structured_updates() -> None:
+    async def handle_ws_request(request: web.Request) -> web.WebSocketResponse:
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        async for message in ws:
+            payload = json.loads(message.data)
+            assert payload["method"] == "session/set_config_option"
+            assert payload["params"]["configId"] == "mode"
+
+            await ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "session/update",
+                    "params": {
+                        "sessionId": "sess_1",
+                        "update": {
+                            "sessionUpdate": "config_option_update",
+                            "configOptions": [
+                                {
+                                    "id": "mode",
+                                    "name": "Mode",
+                                    "category": "mode",
+                                    "type": "select",
+                                    "currentValue": "code",
+                                    "options": [{"value": "ask", "name": "Ask"}],
+                                }
+                            ],
+                        },
+                    },
+                }
+            )
+            await ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "session/update",
+                    "params": {
+                        "sessionId": "sess_1",
+                        "update": {
+                            "sessionUpdate": "current_mode_update",
+                            "currentModeId": "code",
+                        },
+                    },
+                }
+            )
+            await ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": payload["id"],
+                    "result": {},
+                }
+            )
+            break
+        return ws
+
+    port = _get_free_port()
+    app = web.Application()
+    app.router.add_get("/acp/ws", handle_ws_request)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="127.0.0.1", port=port)
+    await site.start()
+
+    try:
+        client = ACPClient(host="127.0.0.1", port=port)
+        response, updates = await client.set_config_option_with_updates(
+            session_id="sess_1",
+            config_id="mode",
+            value="code",
+            transport="ws",
+        )
+        assert isinstance(response.result, dict)
+        update_types = [update.sessionUpdate for update in updates]
+        assert "config_option_update" in update_types
+        assert "current_mode_update" in update_types
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
 async def test_ws_client_handles_permission_request() -> None:
     async def handle_ws_request(request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse()

@@ -27,6 +27,7 @@ uv run acp-client --transport ws --host 127.0.0.1 --port 8080 --method session/l
 - `load_session_setup_parsed(...)` — типизированный helper для ответа `session/load` и replay updates.
 - `load_session_parsed(...)` — возвращает типизированные `session/update` события.
 - `load_session_structured_updates(...)` — возвращает только известные типизированные payload `session/update`.
+- `set_config_option_with_updates(...)` — меняет config option и возвращает типизированные update-события.
 - `load_session_tool_updates(...)` — возвращает только события tool call.
 - `load_session_plan_updates(...)` — возвращает только события `plan`.
 - `list_sessions(...)` и `list_all_sessions(...)` — работа с `session/list` и cursor-пагинацией.
