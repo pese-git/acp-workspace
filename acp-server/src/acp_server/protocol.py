@@ -1050,19 +1050,22 @@ class ACPProtocol:
                     },
                 )
             )
-            remembered_permission = session.permission_policy.get(directives.tool_kind)
-            if remembered_permission == "allow_always":
+            remembered_permission = self._resolve_remembered_permission_decision(
+                session=session,
+                tool_kind=directives.tool_kind,
+            )
+            if remembered_permission == "allow":
                 notifications.extend(
-                    self._build_demo_tool_execution_updates(
+                    self._build_policy_tool_execution_updates(
                         session=session,
                         session_id=session_id,
                         tool_call_id=tool_call_id,
                         allowed=True,
                     )
                 )
-            elif remembered_permission == "reject_always":
+            elif remembered_permission == "reject":
                 notifications.extend(
-                    self._build_demo_tool_execution_updates(
+                    self._build_policy_tool_execution_updates(
                         session=session,
                         session_id=session_id,
                         tool_call_id=tool_call_id,
@@ -1090,7 +1093,7 @@ class ACPProtocol:
                 notifications.append(permission_request)
                 should_request_permission = True
         else:
-            # Демонстрационный tool-call lifecycle для совместимости с ACP-клиентами.
+            # Базовый tool-call lifecycle для сценариев без permission-gate.
             tool_notifications = self._build_tool_call_updates(
                 session=session,
                 session_id=session_id,
@@ -1868,17 +1871,24 @@ class ACPProtocol:
         outcome_value = self._extract_permission_outcome(result)
         selected_option = self._extract_permission_option_id(result)
         selected_option_id = selected_option if isinstance(selected_option, str) else None
+        selected_option_kind = self._resolve_permission_option_kind(selected_option_id)
+
+        session.active_turn.permission_request_id = None
+        session.active_turn.permission_tool_call_id = None
+
         tool_call_state = session.tool_calls.get(tool_call_id)
         tool_kind = tool_call_state.kind if tool_call_state is not None else None
-        if tool_kind is not None and selected_option_id in {"allow_always", "reject_always"}:
+
+        if tool_kind is not None and selected_option_kind in {"allow_always", "reject_always"}:
             # Сохраняем policy-решение для следующих tool-call этого же kind.
-            session.permission_policy[tool_kind] = selected_option_id
-        should_allow = outcome_value == "selected" and selected_option_id is not None
-        if selected_option_id is not None:
-            should_allow = should_allow and selected_option_id.startswith("allow")
+            session.permission_policy[tool_kind] = selected_option_kind
+
+        should_allow = bool(
+            outcome_value == "selected" and selected_option_kind in {"allow_once", "allow_always"}
+        )
         if not should_allow:
             notifications.extend(
-                self._build_demo_tool_execution_updates(
+                self._build_policy_tool_execution_updates(
                     session=session,
                     session_id=session_id,
                     tool_call_id=tool_call_id,
@@ -1900,7 +1910,7 @@ class ACPProtocol:
             )
 
         notifications.extend(
-            self._build_demo_tool_execution_updates(
+            self._build_policy_tool_execution_updates(
                 session=session,
                 session_id=session_id,
                 tool_call_id=tool_call_id,
@@ -1922,7 +1932,7 @@ class ACPProtocol:
             followup_responses=[completed] if completed is not None else [],
         )
 
-    def _build_demo_tool_execution_updates(
+    def _build_policy_tool_execution_updates(
         self,
         *,
         session: SessionState,
@@ -1930,10 +1940,10 @@ class ACPProtocol:
         tool_call_id: str,
         allowed: bool,
     ) -> list[ACPMessage]:
-        """Строит lifecycle updates для локального tool execution после policy-решения.
+        """Строит lifecycle updates для tool execution после policy-решения.
 
         Пример использования:
-            updates = protocol._build_demo_tool_execution_updates(
+            updates = protocol._build_policy_tool_execution_updates(
                 session=state,
                 session_id="sess_1",
                 tool_call_id="call_1",
@@ -2330,6 +2340,53 @@ class ACPProtocol:
         if isinstance(raw_option_id, str):
             return raw_option_id
         return None
+
+    def _resolve_permission_option_kind(self, option_id: str | None) -> str | None:
+        """Возвращает kind permission-опции по ее `optionId`.
+
+        Пример использования:
+            kind = protocol._resolve_permission_option_kind("allow_once")
+        """
+
+        if option_id is None:
+            return None
+        for option in self._build_permission_options():
+            if not isinstance(option, dict):
+                continue
+            if option.get("optionId") != option_id:
+                continue
+            kind_value = option.get("kind")
+            if isinstance(kind_value, str):
+                return kind_value
+            return None
+        return None
+
+    def _resolve_remembered_permission_decision(
+        self,
+        *,
+        session: SessionState,
+        tool_kind: str,
+    ) -> str:
+        """Возвращает применяемое policy-решение для tool kind.
+
+        Возвращаемые значения:
+        - `allow`: выполнить tool-call без запроса permission.
+        - `reject`: отклонить tool-call без запроса permission.
+        - `ask`: запросить решение у клиента через `session/request_permission`.
+
+        Пример использования:
+            decision = protocol._resolve_remembered_permission_decision(
+                session=state,
+                tool_kind="execute",
+            )
+        """
+
+        remembered = session.permission_policy.get(tool_kind)
+        if remembered == "allow_always":
+            return "allow"
+        if remembered == "reject_always":
+            return "reject"
+        return "ask"
 
     def _build_permission_options(self) -> list[dict[str, Any]]:
         """Возвращает варианты решения для `session/request_permission`.
