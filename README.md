@@ -35,6 +35,8 @@ uv sync --directory acp-client
 make run-server-ws
 # с обязательной аутентификацией
 uv run --directory acp-server acp-server --host 127.0.0.1 --port 8080 --require-auth
+# с local API key backend для authenticate
+uv run --directory acp-server acp-server --host 127.0.0.1 --port 8080 --require-auth --auth-api-key dev-secret
 ```
 
 2) Отправить запрос с клиента:

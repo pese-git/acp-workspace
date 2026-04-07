@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 
 from .http_server import ACPHttpServer
 
@@ -29,8 +30,26 @@ def run_server() -> None:
         action="store_true",
         help="Требовать authenticate перед session/new и session/load",
     )
+    parser.add_argument(
+        "--auth-api-key",
+        default=None,
+        help=(
+            "Локальный API key для authenticate (передается клиентом в params.apiKey); "
+            "можно также задать через переменную среды ACP_SERVER_API_KEY"
+        ),
+    )
     args = parser.parse_args()
 
-    server = ACPHttpServer(host=args.host, port=args.port, require_auth=args.require_auth)
+    auth_api_key = args.auth_api_key
+    if not isinstance(auth_api_key, str) or not auth_api_key:
+        env_api_key = os.getenv("ACP_SERVER_API_KEY")
+        auth_api_key = env_api_key if isinstance(env_api_key, str) and env_api_key else None
+
+    server = ACPHttpServer(
+        host=args.host,
+        port=args.port,
+        require_auth=args.require_auth,
+        auth_api_key=auth_api_key,
+    )
 
     asyncio.run(server.run())

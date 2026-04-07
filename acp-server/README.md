@@ -16,6 +16,8 @@ uv sync
 uv run acp-server --host 127.0.0.1 --port 8080
 # или с обязательной аутентификацией
 uv run acp-server --host 127.0.0.1 --port 8080 --require-auth
+# с локальным API key backend для authenticate
+uv run acp-server --host 127.0.0.1 --port 8080 --require-auth --auth-api-key dev-secret
 ```
 
 ## ACP методы
@@ -41,7 +43,7 @@ uv run acp-server --host 127.0.0.1 --port 8080 --require-auth
 
 - Через WebSocket сервер поддерживает отложенное завершение prompt-turn.
 - В режиме `ask` сервер отправляет клиенту JSON-RPC request `session/request_permission` перед выполнением tool call.
-- Для demo-сценариев поддержаны slash-команды `/plan`, `/tool`, `/tool-pending`.
+- Для compatibility поддержаны slash-команды `/plan`, `/tool`, `/tool-pending`.
 - Для WS-оркестрации также поддерживаются structured overrides через `_meta.promptDirectives`.
 - Legacy marker-триггеры (`[plan]`, `[tool]`, `[tool-pending]`) больше не обрабатываются.
 - Если turn отменяется методом `session/cancel`, исходный `session/prompt` завершается с `stopReason: "cancelled"`.
@@ -50,6 +52,7 @@ uv run acp-server --host 127.0.0.1 --port 8080 --require-auth
 
 - При запуске с `--require-auth` сервер возвращает `authMethods` в `initialize`.
 - До успешного `authenticate` методы `session/new` и `session/load` возвращают ошибку `auth_required`.
+- При запуске с `--auth-api-key` (или `ACP_SERVER_API_KEY`) метод `authenticate` требует `params.apiKey`.
 
 ### Поведение `session/list`
 

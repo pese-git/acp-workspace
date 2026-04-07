@@ -30,7 +30,12 @@ class ACPHttpServer:
     """
 
     def __init__(
-        self, host: str = "127.0.0.1", port: int = 8080, *, require_auth: bool = False
+        self,
+        host: str = "127.0.0.1",
+        port: int = 8080,
+        *,
+        require_auth: bool = False,
+        auth_api_key: str | None = None,
     ) -> None:
         """Создает транспортный сервер с адресом прослушивания.
 
@@ -41,6 +46,7 @@ class ACPHttpServer:
         self.host = host
         self.port = port
         self.require_auth = require_auth
+        self.auth_api_key = auth_api_key
 
     async def run(self) -> None:
         """Запускает WS endpoint и держит процесс живым.
@@ -73,7 +79,7 @@ class ACPHttpServer:
 
         ws = web.WebSocketResponse()
         await ws.prepare(request)
-        protocol = ACPProtocol(require_auth=self.require_auth)
+        protocol = ACPProtocol(require_auth=self.require_auth, auth_api_key=self.auth_api_key)
         # Храним отложенные завершения prompt-turn по sessionId в рамках WS-соединения.
         deferred_prompt_tasks: dict[str, asyncio.Task[None]] = {}
         # По ACP любые session-методы в WS доступны только после initialize.

@@ -717,6 +717,82 @@ async def test_ws_client_auto_authenticates_before_session_method() -> None:
 
 
 @pytest.mark.asyncio
+async def test_ws_client_auto_authenticate_sends_api_key_when_configured() -> None:
+    async def handle_ws_request(request: web.Request) -> web.WebSocketResponse:
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        step = 0
+        async for message in ws:
+            payload = json.loads(message.data)
+            if step == 0:
+                assert payload["method"] == "initialize"
+                await ws.send_json(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": payload["id"],
+                        "result": {
+                            "protocolVersion": 1,
+                            "agentCapabilities": {
+                                "loadSession": True,
+                                "promptCapabilities": {
+                                    "image": False,
+                                    "audio": False,
+                                    "embeddedContext": False,
+                                },
+                                "mcpCapabilities": {"http": False, "sse": False},
+                                "sessionCapabilities": {"list": {}},
+                            },
+                            "agentInfo": {"name": "acp-server", "version": "0.1.0"},
+                            "authMethods": [{"id": "local"}],
+                        },
+                    }
+                )
+                step = 1
+                continue
+            if step == 1:
+                assert payload["method"] == "authenticate"
+                assert payload["params"]["methodId"] == "local"
+                assert payload["params"]["apiKey"] == "client-secret"
+                await ws.send_json(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": payload["id"],
+                        "result": {},
+                    }
+                )
+                step = 2
+                continue
+
+            assert payload["method"] == "session/list"
+            await ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": payload["id"],
+                    "result": {"sessions": [], "nextCursor": None},
+                }
+            )
+            break
+
+        return ws
+
+    port = _get_free_port()
+    app = web.Application()
+    app.router.add_get("/acp/ws", handle_ws_request)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="127.0.0.1", port=port)
+    await site.start()
+
+    try:
+        client = ACPClient(host="127.0.0.1", port=port, auth_api_key="client-secret")
+        response = await client.request(method="session/list", params={})
+        assert response.result == {"sessions": [], "nextCursor": None}
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
 async def test_persistent_ws_session_auto_authenticates_once() -> None:
     async def handle_ws_request(request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse()
@@ -863,6 +939,43 @@ async def test_client_authenticate_sends_method_id_and_parses_empty_result() -> 
 
     try:
         client = ACPClient(host="127.0.0.1", port=port)
+        result = await client.authenticate(method_id="local")
+        assert result.model_dump() == {}
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_client_authenticate_sends_configured_api_key() -> None:
+    async def handle_ws_request(request: web.Request) -> web.WebSocketResponse:
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        async for message in ws:
+            payload = json.loads(message.data)
+            assert payload["method"] == "authenticate"
+            assert payload["params"]["methodId"] == "local"
+            assert payload["params"]["apiKey"] == "client-secret"
+            await ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": payload["id"],
+                    "result": {},
+                }
+            )
+            break
+        return ws
+
+    port = _get_free_port()
+    app = web.Application()
+    app.router.add_get("/acp/ws", handle_ws_request)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="127.0.0.1", port=port)
+    await site.start()
+
+    try:
+        client = ACPClient(host="127.0.0.1", port=port, auth_api_key="client-secret")
         result = await client.authenticate(method_id="local")
         assert result.model_dump() == {}
     finally:

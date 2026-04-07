@@ -125,6 +125,7 @@ class PromptDirectives:
     request_tool: bool = False
     keep_tool_pending: bool = False
     publish_plan: bool = False
+    plan_entries: list[dict[str, str]] | None = None
     tool_kind: str = "other"
     fs_read_path: str | None = None
     fs_write_path: str | None = None
@@ -218,7 +219,7 @@ class ACPProtocol:
         outcome = protocol.handle(ACPMessage.request("initialize", {}))
     """
 
-    def __init__(self, *, require_auth: bool = False) -> None:
+    def __init__(self, *, require_auth: bool = False, auth_api_key: str | None = None) -> None:
         """Инициализирует протокол и пустое хранилище сессий.
 
         Пример использования:
@@ -232,13 +233,15 @@ class ACPProtocol:
         self._runtime_capabilities: ClientRuntimeCapabilities | None = None
         # Флаг для сценариев, где агент требует authenticate до session setup.
         self._require_auth = require_auth
+        # Локальный API key для production-профиля authenticate (если задан).
+        self._auth_api_key = auth_api_key
         # Состояние аутентификации текущего протокольного инстанса.
         self._authenticated = False
         self._auth_methods: list[dict[str, Any]] = [
             {
                 "id": "local",
                 "name": "Local authentication",
-                "description": "Demo local authentication flow",
+                "description": "Local authentication flow",
                 "type": "api_key",
             }
         ]
@@ -468,6 +471,21 @@ class ACPProtocol:
                 code=-32602,
                 message="Invalid params: unknown authentication method",
             )
+
+        if self._auth_api_key is not None:
+            api_key = params.get("apiKey")
+            if not isinstance(api_key, str) or not api_key:
+                return ACPMessage.error_response(
+                    request_id,
+                    code=-32602,
+                    message="Invalid params: apiKey is required",
+                )
+            if api_key != self._auth_api_key:
+                return ACPMessage.error_response(
+                    request_id,
+                    code=-32011,
+                    message="auth_failed",
+                )
 
         self._authenticated = True
         return ACPMessage.response(request_id, {})
@@ -914,7 +932,7 @@ class ACPProtocol:
         directives = self._resolve_prompt_directives(params=params, text_preview=text_preview)
         tool_runtime_available = self._can_run_tool_runtime(session)
         should_run_tool_flow = directives.request_tool and tool_runtime_available
-        tool_title = self._resolve_demo_tool_title(directives.tool_kind)
+        tool_title = self._resolve_tool_title(directives.tool_kind)
 
         # Все промежуточные события отправляются через `session/update`.
         notifications: list[ACPMessage] = []
@@ -936,24 +954,10 @@ class ACPProtocol:
         notifications.append(update)
 
         if directives.publish_plan:
-            # В demo-режиме публикуем пример плана для клиентских UI.
-            plan_entries = [
-                {
-                    "content": "Проанализировать текущее состояние проекта",
-                    "priority": "high",
-                    "status": "completed",
-                },
-                {
-                    "content": "Внести минимальные изменения в код",
-                    "priority": "high",
-                    "status": "in_progress",
-                },
-                {
-                    "content": "Запустить проверки и подготовить результат",
-                    "priority": "medium",
-                    "status": "pending",
-                },
-            ]
+            plan_entries = self._build_plan_entries(
+                directives=directives,
+                text_preview=text_preview,
+            )
             session.latest_plan = plan_entries
             notifications.append(
                 ACPMessage.notification(
@@ -1029,7 +1033,7 @@ class ACPProtocol:
                         },
                     )
                 )
-        elif should_run_tool_flow and session.config_values.get("mode", "ask") == "ask":
+        elif should_run_tool_flow:
             tool_call_id = self._create_tool_call(
                 session=session,
                 title=tool_title,
@@ -1050,78 +1054,77 @@ class ACPProtocol:
                     },
                 )
             )
-            remembered_permission = self._resolve_remembered_permission_decision(
-                session=session,
-                tool_kind=directives.tool_kind,
-            )
-            if remembered_permission == "allow":
-                notifications.extend(
-                    self._build_policy_tool_execution_updates(
-                        session=session,
-                        session_id=session_id,
-                        tool_call_id=tool_call_id,
-                        allowed=True,
-                    )
-                )
-            elif remembered_permission == "reject":
-                notifications.extend(
-                    self._build_policy_tool_execution_updates(
-                        session=session,
-                        session_id=session_id,
-                        tool_call_id=tool_call_id,
-                        allowed=False,
-                    )
-                )
-                prompt_stop_reason = "cancelled"
-            else:
-                permission_request = ACPMessage.request(
-                    "session/request_permission",
-                    {
-                        "sessionId": session_id,
-                        "toolCall": {
-                            "toolCallId": tool_call_id,
-                            "title": tool_title,
-                            "kind": directives.tool_kind,
-                            "status": "pending",
-                        },
-                        "options": self._build_permission_options(),
-                    },
-                )
-                session.active_turn.permission_request_id = permission_request.id
-                session.active_turn.permission_tool_call_id = tool_call_id
-                session.active_turn.phase = "waiting_permission"
-                notifications.append(permission_request)
-                should_request_permission = True
-        else:
-            # Базовый tool-call lifecycle для сценариев без permission-gate.
-            tool_notifications = self._build_tool_call_updates(
-                session=session,
-                session_id=session_id,
-                prompt_requests_tool=should_run_tool_flow,
-                leave_running=directives.keep_tool_pending,
-                tool_kind=directives.tool_kind,
-            )
-            notifications.extend(tool_notifications)
 
-            if directives.request_tool and not should_run_tool_flow:
-                notifications.append(
-                    ACPMessage.notification(
-                        "session/update",
+            if session.config_values.get("mode", "ask") == "ask":
+                remembered_permission = self._resolve_remembered_permission_decision(
+                    session=session,
+                    tool_kind=directives.tool_kind,
+                )
+                if remembered_permission == "allow":
+                    notifications.extend(
+                        self._build_policy_tool_execution_updates(
+                            session=session,
+                            session_id=session_id,
+                            tool_call_id=tool_call_id,
+                            allowed=True,
+                        )
+                    )
+                elif remembered_permission == "reject":
+                    notifications.extend(
+                        self._build_policy_tool_execution_updates(
+                            session=session,
+                            session_id=session_id,
+                            tool_call_id=tool_call_id,
+                            allowed=False,
+                        )
+                    )
+                    prompt_stop_reason = "cancelled"
+                else:
+                    permission_request = ACPMessage.request(
+                        "session/request_permission",
                         {
                             "sessionId": session_id,
-                            "update": {
-                                "sessionUpdate": "agent_message_chunk",
-                                "content": {
-                                    "type": "text",
-                                    "text": (
-                                        "Tool runtime unavailable for this client "
-                                        "capabilities profile."
-                                    ),
-                                },
+                            "toolCall": {
+                                "toolCallId": tool_call_id,
+                                "title": tool_title,
+                                "kind": directives.tool_kind,
+                                "status": "pending",
                             },
+                            "options": self._build_permission_options(),
                         },
                     )
+                    session.active_turn.permission_request_id = permission_request.id
+                    session.active_turn.permission_tool_call_id = tool_call_id
+                    session.active_turn.phase = "waiting_permission"
+                    notifications.append(permission_request)
+                    should_request_permission = True
+            else:
+                notifications.extend(
+                    self._build_executor_tool_execution_updates(
+                        session=session,
+                        session_id=session_id,
+                        tool_call_id=tool_call_id,
+                        leave_running=directives.keep_tool_pending,
+                    )
                 )
+        elif directives.request_tool:
+            notifications.append(
+                ACPMessage.notification(
+                    "session/update",
+                    {
+                        "sessionId": session_id,
+                        "update": {
+                            "sessionUpdate": "agent_message_chunk",
+                            "content": {
+                                "type": "text",
+                                "text": (
+                                    "Tool runtime unavailable for this client capabilities profile."
+                                ),
+                            },
+                        },
+                    },
+                )
+            )
 
         session.history.append({"role": "user", "content": prompt})
         session.history.append(
@@ -1586,7 +1589,32 @@ class ACPProtocol:
                 output_truncated = result["truncated"]
             raw_exit_status = result.get("exitStatus")
             has_exit_status = isinstance(raw_exit_status, dict)
+            if raw_exit_status is not None and not has_exit_status:
+                return self._finalize_failed_client_rpc_request(
+                    session=session,
+                    session_id=session_id,
+                    tool_call_id=pending.tool_call_id,
+                    failure_text="Invalid terminal/output response.",
+                )
             if has_exit_status:
+                if raw_exit_status.get("exitCode") is not None and not isinstance(
+                    raw_exit_status.get("exitCode"), int
+                ):
+                    return self._finalize_failed_client_rpc_request(
+                        session=session,
+                        session_id=session_id,
+                        tool_call_id=pending.tool_call_id,
+                        failure_text="Invalid terminal/output response.",
+                    )
+                if raw_exit_status.get("signal") is not None and not isinstance(
+                    raw_exit_status.get("signal"), str
+                ):
+                    return self._finalize_failed_client_rpc_request(
+                        session=session,
+                        session_id=session_id,
+                        tool_call_id=pending.tool_call_id,
+                        failure_text="Invalid terminal/output response.",
+                    )
                 if isinstance(raw_exit_status.get("exitCode"), int):
                     output_exit_code = raw_exit_status["exitCode"]
                 if isinstance(raw_exit_status.get("signal"), str):
@@ -2742,6 +2770,7 @@ class ACPProtocol:
             request_tool=has_tool_directive or has_pending_directive,
             keep_tool_pending=has_pending_directive,
             publish_plan=has_plan_directive,
+            plan_entries=None,
             tool_kind=tool_kind,
             fs_read_path=fs_read_path,
             fs_write_path=fs_write_path,
@@ -2758,7 +2787,7 @@ class ACPProtocol:
     ) -> PromptDirectives:
         """Формирует итоговые prompt-directives из текста и structured `_meta`.
 
-        Structured overrides позволяют управлять demo-оркестрацией без
+        Structured overrides позволяют управлять prompt-оркестрацией без
         специальных slash-триггеров внутри пользовательского текста.
 
         Пример использования:
@@ -2784,6 +2813,12 @@ class ACPProtocol:
         publish_plan = raw_overrides.get("publishPlan")
         if isinstance(publish_plan, bool):
             directives.publish_plan = publish_plan
+
+        raw_plan_entries = raw_overrides.get("planEntries")
+        normalized_plan_entries = self._normalize_plan_entries(raw_plan_entries)
+        if normalized_plan_entries is not None:
+            directives.plan_entries = normalized_plan_entries
+            directives.publish_plan = True
 
         raw_tool_kind = raw_overrides.get("toolKind")
         if isinstance(raw_tool_kind, str):
@@ -2840,11 +2875,11 @@ class ACPProtocol:
             return stop_reason
         return "end_turn"
 
-    def _resolve_demo_tool_title(self, kind: str) -> str:
-        """Возвращает человекочитаемый title для demo tool-call по kind.
+    def _resolve_tool_title(self, kind: str) -> str:
+        """Возвращает человекочитаемый title для tool-call по kind.
 
         Пример использования:
-            title = protocol._resolve_demo_tool_title("execute")
+            title = protocol._resolve_tool_title("execute")
         """
 
         titles = {
@@ -2873,52 +2908,64 @@ class ACPProtocol:
             return normalized
         return None
 
-    def _build_tool_call_updates(
+    def _normalize_plan_entries(self, raw_entries: Any) -> list[dict[str, str]] | None:
+        """Нормализует structured `planEntries` из `_meta.promptDirectives`.
+
+        Пример использования:
+            entries = protocol._normalize_plan_entries(raw_entries)
+        """
+
+        if not isinstance(raw_entries, list) or not raw_entries:
+            return None
+
+        normalized_entries: list[dict[str, str]] = []
+        allowed_priorities = {"low", "medium", "high"}
+        allowed_statuses = {"pending", "in_progress", "completed", "cancelled"}
+        for entry in raw_entries:
+            if not isinstance(entry, dict):
+                continue
+            content = entry.get("content")
+            if not isinstance(content, str) or not content.strip():
+                continue
+
+            raw_priority = entry.get("priority")
+            priority = raw_priority if isinstance(raw_priority, str) else "medium"
+            if priority not in allowed_priorities:
+                priority = "medium"
+
+            raw_status = entry.get("status")
+            status = raw_status if isinstance(raw_status, str) else "pending"
+            if status not in allowed_statuses:
+                status = "pending"
+
+            normalized_entries.append(
+                {
+                    "content": content.strip(),
+                    "priority": priority,
+                    "status": status,
+                }
+            )
+
+        return normalized_entries or None
+
+    def _build_executor_tool_execution_updates(
         self,
         *,
         session: SessionState,
         session_id: str,
-        prompt_requests_tool: bool,
+        tool_call_id: str,
         leave_running: bool,
-        tool_kind: str,
     ) -> list[ACPMessage]:
-        """Генерирует demo-последовательность `tool_call`/`tool_call_update`.
-
-        Включается явными флагами, вычисленными на этапе анализа prompt.
-        Нужен как каркас для протокольной совместимости и тестов.
+        """Генерирует базовый executor-lifecycle для существующего tool-call.
 
         Пример использования:
-            updates = protocol._build_tool_call_updates(
+            updates = protocol._build_executor_tool_execution_updates(
                 session=state,
                 session_id="sess_1",
-                prompt_requests_tool=True,
+                tool_call_id="call_001",
                 leave_running=False,
             )
         """
-
-        # Если turn не требует вызова инструмента, update-события не генерируем.
-        if not prompt_requests_tool:
-            return []
-
-        tool_call_id = self._create_tool_call(
-            session=session,
-            title=self._resolve_demo_tool_title(tool_kind),
-            kind=tool_kind,
-        )
-
-        created = ACPMessage.notification(
-            "session/update",
-            {
-                "sessionId": session_id,
-                "update": {
-                    "sessionUpdate": "tool_call",
-                    "toolCallId": tool_call_id,
-                    "title": self._resolve_demo_tool_title(tool_kind),
-                    "kind": tool_kind,
-                    "status": "pending",
-                },
-            },
-        )
 
         in_progress = ACPMessage.notification(
             "session/update",
@@ -2934,14 +2981,14 @@ class ACPProtocol:
         self._update_tool_call_status(session, tool_call_id, "in_progress")
 
         if leave_running:
-            return [created, in_progress]
+            return [in_progress]
 
         completed_content = [
             {
                 "type": "content",
                 "content": {
                     "type": "text",
-                    "text": "Demo tool completed successfully.",
+                    "text": "Tool completed successfully.",
                 },
             }
         ]
@@ -2963,7 +3010,45 @@ class ACPProtocol:
                 },
             },
         )
-        return [created, in_progress, completed]
+        return [in_progress, completed]
+
+    def _build_plan_entries(
+        self,
+        *,
+        directives: PromptDirectives,
+        text_preview: str,
+    ) -> list[dict[str, str]]:
+        """Строит plan entries для `session/update: plan`.
+
+        Пример использования:
+            entries = protocol._build_plan_entries(
+                directives=directives,
+                text_preview="ship release",
+            )
+        """
+
+        if directives.plan_entries:
+            return directives.plan_entries
+
+        normalized_preview = text_preview.strip() or "выполнение запроса"
+        short_preview = normalized_preview[:80]
+        return [
+            {
+                "content": f"Уточнить задачу: {short_preview}",
+                "priority": "high",
+                "status": "completed",
+            },
+            {
+                "content": f"Выполнить основной шаг для: {short_preview}",
+                "priority": "high",
+                "status": "in_progress",
+            },
+            {
+                "content": "Проверить результат и завершить ответ",
+                "priority": "medium",
+                "status": "pending",
+            },
+        ]
 
     def _create_tool_call(self, session: SessionState, *, title: str, kind: str) -> str:
         """Создает запись нового tool call в состоянии сессии.

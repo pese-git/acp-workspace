@@ -94,6 +94,52 @@ def test_authenticate_allows_session_creation_when_auth_enabled() -> None:
     assert created.response.error is None
 
 
+def test_authenticate_requires_api_key_when_server_has_auth_backend() -> None:
+    protocol = ACPProtocol(require_auth=True, auth_api_key="top-secret")
+    init = protocol.handle(
+        ACPMessage.request(
+            "initialize",
+            {
+                "protocolVersion": 1,
+                "clientCapabilities": {},
+            },
+        )
+    )
+    assert init.response is not None
+    assert isinstance(init.response.result, dict)
+    method_id = init.response.result["authMethods"][0]["id"]
+
+    missing_key = protocol.handle(ACPMessage.request("authenticate", {"methodId": method_id}))
+    assert missing_key.response is not None
+    assert missing_key.response.error is not None
+    assert missing_key.response.error.message == "Invalid params: apiKey is required"
+
+    wrong_key = protocol.handle(
+        ACPMessage.request(
+            "authenticate",
+            {
+                "methodId": method_id,
+                "apiKey": "bad-key",
+            },
+        )
+    )
+    assert wrong_key.response is not None
+    assert wrong_key.response.error is not None
+    assert wrong_key.response.error.message == "auth_failed"
+
+    authenticated = protocol.handle(
+        ACPMessage.request(
+            "authenticate",
+            {
+                "methodId": method_id,
+                "apiKey": "top-secret",
+            },
+        )
+    )
+    assert authenticated.response is not None
+    assert authenticated.response.error is None
+
+
 def test_initialize_negotiates_to_supported_version() -> None:
     protocol = ACPProtocol()
     request = ACPMessage.request(
@@ -261,6 +307,55 @@ def test_prompt_with_meta_directive_emits_plan_update_without_slash() -> None:
         and notification.params["update"].get("sessionUpdate") == "plan"
     ]
     assert len(plan_updates) == 1
+
+
+def test_prompt_with_plan_entries_override_emits_custom_plan() -> None:
+    protocol = ACPProtocol()
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "custom plan"}],
+                "_meta": {
+                    "promptDirectives": {
+                        "planEntries": [
+                            {
+                                "content": "Собрать данные",
+                                "priority": "high",
+                                "status": "completed",
+                            },
+                            {
+                                "content": "Сформировать результат",
+                                "priority": "medium",
+                                "status": "in_progress",
+                            },
+                        ]
+                    }
+                },
+            },
+        )
+    )
+
+    assert outcome.response is not None
+    plan_update = next(
+        notification
+        for notification in outcome.notifications
+        if notification.method == "session/update"
+        and isinstance(notification.params, dict)
+        and isinstance(notification.params.get("update"), dict)
+        and notification.params["update"].get("sessionUpdate") == "plan"
+    )
+    assert plan_update.params is not None
+    entries = plan_update.params["update"].get("entries")
+    assert isinstance(entries, list)
+    assert entries[0]["content"] == "Собрать данные"
+    assert entries[1]["status"] == "in_progress"
 
 
 def test_prompt_with_legacy_marker_does_not_emit_plan_update() -> None:
@@ -1396,6 +1491,73 @@ def test_terminal_output_invalid_payload_marks_tool_as_failed() -> None:
     )
 
 
+def test_terminal_output_with_non_object_exit_status_marks_tool_as_failed() -> None:
+    protocol = ACPProtocol()
+    protocol.handle(
+        ACPMessage.request(
+            "initialize",
+            {
+                "protocolVersion": 1,
+                "clientCapabilities": {
+                    "fs": {"readTextFile": False, "writeTextFile": False},
+                    "terminal": True,
+                },
+            },
+        )
+    )
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    prompt_outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "run command"}],
+                "_meta": {"promptDirectives": {"terminalCommand": "ls"}},
+            },
+        )
+    )
+    assert prompt_outcome.response is None
+    create_request = next(
+        notification
+        for notification in prompt_outcome.notifications
+        if notification.method == "terminal/create"
+    )
+    assert create_request.id is not None
+
+    output_step = protocol.handle_client_response(
+        ACPMessage.response(create_request.id, {"terminalId": "term_1"})
+    )
+    output_request = next(
+        notification
+        for notification in output_step.notifications
+        if notification.method == "terminal/output"
+    )
+    assert output_request.id is not None
+
+    resolved = protocol.handle_client_response(
+        ACPMessage.response(
+            output_request.id,
+            {
+                "output": "partial",
+                "exitStatus": "done",
+            },
+        )
+    )
+    assert len(resolved.followup_responses) == 1
+    assert resolved.followup_responses[0].result == {"stopReason": "end_turn"}
+    assert any(
+        notification.params is not None
+        and notification.params["update"].get("status") == "failed"
+        and "Invalid terminal/output response"
+        in notification.params["update"]["content"][0]["content"]["text"]
+        for notification in resolved.notifications
+    )
+
+
 def test_cancel_during_terminal_flow_emits_kill_and_release_requests() -> None:
     protocol = ACPProtocol()
     protocol.handle(
@@ -1745,6 +1907,47 @@ def test_permission_selected_with_unknown_option_is_rejected() -> None:
         notification.method == "session/request_permission"
         for notification in next_prompt.notifications
     )
+
+
+def test_permission_selected_without_option_id_is_rejected() -> None:
+    protocol = ACPProtocol()
+    _initialize_with_tool_runtime(protocol)
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    prompt_outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "run tool"}],
+                "_meta": {"promptDirectives": {"requestTool": True}},
+            },
+        )
+    )
+    assert prompt_outcome.response is None
+
+    permission_request = next(
+        notification
+        for notification in prompt_outcome.notifications
+        if notification.method == "session/request_permission"
+    )
+    assert permission_request.id is not None
+
+    resolved = protocol.handle_client_response(
+        ACPMessage.response(
+            permission_request.id,
+            {
+                "outcome": {
+                    "outcome": "selected",
+                },
+            },
+        )
+    )
+    assert len(resolved.followup_responses) == 1
+    assert resolved.followup_responses[0].result == {"stopReason": "cancelled"}
 
 
 def test_late_permission_response_after_cancel_is_ignored() -> None:

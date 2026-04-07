@@ -38,6 +38,7 @@ uv run acp-client --host 127.0.0.1 --port 8080 --method session/load --params '{
 - Перед вызовами `session/*` клиент автоматически выполняет `initialize` в рамках WS-соединения.
 - Если в `initialize` возвращены `authMethods`, клиент автоматически выполняет `authenticate` перед `session/*` (можно отключить через `auto_authenticate=False`).
 - Можно указать `preferred_auth_method_id`, чтобы выбрать конкретный advertised auth method вместо первого в списке.
+- Для API key auth можно передать `auth_api_key` в `ACPClient(...)`; тогда ключ отправится в `authenticate` как `params.apiKey`.
 - В auto-initialize отправляются baseline `clientCapabilities` (`fs.readTextFile=false`, `fs.writeTextFile=false`, `terminal=false`).
 - Для нескольких запросов в одном WS-канале используйте `open_ws_session()`; `initialize` выполняется один раз на соединение.
 

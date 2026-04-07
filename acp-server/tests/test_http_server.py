@@ -18,11 +18,20 @@ def _get_free_port() -> int:
         return int(sock.getsockname()[1])
 
 
-async def _start_test_server(*, require_auth: bool = False) -> tuple[web.AppRunner, int]:
+async def _start_test_server(
+    *,
+    require_auth: bool = False,
+    auth_api_key: str | None = None,
+) -> tuple[web.AppRunner, int]:
     """Поднимает aiohttp-приложение с ACP WS handler."""
 
     port = _get_free_port()
-    server = ACPHttpServer(host="127.0.0.1", port=port, require_auth=require_auth)
+    server = ACPHttpServer(
+        host="127.0.0.1",
+        port=port,
+        require_auth=require_auth,
+        auth_api_key=auth_api_key,
+    )
     app = web.Application()
     app.router.add_get("/acp/ws", server.handle_ws_request)
 
@@ -252,6 +261,57 @@ async def test_ws_requires_authenticate_when_server_auth_enabled() -> None:
                 authorized = await asyncio.wait_for(ws.receive_json(), timeout=1.0)
                 assert authorized["id"] == "new_2"
                 assert isinstance(authorized.get("result", {}).get("sessionId"), str)
+            finally:
+                await ws.close()
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_ws_authenticate_requires_api_key_when_configured() -> None:
+    runner, port = await _start_test_server(require_auth=True, auth_api_key="top-secret")
+
+    try:
+        async with ClientSession() as session:
+            ws = await session.ws_connect(f"http://127.0.0.1:{port}/acp/ws")
+            try:
+                await _ws_initialize(ws)
+
+                await ws.send_json(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": "auth_missing",
+                        "method": "authenticate",
+                        "params": {"methodId": "local"},
+                    }
+                )
+                missing_key = await asyncio.wait_for(ws.receive_json(), timeout=1.0)
+                assert missing_key["id"] == "auth_missing"
+                assert missing_key["error"]["message"] == "Invalid params: apiKey is required"
+
+                await ws.send_json(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": "auth_wrong",
+                        "method": "authenticate",
+                        "params": {"methodId": "local", "apiKey": "wrong"},
+                    }
+                )
+                wrong_key = await asyncio.wait_for(ws.receive_json(), timeout=1.0)
+                assert wrong_key["id"] == "auth_wrong"
+                assert wrong_key["error"]["message"] == "auth_failed"
+
+                await ws.send_json(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": "auth_ok",
+                        "method": "authenticate",
+                        "params": {"methodId": "local", "apiKey": "top-secret"},
+                    }
+                )
+                authenticated = await asyncio.wait_for(ws.receive_json(), timeout=1.0)
+                assert authenticated["id"] == "auth_ok"
+                assert authenticated["result"] == {}
             finally:
                 await ws.close()
     finally:

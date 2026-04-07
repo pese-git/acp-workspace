@@ -60,6 +60,7 @@ class ACPClient:
         port: int = 8765,
         *,
         preferred_auth_method_id: str | None = None,
+        auth_api_key: str | None = None,
         auto_authenticate: bool = True,
     ) -> None:
         """Создает клиент с адресом ACP-сервера.
@@ -71,6 +72,7 @@ class ACPClient:
         self.host = host
         self.port = port
         self.preferred_auth_method_id = preferred_auth_method_id
+        self.auth_api_key = auth_api_key
         self.auto_authenticate = auto_authenticate
 
     @staticmethod
@@ -166,18 +168,25 @@ class ACPClient:
         )
         return parse_initialize_result(response)
 
-    async def authenticate(self, *, method_id: str) -> AuthenticateResult:
+    async def authenticate(
+        self, *, method_id: str, api_key: str | None = None
+    ) -> AuthenticateResult:
         """Выполняет `authenticate` для указанного auth method id.
 
         Пример использования:
             result = await client.authenticate(method_id="local")
         """
 
+        resolved_api_key = api_key if isinstance(api_key, str) and api_key else self.auth_api_key
+        auth_params: dict[str, Any] = {
+            "methodId": method_id,
+        }
+        if isinstance(resolved_api_key, str) and resolved_api_key:
+            auth_params["apiKey"] = resolved_api_key
+
         response = await self.request(
             method="authenticate",
-            params={
-                "methodId": method_id,
-            },
+            params=auth_params,
         )
         return parse_authenticate_result(response)
 
@@ -592,16 +601,27 @@ class ACPClient:
                 raise RuntimeError(msg)
             return parse_initialize_result(response)
 
-    async def _perform_ws_authenticate(self, ws: Any, *, method_id: str) -> AuthenticateResult:
+    async def _perform_ws_authenticate(
+        self,
+        ws: Any,
+        *,
+        method_id: str,
+        api_key: str | None = None,
+    ) -> AuthenticateResult:
         """Выполняет ACP `authenticate` в открытом WS-соединении.
 
         Пример использования:
             await client._perform_ws_authenticate(ws, method_id="local")
         """
 
+        resolved_api_key = api_key if isinstance(api_key, str) and api_key else self.auth_api_key
+        auth_params: dict[str, Any] = {"methodId": method_id}
+        if isinstance(resolved_api_key, str) and resolved_api_key:
+            auth_params["apiKey"] = resolved_api_key
+
         auth_request = ACPMessage.request(
             method="authenticate",
-            params={"methodId": method_id},
+            params=auth_params,
         )
         await ws.send_str(auth_request.to_json())
 
@@ -1101,6 +1121,7 @@ class ACPClientWSSession:
                     await self._client._perform_ws_authenticate(
                         self._ws,
                         method_id=selected_auth_method,
+                        api_key=self._client.auth_api_key,
                     )
             self._initialized = True
 
@@ -1123,7 +1144,9 @@ class ACPClientWSSession:
             self._initialized = True
         return response
 
-    async def authenticate(self, *, method_id: str) -> AuthenticateResult:
+    async def authenticate(
+        self, *, method_id: str, api_key: str | None = None
+    ) -> AuthenticateResult:
         """Выполняет `authenticate` в рамках persistent WS-сессии.
 
         Пример использования:
@@ -1132,7 +1155,18 @@ class ACPClientWSSession:
 
         response = await self.request(
             method="authenticate",
-            params={"methodId": method_id},
+            params={
+                "methodId": method_id,
+                **(
+                    {"apiKey": api_key}
+                    if isinstance(api_key, str) and api_key
+                    else (
+                        {"apiKey": self._client.auth_api_key}
+                        if isinstance(self._client.auth_api_key, str) and self._client.auth_api_key
+                        else {}
+                    )
+                ),
+            },
         )
         return parse_authenticate_result(response)
 
