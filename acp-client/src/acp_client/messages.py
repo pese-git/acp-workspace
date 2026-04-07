@@ -335,6 +335,95 @@ class SessionSetupResult(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class MessageChunkUpdate(BaseModel):
+    """Событие chunk-сообщения (`agent_message_chunk` / `user_message_chunk`).
+
+    Пример использования:
+        MessageChunkUpdate.model_validate({
+            "sessionUpdate": "agent_message_chunk",
+            "content": {"type": "text", "text": "hi"},
+        })
+    """
+
+    sessionUpdate: Literal["agent_message_chunk", "user_message_chunk"]
+    content: dict[str, Any]
+    model_config = ConfigDict(extra="allow")
+
+
+class SessionInfoUpdate(BaseModel):
+    """Событие `session_info_update` с метаданными активной сессии.
+
+    Пример использования:
+        SessionInfoUpdate.model_validate({
+            "sessionUpdate": "session_info_update",
+            "title": "My session",
+            "updatedAt": "2026-04-07T00:00:00Z",
+        })
+    """
+
+    sessionUpdate: Literal["session_info_update"]
+    title: str | None = None
+    updatedAt: str | None = None
+    model_config = ConfigDict(extra="allow")
+
+
+class CurrentModeUpdate(BaseModel):
+    """Событие `current_mode_update` для смены активного режима.
+
+    Пример использования:
+        CurrentModeUpdate.model_validate({
+            "sessionUpdate": "current_mode_update",
+            "currentModeId": "ask",
+        })
+    """
+
+    sessionUpdate: Literal["current_mode_update"]
+    currentModeId: str
+    model_config = ConfigDict(extra="allow")
+
+
+class AvailableCommand(BaseModel):
+    """Описание одной slash-команды из `available_commands_update`.
+
+    Пример использования:
+        AvailableCommand.model_validate({"name": "status", "description": "Show state"})
+    """
+
+    name: str
+    description: str | None = None
+    model_config = ConfigDict(extra="allow")
+
+
+class AvailableCommandsUpdate(BaseModel):
+    """Событие `available_commands_update` со snapshot команд.
+
+    Пример использования:
+        AvailableCommandsUpdate.model_validate({
+            "sessionUpdate": "available_commands_update",
+            "availableCommands": [],
+        })
+    """
+
+    sessionUpdate: Literal["available_commands_update"]
+    availableCommands: list[AvailableCommand]
+    model_config = ConfigDict(extra="allow")
+
+
+class ConfigOptionUpdate(BaseModel):
+    """Событие `config_option_update` с актуальными config options.
+
+    Пример использования:
+        ConfigOptionUpdate.model_validate({
+            "sessionUpdate": "config_option_update",
+            "configOptions": [],
+        })
+    """
+
+    sessionUpdate: Literal["config_option_update"]
+    configOptions: list[SessionConfigOption]
+    model_config = ConfigDict(extra="allow")
+
+
 class SessionUpdatePayload(BaseModel):
     """Полезная нагрузка события `session/update`.
 
@@ -464,6 +553,17 @@ class PlanUpdate(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+type StructuredSessionUpdate = (
+    ToolCallUpdate
+    | PlanUpdate
+    | MessageChunkUpdate
+    | SessionInfoUpdate
+    | CurrentModeUpdate
+    | AvailableCommandsUpdate
+    | ConfigOptionUpdate
+)
+
+
 class PermissionOption(BaseModel):
     """Описывает один вариант выбора в `session/request_permission`.
 
@@ -583,6 +683,37 @@ def parse_plan_update(update: SessionUpdateNotification) -> PlanUpdate | None:
     if payload.get("sessionUpdate") != "plan":
         return None
     return PlanUpdate.model_validate(payload)
+
+
+def parse_structured_session_update(
+    update: SessionUpdateNotification,
+) -> StructuredSessionUpdate | None:
+    """Пытается распарсить `session/update` в один из известных typed payload.
+
+    Возвращает `None`, если тип update пока не поддерживается типизированной
+    моделью в клиенте.
+
+    Пример использования:
+        parsed = parse_structured_session_update(notification)
+    """
+
+    payload = update.params.update.model_dump()
+    session_update_type = payload.get("sessionUpdate")
+    if session_update_type in {"tool_call", "tool_call_update"}:
+        return parse_tool_call_update(update)
+    if session_update_type == "plan":
+        return PlanUpdate.model_validate(payload)
+    if session_update_type in {"agent_message_chunk", "user_message_chunk"}:
+        return MessageChunkUpdate.model_validate(payload)
+    if session_update_type == "session_info_update":
+        return SessionInfoUpdate.model_validate(payload)
+    if session_update_type == "current_mode_update":
+        return CurrentModeUpdate.model_validate(payload)
+    if session_update_type == "available_commands_update":
+        return AvailableCommandsUpdate.model_validate(payload)
+    if session_update_type == "config_option_update":
+        return ConfigOptionUpdate.model_validate(payload)
+    return None
 
 
 def parse_request_permission_request(payload: dict[str, Any]) -> RequestPermissionRequest | None:

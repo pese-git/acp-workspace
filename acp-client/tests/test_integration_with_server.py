@@ -558,6 +558,92 @@ async def test_load_session_plan_updates_filters_non_plan_events() -> None:
 
 
 @pytest.mark.asyncio
+async def test_load_session_structured_updates_filters_known_payloads() -> None:
+    async def handle_ws_request(request: web.Request) -> web.WebSocketResponse:
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        async for message in ws:
+            payload = json.loads(message.data)
+            assert payload["method"] == "session/load"
+            await ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "session/update",
+                    "params": {
+                        "sessionId": "sess_5",
+                        "update": {
+                            "sessionUpdate": "session_info_update",
+                            "updatedAt": "2026-04-07T00:00:00Z",
+                        },
+                    },
+                }
+            )
+            await ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "session/update",
+                    "params": {
+                        "sessionId": "sess_5",
+                        "update": {
+                            "sessionUpdate": "agent_message_chunk",
+                            "content": {"type": "text", "text": "hello"},
+                        },
+                    },
+                }
+            )
+            await ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "session/update",
+                    "params": {
+                        "sessionId": "sess_5",
+                        "update": {
+                            "sessionUpdate": "unknown_extension_update",
+                            "value": "ignored",
+                        },
+                    },
+                }
+            )
+            await ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": payload["id"],
+                    "result": {
+                        "configOptions": [],
+                        "modes": {"availableModes": [], "currentModeId": "ask"},
+                    },
+                }
+            )
+            break
+        return ws
+
+    port = _get_free_port()
+    app = web.Application()
+    app.router.add_get("/acp/ws", handle_ws_request)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="127.0.0.1", port=port)
+    await site.start()
+
+    try:
+        client = ACPClient(host="127.0.0.1", port=port)
+        response, structured = await client.load_session_structured_updates(
+            session_id="sess_5",
+            cwd="/tmp",
+            mcp_servers=[],
+            transport="ws",
+        )
+        assert isinstance(response.result, dict)
+        assert len(structured) == 2
+        update_types = [update.sessionUpdate for update in structured]
+        assert "session_info_update" in update_types
+        assert "agent_message_chunk" in update_types
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
 async def test_ws_client_receives_updates() -> None:
     async def handle_ws_request(request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse()

@@ -2,10 +2,15 @@ import pytest
 
 from acp_client.messages import (
     ACPMessage,
+    AvailableCommandsUpdate,
+    ConfigOptionUpdate,
+    CurrentModeUpdate,
     InitializeResult,
     JsonRpcError,
+    MessageChunkUpdate,
     PlanUpdate,
     RequestPermissionRequest,
+    SessionInfoUpdate,
     SessionListResult,
     SessionSetupResult,
     ToolCallCreatedUpdate,
@@ -17,6 +22,7 @@ from acp_client.messages import (
     parse_session_list_result,
     parse_session_setup_result,
     parse_session_update_notification,
+    parse_structured_session_update,
     parse_tool_call_update,
 )
 
@@ -270,3 +276,81 @@ def test_parse_session_setup_result_error_response_raises() -> None:
 
     with pytest.raises(ValueError):
         parse_session_setup_result(response, method_name="session/load")
+
+
+def test_parse_structured_session_update_for_message_chunk() -> None:
+    notification = parse_session_update_notification(
+        {
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": "sess_1",
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {"type": "text", "text": "hello"},
+                },
+            },
+        }
+    )
+    assert notification is not None
+
+    parsed = parse_structured_session_update(notification)
+    assert isinstance(parsed, MessageChunkUpdate)
+
+
+def test_parse_structured_session_update_for_session_state_updates() -> None:
+    fixtures: list[tuple[dict[str, object], type[object]]] = [
+        (
+            {
+                "sessionUpdate": "session_info_update",
+                "title": "Test",
+                "updatedAt": "2026-04-07T00:00:00Z",
+            },
+            SessionInfoUpdate,
+        ),
+        (
+            {
+                "sessionUpdate": "current_mode_update",
+                "currentModeId": "ask",
+            },
+            CurrentModeUpdate,
+        ),
+        (
+            {
+                "sessionUpdate": "available_commands_update",
+                "availableCommands": [{"name": "status", "description": "show"}],
+            },
+            AvailableCommandsUpdate,
+        ),
+        (
+            {
+                "sessionUpdate": "config_option_update",
+                "configOptions": [
+                    {
+                        "id": "mode",
+                        "name": "Mode",
+                        "category": "mode",
+                        "type": "select",
+                        "currentValue": "ask",
+                        "options": [{"value": "ask", "name": "Ask"}],
+                    }
+                ],
+            },
+            ConfigOptionUpdate,
+        ),
+    ]
+
+    for payload, expected_type in fixtures:
+        notification = parse_session_update_notification(
+            {
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": {
+                    "sessionId": "sess_1",
+                    "update": payload,
+                },
+            }
+        )
+        assert notification is not None
+        parsed = parse_structured_session_update(notification)
+        assert isinstance(parsed, expected_type)

@@ -14,6 +14,7 @@ from .messages import (
     SessionListResult,
     SessionSetupResult,
     SessionUpdateNotification,
+    StructuredSessionUpdate,
     ToolCallUpdate,
     parse_initialize_result,
     parse_plan_update,
@@ -21,6 +22,7 @@ from .messages import (
     parse_session_list_result,
     parse_session_setup_result,
     parse_session_update_notification,
+    parse_structured_session_update,
     parse_tool_call_update,
 )
 
@@ -495,3 +497,34 @@ class ACPClient:
         )
         parsed = parse_session_setup_result(response, method_name="session/load")
         return parsed, updates
+
+    async def load_session_structured_updates(
+        self,
+        *,
+        session_id: str,
+        cwd: str,
+        mcp_servers: list[dict[str, Any]] | None = None,
+        transport: Literal["http", "ws"] = "ws",
+    ) -> tuple[ACPMessage, list[StructuredSessionUpdate]]:
+        """Загружает сессию и возвращает только известные typed update payload.
+
+        Пример использования:
+            response, updates = await client.load_session_structured_updates(
+                session_id="sess_1",
+                cwd="/tmp",
+            )
+        """
+
+        response, updates = await self.load_session_parsed(
+            session_id=session_id,
+            cwd=cwd,
+            mcp_servers=mcp_servers,
+            transport=transport,
+        )
+        structured: list[StructuredSessionUpdate] = []
+        for update in updates:
+            parsed = parse_structured_session_update(update)
+            if parsed is None:
+                continue
+            structured.append(parsed)
+        return response, structured
