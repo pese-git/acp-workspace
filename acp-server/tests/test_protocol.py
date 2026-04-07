@@ -1749,6 +1749,132 @@ def test_late_permission_response_after_cancel_is_ignored() -> None:
     assert next_prompt.response.result == {"stopReason": "end_turn"}
 
 
+def test_late_fs_response_after_cancel_is_ignored() -> None:
+    protocol = ACPProtocol()
+    protocol.handle(
+        ACPMessage.request(
+            "initialize",
+            {
+                "protocolVersion": 1,
+                "clientCapabilities": {
+                    "fs": {"readTextFile": True, "writeTextFile": False},
+                    "terminal": False,
+                },
+            },
+        )
+    )
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    prompt_outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "read file"}],
+                "_meta": {"promptDirectives": {"fsReadPath": "README.md"}},
+            },
+        )
+    )
+    assert prompt_outcome.response is None
+
+    fs_request = next(
+        notification
+        for notification in prompt_outcome.notifications
+        if notification.method == "fs/read_text_file"
+    )
+    assert fs_request.id is not None
+
+    cancel_outcome = protocol.handle(
+        ACPMessage.notification("session/cancel", {"sessionId": session_id})
+    )
+    assert len(cancel_outcome.followup_responses) == 1
+    assert cancel_outcome.followup_responses[0].result == {"stopReason": "cancelled"}
+
+    late_fs_response = protocol.handle_client_response(
+        ACPMessage.response(fs_request.id, {"content": "late payload"})
+    )
+    assert late_fs_response.notifications == []
+    assert late_fs_response.followup_responses == []
+
+    next_prompt = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "normal prompt"}],
+            },
+        )
+    )
+    assert next_prompt.response is not None
+    assert next_prompt.response.result == {"stopReason": "end_turn"}
+
+
+def test_late_terminal_create_response_after_cancel_is_ignored() -> None:
+    protocol = ACPProtocol()
+    protocol.handle(
+        ACPMessage.request(
+            "initialize",
+            {
+                "protocolVersion": 1,
+                "clientCapabilities": {
+                    "fs": {"readTextFile": False, "writeTextFile": False},
+                    "terminal": True,
+                },
+            },
+        )
+    )
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    prompt_outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "run command"}],
+                "_meta": {"promptDirectives": {"terminalCommand": "sleep 10"}},
+            },
+        )
+    )
+    assert prompt_outcome.response is None
+
+    create_request = next(
+        notification
+        for notification in prompt_outcome.notifications
+        if notification.method == "terminal/create"
+    )
+    assert create_request.id is not None
+
+    cancel_outcome = protocol.handle(
+        ACPMessage.notification("session/cancel", {"sessionId": session_id})
+    )
+    assert len(cancel_outcome.followup_responses) == 1
+    assert cancel_outcome.followup_responses[0].result == {"stopReason": "cancelled"}
+
+    late_create_response = protocol.handle_client_response(
+        ACPMessage.response(create_request.id, {"terminalId": "term_late"})
+    )
+    assert late_create_response.notifications == []
+    assert late_create_response.followup_responses == []
+
+    next_prompt = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "normal prompt"}],
+            },
+        )
+    )
+    assert next_prompt.response is not None
+    assert next_prompt.response.result == {"stopReason": "end_turn"}
+
+
 def test_permission_allow_always_applies_to_next_tool_call() -> None:
     protocol = ACPProtocol()
     _initialize_with_tool_runtime(protocol)

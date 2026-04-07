@@ -58,6 +58,9 @@ class SessionState:
     # Идентификаторы permission-запросов, отмененных через `session/cancel`.
     # Нужны для детерминированного игнорирования поздних client-responses.
     cancelled_permission_requests: set[JsonRpcId] = field(default_factory=set)
+    # Идентификаторы agent->client RPC, отмененных через `session/cancel`.
+    # Поздние ответы на такие запросы должны игнорироваться детерминированно.
+    cancelled_client_rpc_requests: set[JsonRpcId] = field(default_factory=set)
     # Runtime-capabilities клиента, зафиксированные для этой сессии.
     runtime_capabilities: ClientRuntimeCapabilities | None = None
 
@@ -1201,6 +1204,13 @@ class ACPProtocol:
                 # Фиксируем отмененный permission-request, чтобы его поздний
                 # response не мог повлиять на последующие turn-циклы.
                 session.cancelled_permission_requests.add(session.active_turn.permission_request_id)
+            if (
+                session.active_turn is not None
+                and session.active_turn.pending_client_request is not None
+            ):
+                session.cancelled_client_rpc_requests.add(
+                    session.active_turn.pending_client_request.request_id
+                )
             pending = (
                 session.active_turn.pending_client_request
                 if session.active_turn is not None
@@ -1318,6 +1328,10 @@ class ACPProtocol:
         if resolved_client_rpc is not None:
             return resolved_client_rpc
 
+        if self._consume_cancelled_client_rpc_response(message.id):
+            # Late response на отмененный agent->client RPC считаем no-op.
+            return ProtocolOutcome()
+
         if self._consume_cancelled_permission_response(message.id):
             # Late response на уже отмененный permission-request считаем
             # корректно обработанным no-op, чтобы избежать race-эффектов.
@@ -1343,6 +1357,24 @@ class ACPProtocol:
             if request_id not in session.cancelled_permission_requests:
                 continue
             session.cancelled_permission_requests.remove(request_id)
+            return True
+        return False
+
+    def _consume_cancelled_client_rpc_response(self, request_id: JsonRpcId) -> bool:
+        """Поглощает late-response на ранее отмененный agent->client RPC.
+
+        Возвращает `True`, если идентификатор найден в canceled-tombstones и
+        удален; иначе `False`.
+
+        Пример использования:
+            if protocol._consume_cancelled_client_rpc_response("rpc_1"):
+                ...
+        """
+
+        for session in self._sessions.values():
+            if request_id not in session.cancelled_client_rpc_requests:
+                continue
+            session.cancelled_client_rpc_requests.remove(request_id)
             return True
         return False
 

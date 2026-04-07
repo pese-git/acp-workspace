@@ -24,4 +24,4 @@
 ## Приоритетный backlog
 
 1. Завершить переход от demo-семантики `session/request_permission` к production policy-model.
-2. Расширить conformance-набор до дополнительных edge-кейсов terminal/fs client-rpc (особенно race-сценарии cancel + pending client-rpc).
+2. Расширить conformance-набор до дополнительных edge-кейсов terminal/fs client-rpc (особенно race-сценарии cancel + pending client-rpc). Статус: partially done (добавлены тесты late-response после cancel для fs/read_text_file и terminal/create).
