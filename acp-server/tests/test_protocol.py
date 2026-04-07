@@ -377,6 +377,237 @@ def test_prompt_can_emit_tool_call_updates() -> None:
     assert "tool_call_update" in update_types
 
 
+def test_prompt_fs_read_emits_client_rpc_request_when_capability_enabled() -> None:
+    protocol = ACPProtocol()
+    initialized = protocol.handle(
+        ACPMessage.request(
+            "initialize",
+            {
+                "protocolVersion": 1,
+                "clientCapabilities": {
+                    "fs": {"readTextFile": True, "writeTextFile": False},
+                    "terminal": False,
+                },
+            },
+        )
+    )
+    assert initialized.response is not None
+
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "/fs-read README.md"}],
+            },
+        )
+    )
+
+    assert outcome.response is None
+    assert any(notification.method == "fs/read_text_file" for notification in outcome.notifications)
+
+
+def test_fs_read_response_completes_turn_with_completed_tool_update() -> None:
+    protocol = ACPProtocol()
+    protocol.handle(
+        ACPMessage.request(
+            "initialize",
+            {
+                "protocolVersion": 1,
+                "clientCapabilities": {
+                    "fs": {"readTextFile": True, "writeTextFile": False},
+                    "terminal": False,
+                },
+            },
+        )
+    )
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    prompt_outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "/fs-read README.md"}],
+            },
+        )
+    )
+    assert prompt_outcome.response is None
+
+    fs_request = next(
+        notification
+        for notification in prompt_outcome.notifications
+        if notification.method == "fs/read_text_file"
+    )
+    assert fs_request.id is not None
+
+    resolved = protocol.handle_client_response(
+        ACPMessage.response(fs_request.id, {"content": "file-body"})
+    )
+    assert len(resolved.followup_responses) == 1
+    assert resolved.followup_responses[0].result == {"stopReason": "end_turn"}
+    assert any(
+        notification.params is not None
+        and notification.params["update"].get("sessionUpdate") == "tool_call_update"
+        and notification.params["update"].get("status") == "completed"
+        for notification in resolved.notifications
+    )
+
+
+def test_fs_write_response_contains_diff_tool_content() -> None:
+    protocol = ACPProtocol()
+    protocol.handle(
+        ACPMessage.request(
+            "initialize",
+            {
+                "protocolVersion": 1,
+                "clientCapabilities": {
+                    "fs": {"readTextFile": False, "writeTextFile": True},
+                    "terminal": False,
+                },
+            },
+        )
+    )
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    prompt_outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "/fs-write notes.txt updated"}],
+            },
+        )
+    )
+    assert prompt_outcome.response is None
+
+    fs_request = next(
+        notification
+        for notification in prompt_outcome.notifications
+        if notification.method == "fs/write_text_file"
+    )
+    assert fs_request.id is not None
+
+    resolved = protocol.handle_client_response(
+        ACPMessage.response(
+            fs_request.id,
+            {
+                "ok": True,
+                "oldText": "before",
+                "newText": "updated",
+            },
+        )
+    )
+    diff_updates = [
+        notification
+        for notification in resolved.notifications
+        if notification.params is not None
+        and notification.params["update"].get("sessionUpdate") == "tool_call_update"
+    ]
+    assert len(diff_updates) >= 1
+    assert diff_updates[0].params is not None
+    content = diff_updates[0].params["update"].get("content")
+    assert isinstance(content, list)
+    assert content[0].get("type") == "diff"
+
+
+def test_prompt_fs_read_without_capability_does_not_emit_fs_rpc() -> None:
+    protocol = ACPProtocol()
+    protocol.handle(
+        ACPMessage.request(
+            "initialize",
+            {
+                "protocolVersion": 1,
+                "clientCapabilities": {
+                    "fs": {"readTextFile": False, "writeTextFile": False},
+                    "terminal": False,
+                },
+            },
+        )
+    )
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "/fs-read README.md"}],
+            },
+        )
+    )
+
+    assert outcome.response is not None
+    assert outcome.response.result == {"stopReason": "end_turn"}
+    assert all(notification.method != "fs/read_text_file" for notification in outcome.notifications)
+
+
+def test_fs_read_client_error_marks_tool_as_failed() -> None:
+    protocol = ACPProtocol()
+    protocol.handle(
+        ACPMessage.request(
+            "initialize",
+            {
+                "protocolVersion": 1,
+                "clientCapabilities": {
+                    "fs": {"readTextFile": True, "writeTextFile": False},
+                    "terminal": False,
+                },
+            },
+        )
+    )
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    prompt_outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "/fs-read README.md"}],
+            },
+        )
+    )
+    assert prompt_outcome.response is None
+
+    fs_request = next(
+        notification
+        for notification in prompt_outcome.notifications
+        if notification.method == "fs/read_text_file"
+    )
+    assert fs_request.id is not None
+
+    resolved = protocol.handle_client_response(
+        ACPMessage.error_response(
+            fs_request.id,
+            code=-32000,
+            message="read failed",
+        )
+    )
+    assert len(resolved.followup_responses) == 1
+    assert resolved.followup_responses[0].result == {"stopReason": "end_turn"}
+    assert any(
+        notification.params is not None and notification.params["update"].get("status") == "failed"
+        for notification in resolved.notifications
+    )
+
+
 def test_cancel_marks_active_tool_call_as_cancelled() -> None:
     protocol = ACPProtocol()
     created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))

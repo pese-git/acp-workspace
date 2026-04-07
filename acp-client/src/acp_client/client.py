@@ -9,6 +9,7 @@ from aiohttp import ClientSession, WSMsgType
 from .messages import (
     ACPMessage,
     InitializeResult,
+    JsonRpcError,
     PlanUpdate,
     SessionListItem,
     SessionListResult,
@@ -27,6 +28,8 @@ from .messages import (
 )
 
 type PermissionHandler = Callable[[dict[str, Any]], str | None]
+type FsReadHandler = Callable[[str], str]
+type FsWriteHandler = Callable[[str, str], str | None]
 
 
 class ACPClient:
@@ -78,6 +81,8 @@ class ACPClient:
         transport: Literal["http", "ws"] = "http",
         on_update: Callable[[dict], None] | None = None,
         on_permission: PermissionHandler | None = None,
+        on_fs_read: FsReadHandler | None = None,
+        on_fs_write: FsWriteHandler | None = None,
     ) -> ACPMessage:
         """Выполняет ACP-запрос через выбранный транспорт.
 
@@ -96,6 +101,8 @@ class ACPClient:
             params=params,
             on_update=on_update,
             on_permission=on_permission,
+            on_fs_read=on_fs_read,
+            on_fs_write=on_fs_write,
         )
 
     async def initialize(
@@ -149,6 +156,8 @@ class ACPClient:
         params: dict | None = None,
         on_update: Callable[[dict], None] | None = None,
         on_permission: PermissionHandler | None = None,
+        on_fs_read: FsReadHandler | None = None,
+        on_fs_write: FsWriteHandler | None = None,
     ) -> ACPMessage:
         """Отправляет request через WebSocket и слушает updates до финала.
 
@@ -197,8 +206,85 @@ class ACPClient:
                     )
                     continue
 
+                handled_fs_request = self._handle_server_fs_request(
+                    payload=payload,
+                    on_fs_read=on_fs_read,
+                    on_fs_write=on_fs_write,
+                )
+                if handled_fs_request is not None:
+                    await ws.send_str(handled_fs_request.to_json())
+                    continue
+
                 response = ACPMessage.from_dict(payload)
                 return response
+
+    def _handle_server_fs_request(
+        self,
+        *,
+        payload: dict[str, Any],
+        on_fs_read: FsReadHandler | None,
+        on_fs_write: FsWriteHandler | None,
+    ) -> ACPMessage | None:
+        """Обрабатывает server-originated `fs/*` запрос и строит response.
+
+        Пример использования:
+            response = client._handle_server_fs_request(payload=data, ...)
+        """
+
+        method = payload.get("method")
+        request_id = payload.get("id")
+        params = payload.get("params")
+
+        if method == "fs/read_text_file":
+            if on_fs_read is None:
+                return ACPMessage(
+                    id=request_id,
+                    error=JsonRpcError(
+                        code=-32601,
+                        message="Client does not support fs/read_text_file",
+                    ),
+                )
+            path = params.get("path") if isinstance(params, dict) else None
+            if not isinstance(path, str):
+                return ACPMessage(
+                    id=request_id,
+                    error=JsonRpcError(
+                        code=-32602,
+                        message="Invalid params: path must be a string",
+                    ),
+                )
+            return ACPMessage.response(request_id, {"content": on_fs_read(path)})
+
+        if method == "fs/write_text_file":
+            if on_fs_write is None:
+                return ACPMessage(
+                    id=request_id,
+                    error=JsonRpcError(
+                        code=-32601,
+                        message="Client does not support fs/write_text_file",
+                    ),
+                )
+            path = params.get("path") if isinstance(params, dict) else None
+            content = params.get("content") if isinstance(params, dict) else None
+            if not isinstance(path, str) or not isinstance(content, str):
+                return ACPMessage(
+                    id=request_id,
+                    error=JsonRpcError(
+                        code=-32602,
+                        message="Invalid params: path and content must be strings",
+                    ),
+                )
+            old_text = on_fs_write(path, content)
+            return ACPMessage.response(
+                request_id,
+                {
+                    "ok": True,
+                    "oldText": old_text,
+                    "newText": content,
+                },
+            )
+
+        return None
 
     async def _perform_ws_initialize(self, ws: Any) -> None:
         """Выполняет ACP initialize в открытом WS-соединении.

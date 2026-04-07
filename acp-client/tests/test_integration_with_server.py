@@ -1011,3 +1011,128 @@ async def test_ws_client_handles_permission_request() -> None:
         assert response.result == {"stopReason": "end_turn"}
     finally:
         await runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_ws_client_handles_fs_read_request() -> None:
+    async def handle_ws_request(request: web.Request) -> web.WebSocketResponse:
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        async for message in ws:
+            prompt_payload = json.loads(message.data)
+            if await _maybe_reply_initialize(ws, prompt_payload):
+                continue
+            assert prompt_payload["method"] == "session/prompt"
+
+            await ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": "fs_1",
+                    "method": "fs/read_text_file",
+                    "params": {
+                        "sessionId": "sess_1",
+                        "path": "/tmp/demo.txt",
+                    },
+                }
+            )
+
+            fs_response = await ws.receive_json()
+            assert fs_response["id"] == "fs_1"
+            assert fs_response["result"]["content"] == "demo-body"
+
+            await ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": prompt_payload["id"],
+                    "result": {"stopReason": "end_turn"},
+                }
+            )
+            break
+        return ws
+
+    port = _get_free_port()
+    app = web.Application()
+    app.router.add_get("/acp/ws", handle_ws_request)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="127.0.0.1", port=port)
+    await site.start()
+
+    try:
+        client = ACPClient(host="127.0.0.1", port=port)
+
+        response = await client.request(
+            method="session/prompt",
+            params={"sessionId": "sess_1", "prompt": [{"type": "text", "text": "/fs-read"}]},
+            transport="ws",
+            on_fs_read=lambda _path: "demo-body",
+        )
+
+        assert response.result == {"stopReason": "end_turn"}
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_ws_client_handles_fs_write_request() -> None:
+    async def handle_ws_request(request: web.Request) -> web.WebSocketResponse:
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        async for message in ws:
+            prompt_payload = json.loads(message.data)
+            if await _maybe_reply_initialize(ws, prompt_payload):
+                continue
+            assert prompt_payload["method"] == "session/prompt"
+
+            await ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": "fs_2",
+                    "method": "fs/write_text_file",
+                    "params": {
+                        "sessionId": "sess_1",
+                        "path": "/tmp/demo.txt",
+                        "content": "new-text",
+                    },
+                }
+            )
+
+            fs_response = await ws.receive_json()
+            assert fs_response["id"] == "fs_2"
+            assert fs_response["result"]["ok"] is True
+            assert fs_response["result"]["oldText"] == "old-text"
+            assert fs_response["result"]["newText"] == "new-text"
+
+            await ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": prompt_payload["id"],
+                    "result": {"stopReason": "end_turn"},
+                }
+            )
+            break
+        return ws
+
+    port = _get_free_port()
+    app = web.Application()
+    app.router.add_get("/acp/ws", handle_ws_request)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="127.0.0.1", port=port)
+    await site.start()
+
+    try:
+        client = ACPClient(host="127.0.0.1", port=port)
+
+        response = await client.request(
+            method="session/prompt",
+            params={"sessionId": "sess_1", "prompt": [{"type": "text", "text": "/fs-write"}]},
+            transport="ws",
+            on_fs_write=lambda _path, _content: "old-text",
+        )
+
+        assert response.result == {"stopReason": "end_turn"}
+    finally:
+        await runner.cleanup()

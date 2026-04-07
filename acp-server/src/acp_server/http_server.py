@@ -81,6 +81,28 @@ class ACPHttpServer:
                 and acp_request.method == "session/prompt"
                 and isinstance(acp_request.params, dict)
             ):
+                # HTTP не поддерживает agent->client RPC roundtrip (fs/*, permission).
+                # Если prompt запросил такой flow, возвращаем явную ошибку.
+                requires_bidirectional_rpc = any(
+                    notification.method in {"fs/read_text_file", "fs/write_text_file"}
+                    for notification in outcome.notifications
+                )
+                if requires_bidirectional_rpc:
+                    session_id = acp_request.params.get("sessionId")
+                    if isinstance(session_id, str):
+                        self.protocol.handle(
+                            ACPMessage.notification(
+                                "session/cancel",
+                                {"sessionId": session_id},
+                            )
+                        )
+                    error = ACPMessage.error_response(
+                        acp_request.id,
+                        code=-32000,
+                        message="fs client RPC requires WebSocket transport",
+                    )
+                    return web.json_response(error.to_dict(), status=200)
+
                 # Для HTTP финализируем deferred prompt сразу, чтобы не терять response.
                 session_id = acp_request.params.get("sessionId")
                 if isinstance(session_id, str):

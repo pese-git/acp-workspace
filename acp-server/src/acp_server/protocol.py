@@ -97,6 +97,8 @@ class ActiveTurnState:
     permission_tool_call_id: str | None = None
     # Фаза жизненного цикла prompt-turn для детерминированного поведения.
     phase: str = "running"
+    # Исходящий запрос к клиенту (fs/*), если turn ожидает его completion.
+    pending_client_request: PendingClientRequestState | None = None
 
 
 @dataclass(slots=True)
@@ -113,6 +115,45 @@ class PromptDirectives:
     request_tool: bool = False
     keep_tool_pending: bool = False
     publish_plan: bool = False
+    fs_read_path: str | None = None
+    fs_write_path: str | None = None
+    fs_write_content: str | None = None
+
+
+@dataclass(slots=True)
+class PendingClientRequestState:
+    """Состояние исходящего agent->client request внутри активного turn.
+
+    Нужно для корреляции входящего client response с ожидаемым действием
+    (например, `fs/read_text_file` или `fs/write_text_file`).
+
+    Пример использования:
+        pending = PendingClientRequestState(
+            request_id="req_1",
+            kind="fs_read",
+            tool_call_id="call_001",
+            path="/tmp/README.md",
+        )
+    """
+
+    request_id: JsonRpcId
+    kind: str
+    tool_call_id: str
+    path: str
+    expected_new_text: str | None = None
+
+
+@dataclass(slots=True)
+class PreparedFsClientRequest:
+    """Подготовленный пакет сообщений для fs/* agent->client запроса.
+
+    Пример использования:
+        prepared = PreparedFsClientRequest(messages=[...], pending_request=pending)
+    """
+
+    kind: str
+    messages: list[ACPMessage]
+    pending_request: PendingClientRequestState
 
 
 @dataclass(slots=True)
@@ -820,11 +861,38 @@ class ACPProtocol:
                 )
             )
 
-        # В режиме `ask` эмулируем обязательный permission-request перед tool call.
-        should_request_permission = (
-            should_run_tool_flow and session.config_values.get("mode", "ask") == "ask"
+        fs_request = self._build_fs_client_request(
+            session=session,
+            session_id=session_id,
+            directives=directives,
         )
-        if should_request_permission:
+
+        should_request_permission = False
+        if fs_request is not None:
+            if self._can_use_fs_client_rpc(fs_request.kind):
+                notifications.extend(fs_request.messages)
+                session.active_turn.pending_client_request = fs_request.pending_request
+                session.active_turn.phase = "waiting_client_rpc"
+            else:
+                notifications.append(
+                    ACPMessage.notification(
+                        "session/update",
+                        {
+                            "sessionId": session_id,
+                            "update": {
+                                "sessionUpdate": "agent_message_chunk",
+                                "content": {
+                                    "type": "text",
+                                    "text": (
+                                        "File system RPC is unavailable for this "
+                                        "client capabilities profile."
+                                    ),
+                                },
+                            },
+                        },
+                    )
+                )
+        elif should_run_tool_flow and session.config_values.get("mode", "ask") == "ask":
             tool_call_id = self._create_tool_call(
                 session=session,
                 title="Demo tool execution",
@@ -861,6 +929,7 @@ class ACPProtocol:
             session.active_turn.permission_tool_call_id = tool_call_id
             session.active_turn.phase = "waiting_permission"
             notifications.append(permission_request)
+            should_request_permission = True
         else:
             # Демонстрационный tool-call lifecycle для совместимости с ACP-клиентами.
             tool_notifications = self._build_tool_call_updates(
@@ -936,6 +1005,9 @@ class ACPProtocol:
         should_defer_completion = (
             directives.keep_tool_pending and should_run_tool_flow
         ) or should_request_permission
+        should_defer_completion = (
+            should_defer_completion or session.active_turn.pending_client_request is not None
+        )
         if should_defer_completion:
             # Для незавершенных tool-call оставляем prompt-request «в полете».
             # Финальный response будет отправлен позже (автозавершение или cancel).
@@ -1042,10 +1114,198 @@ class ACPProtocol:
         if message.id is None:
             return ProtocolOutcome()
 
+        resolved_client_rpc = self._resolve_pending_client_rpc_response(
+            request_id=message.id,
+            result=message.result,
+            error=message.error.model_dump(exclude_none=True)
+            if message.error is not None
+            else None,
+        )
+        if resolved_client_rpc is not None:
+            return resolved_client_rpc
+
         resolved = self._resolve_permission_response(message.id, message.result)
         if resolved is None:
             return ProtocolOutcome()
         return resolved
+
+    def _resolve_pending_client_rpc_response(
+        self,
+        *,
+        request_id: JsonRpcId,
+        result: Any,
+        error: dict[str, Any] | None,
+    ) -> ProtocolOutcome | None:
+        """Обрабатывает response на ожидаемый agent->client fs/* request.
+
+        Пример использования:
+            outcome = protocol._resolve_pending_client_rpc_response(
+                request_id="req_1",
+                result={"content": "ok"},
+                error=None,
+            )
+        """
+
+        session = self._find_session_by_pending_client_request_id(request_id)
+        if session is None or session.active_turn is None:
+            return None
+        pending = session.active_turn.pending_client_request
+        if pending is None:
+            return None
+
+        session_id = session.session_id
+        notifications: list[ACPMessage] = []
+
+        if error is not None:
+            self._update_tool_call_status(session, pending.tool_call_id, "failed")
+            notifications.append(
+                ACPMessage.notification(
+                    "session/update",
+                    {
+                        "sessionId": session_id,
+                        "update": {
+                            "sessionUpdate": "tool_call_update",
+                            "toolCallId": pending.tool_call_id,
+                            "status": "failed",
+                            "content": [
+                                {
+                                    "type": "content",
+                                    "content": {
+                                        "type": "text",
+                                        "text": "Client RPC request failed.",
+                                    },
+                                }
+                            ],
+                        },
+                    },
+                )
+            )
+            session.updated_at = datetime.now(UTC).isoformat()
+            notifications.append(
+                self._session_info_notification(
+                    session_id=session_id,
+                    title=None,
+                    updated_at=session.updated_at,
+                )
+            )
+            failed = self._finalize_active_turn(session=session, stop_reason="end_turn")
+            return ProtocolOutcome(
+                notifications=notifications,
+                followup_responses=[failed] if failed is not None else [],
+            )
+
+        if pending.kind == "fs_read":
+            content_text = ""
+            if isinstance(result, dict) and isinstance(result.get("content"), str):
+                content_text = result["content"]
+            self._update_tool_call_status(
+                session,
+                pending.tool_call_id,
+                "completed",
+                content=[
+                    {
+                        "type": "content",
+                        "content": {
+                            "type": "text",
+                            "text": content_text,
+                        },
+                    }
+                ],
+            )
+            notifications.append(
+                ACPMessage.notification(
+                    "session/update",
+                    {
+                        "sessionId": session_id,
+                        "update": {
+                            "sessionUpdate": "tool_call_update",
+                            "toolCallId": pending.tool_call_id,
+                            "status": "completed",
+                            "content": [
+                                {
+                                    "type": "content",
+                                    "content": {
+                                        "type": "text",
+                                        "text": content_text,
+                                    },
+                                }
+                            ],
+                        },
+                    },
+                )
+            )
+        elif pending.kind == "fs_write":
+            old_text: str | None = None
+            new_text = pending.expected_new_text or ""
+            if isinstance(result, dict):
+                if isinstance(result.get("oldText"), str):
+                    old_text = result["oldText"]
+                if isinstance(result.get("newText"), str):
+                    new_text = result["newText"]
+
+            diff_content = [
+                {
+                    "type": "diff",
+                    "path": pending.path,
+                    "oldText": old_text,
+                    "newText": new_text,
+                }
+            ]
+            self._update_tool_call_status(
+                session,
+                pending.tool_call_id,
+                "completed",
+                content=diff_content,
+            )
+            notifications.append(
+                ACPMessage.notification(
+                    "session/update",
+                    {
+                        "sessionId": session_id,
+                        "update": {
+                            "sessionUpdate": "tool_call_update",
+                            "toolCallId": pending.tool_call_id,
+                            "status": "completed",
+                            "content": diff_content,
+                        },
+                    },
+                )
+            )
+        else:
+            return None
+
+        session.active_turn.pending_client_request = None
+        session.updated_at = datetime.now(UTC).isoformat()
+        notifications.append(
+            self._session_info_notification(
+                session_id=session_id,
+                title=None,
+                updated_at=session.updated_at,
+            )
+        )
+        completed = self._finalize_active_turn(session=session, stop_reason="end_turn")
+        return ProtocolOutcome(
+            notifications=notifications,
+            followup_responses=[completed] if completed is not None else [],
+        )
+
+    def _find_session_by_pending_client_request_id(
+        self,
+        request_id: JsonRpcId,
+    ) -> SessionState | None:
+        """Ищет сессию по id ожидаемого agent->client запроса.
+
+        Пример использования:
+            session = protocol._find_session_by_pending_client_request_id("req_1")
+        """
+
+        for session in self._sessions.values():
+            active_turn = session.active_turn
+            if active_turn is None or active_turn.pending_client_request is None:
+                continue
+            if active_turn.pending_client_request.request_id == request_id:
+                return session
+        return None
 
     def _finalize_active_turn(
         self, session: SessionState, *, stop_reason: str
@@ -1220,6 +1480,145 @@ class ACPProtocol:
         if caps is None:
             return True
         return caps.terminal or caps.fs_read or caps.fs_write
+
+    def _can_use_fs_client_rpc(self, kind: str) -> bool:
+        """Проверяет доступность fs/* client RPC для указанной операции.
+
+        Пример использования:
+            enabled = protocol._can_use_fs_client_rpc("fs_read")
+        """
+
+        caps = self._runtime_capabilities
+        if caps is None:
+            return False
+        if kind == "fs_read":
+            return caps.fs_read
+        if kind == "fs_write":
+            return caps.fs_write
+        return False
+
+    def _build_fs_client_request(
+        self,
+        *,
+        session: SessionState,
+        session_id: str,
+        directives: PromptDirectives,
+    ) -> PreparedFsClientRequest | None:
+        """Готовит исходящий fs/* request и связанный tool_call lifecycle.
+
+        Пример использования:
+            prepared = protocol._build_fs_client_request(
+                session=state,
+                session_id="sess_1",
+                directives=directives,
+            )
+        """
+
+        if directives.fs_read_path is not None:
+            target_path = self._normalize_session_path(session.cwd, directives.fs_read_path)
+            if target_path is None:
+                return None
+            tool_call_id = self._create_tool_call(
+                session=session,
+                title="Read text file",
+                kind="read",
+            )
+            created = ACPMessage.notification(
+                "session/update",
+                {
+                    "sessionId": session_id,
+                    "update": {
+                        "sessionUpdate": "tool_call",
+                        "toolCallId": tool_call_id,
+                        "title": "Read text file",
+                        "kind": "read",
+                        "status": "pending",
+                        "locations": [{"path": target_path}],
+                    },
+                },
+            )
+            fs_request = ACPMessage.request(
+                "fs/read_text_file",
+                {
+                    "sessionId": session_id,
+                    "path": target_path,
+                },
+            )
+            if fs_request.id is None:
+                return None
+            pending = PendingClientRequestState(
+                request_id=fs_request.id,
+                kind="fs_read",
+                tool_call_id=tool_call_id,
+                path=target_path,
+            )
+            return PreparedFsClientRequest(
+                kind="fs_read",
+                messages=[created, fs_request],
+                pending_request=pending,
+            )
+
+        if directives.fs_write_path is not None and directives.fs_write_content is not None:
+            target_path = self._normalize_session_path(session.cwd, directives.fs_write_path)
+            if target_path is None:
+                return None
+            tool_call_id = self._create_tool_call(
+                session=session,
+                title="Write text file",
+                kind="edit",
+            )
+            created = ACPMessage.notification(
+                "session/update",
+                {
+                    "sessionId": session_id,
+                    "update": {
+                        "sessionUpdate": "tool_call",
+                        "toolCallId": tool_call_id,
+                        "title": "Write text file",
+                        "kind": "edit",
+                        "status": "pending",
+                        "locations": [{"path": target_path}],
+                    },
+                },
+            )
+            fs_request = ACPMessage.request(
+                "fs/write_text_file",
+                {
+                    "sessionId": session_id,
+                    "path": target_path,
+                    "content": directives.fs_write_content,
+                },
+            )
+            if fs_request.id is None:
+                return None
+            pending = PendingClientRequestState(
+                request_id=fs_request.id,
+                kind="fs_write",
+                tool_call_id=tool_call_id,
+                path=target_path,
+                expected_new_text=directives.fs_write_content,
+            )
+            return PreparedFsClientRequest(
+                kind="fs_write",
+                messages=[created, fs_request],
+                pending_request=pending,
+            )
+
+        return None
+
+    def _normalize_session_path(self, cwd: str, candidate: str) -> str | None:
+        """Преобразует путь из slash-команды в абсолютный путь в рамках cwd.
+
+        Пример использования:
+            path = protocol._normalize_session_path("/tmp", "README.md")
+        """
+
+        if not isinstance(candidate, str) or not candidate.strip():
+            return None
+        candidate_path = Path(candidate)
+        if candidate_path.is_absolute():
+            return str(candidate_path)
+        return str(Path(cwd) / candidate_path)
 
     def _find_session_by_permission_request_id(
         self,
@@ -1587,6 +1986,24 @@ class ACPProtocol:
         has_plan_directive = "/plan" in normalized_tokens
         has_tool_directive = "/tool" in normalized_tokens
         has_pending_directive = "/tool-pending" in normalized_tokens
+        fs_read_path: str | None = None
+        fs_write_path: str | None = None
+        fs_write_content: str | None = None
+
+        stripped_preview = text_preview.strip()
+        if stripped_preview.startswith("/fs-read "):
+            maybe_path = stripped_preview[len("/fs-read ") :].strip()
+            if maybe_path:
+                fs_read_path = maybe_path
+        if stripped_preview.startswith("/fs-write "):
+            raw_write_payload = stripped_preview[len("/fs-write ") :].strip()
+            path_and_content = raw_write_payload.split(" ", 1)
+            if len(path_and_content) == 2:
+                candidate_path = path_and_content[0].strip()
+                candidate_content = path_and_content[1]
+                if candidate_path:
+                    fs_write_path = candidate_path
+                    fs_write_content = candidate_content
 
         # Опциональный mock-режим для старых сценариев и backward-совместимости.
         if "/mock-markers" in normalized_tokens:
@@ -1598,6 +2015,9 @@ class ACPProtocol:
             request_tool=has_tool_directive or has_pending_directive,
             keep_tool_pending=has_pending_directive,
             publish_plan=has_plan_directive,
+            fs_read_path=fs_read_path,
+            fs_write_path=fs_write_path,
+            fs_write_content=fs_write_content,
         )
 
     def _build_tool_call_updates(
