@@ -19,6 +19,7 @@ from aiohttp import WSMsgType, web
 
 from .messages import ACPMessage
 from .protocol import ACPProtocol, ProtocolOutcome
+from .storage import SessionStorage
 
 # Получаем структурированный logger
 logger = structlog.get_logger()
@@ -42,8 +43,16 @@ class ACPHttpServer:
         *,
         require_auth: bool = False,
         auth_api_key: str | None = None,
+        storage: SessionStorage | None = None,
     ) -> None:
         """Создает транспортный сервер с адресом прослушивания.
+
+        Args:
+            host: IP адрес для прослушивания (по умолчанию 127.0.0.1).
+            port: Порт для прослушивания (по умолчанию 8080).
+            require_auth: Требовать аутентификацию перед session/new и session/load.
+            auth_api_key: API ключ для аутентификации.
+            storage: Backend для хранения сессий (по умолчанию InMemoryStorage).
 
         Пример использования:
             ACPHttpServer(host="0.0.0.0", port=8080)
@@ -53,6 +62,7 @@ class ACPHttpServer:
         self.port = port
         self.require_auth = require_auth
         self.auth_api_key = auth_api_key
+        self.storage = storage
 
     async def run(self) -> None:
         """Запускает WS endpoint и держит процесс живым.
@@ -106,7 +116,11 @@ class ACPHttpServer:
 
         ws = web.WebSocketResponse()
         await ws.prepare(request)
-        protocol = ACPProtocol(require_auth=self.require_auth, auth_api_key=self.auth_api_key)
+        protocol = ACPProtocol(
+            require_auth=self.require_auth,
+            auth_api_key=self.auth_api_key,
+            storage=self.storage,
+        )
         # Храним отложенные завершения prompt-turn по sessionId в рамках WS-соединения.
         deferred_prompt_tasks: dict[str, asyncio.Task[None]] = {}
         # По ACP любые session-методы в WS доступны только после initialize.

@@ -12,12 +12,71 @@ uv sync
 
 ## Запуск
 
+### Базовый запуск (in-memory хранилище)
+
 ```bash
 uv run acp-server --host 127.0.0.1 --port 8080
-# или с обязательной аутентификацией
+```
+
+### С обязательной аутентификацией
+
+```bash
 uv run acp-server --host 127.0.0.1 --port 8080 --require-auth
-# с локальным API key backend для authenticate
+```
+
+### С локальным API key backend для authenticate
+
+```bash
 uv run acp-server --host 127.0.0.1 --port 8080 --require-auth --auth-api-key dev-secret
+```
+
+## Хранилище сессий
+
+Сервер поддерживает два backends для хранения сессий:
+
+### In-memory (по умолчанию)
+
+Сессии хранятся в памяти процесса и теряются при перезапуске:
+
+```bash
+uv run acp-server --host 127.0.0.1 --port 8080
+# или явно:
+uv run acp-server --host 127.0.0.1 --port 8080 --storage memory
+```
+
+### JSON файловое хранилище (persistence)
+
+Сессии сохраняются в JSON файлы для persistence между перезапусками:
+
+```bash
+# Сохранять сессии в ~/.acp/sessions
+uv run acp-server --host 127.0.0.1 --port 8080 --storage json:~/.acp/sessions
+
+# Или с абсолютным путем
+uv run acp-server --host 127.0.0.1 --port 8080 --storage json:/var/lib/acp/sessions
+```
+
+Каждая сессия сохраняется в отдельный JSON файл (`{session_id}.json`) с полным состоянием включая:
+- Текущую рабочую директорию
+- Историю диалога
+- Состояние tool calls
+- Конфигурацию сессии
+- Runtime capabilities клиента
+
+**Пример:**
+
+```bash
+# Разработка с persistence (в домашней директории)
+uv run acp-server --log-level DEBUG --storage json:~/.acp/sessions
+
+# Production с JSON логами и хранилищем
+uv run acp-server \
+  --host 0.0.0.0 \
+  --port 8080 \
+  --require-auth \
+  --auth-api-key $ACP_SERVER_API_KEY \
+  --log-json \
+  --storage json:/var/lib/acp/sessions
 ```
 
 ## Логирование
