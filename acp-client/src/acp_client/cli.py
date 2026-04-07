@@ -1,3 +1,12 @@
+"""CLI-обертка над ACPClient.
+
+Команда читает параметры из аргументов, выполняет ACP-запрос и печатает JSON.
+Для `session/load` поддержан режим показа replay/update-событий.
+
+Пример использования:
+    acp-client --transport ws --method session/load --show-updates --params '{...}'
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -10,6 +19,18 @@ from .messages import parse_json_params
 
 
 def run_client() -> None:
+    """Точка входа CLI-клиента.
+
+    Метод:
+    - парсит аргументы,
+    - валидирует JSON-параметры,
+    - вызывает ACP-клиент,
+    - печатает результат в человеко-читаемом JSON.
+
+    Пример использования:
+        run_client()
+    """
+
     parser = argparse.ArgumentParser(prog="acp-client")
     parser.add_argument("--transport", choices=["http", "ws"], default="http")
     parser.add_argument("--host", default="127.0.0.1")

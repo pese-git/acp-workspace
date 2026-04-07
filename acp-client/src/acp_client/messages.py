@@ -1,3 +1,15 @@
+"""Модели и утилиты клиента для JSON-RPC/ACP сообщений.
+
+Модуль описывает:
+- базовые структуры JSON-RPC (`ACPMessage`, `JsonRpcError`),
+- типизированный формат уведомления `session/update`,
+- парсинг JSON-аргументов CLI.
+
+Пример использования:
+    request = ACPMessage.request("ping", {})
+    payload = request.to_json()
+"""
+
 from __future__ import annotations
 
 import json
@@ -11,6 +23,14 @@ type JsonRpcId = str | int
 
 
 class JsonRpcError(BaseModel):
+    """Структура ошибки JSON-RPC, полученной от сервера.
+
+    Поле `data` опционально и содержит дополнительную диагностику.
+
+    Пример использования:
+        err = JsonRpcError(code=-32602, message="Invalid params")
+    """
+
     # Код и текст ошибки соответствуют JSON-RPC 2.0.
     code: int
     message: str
@@ -19,6 +39,18 @@ class JsonRpcError(BaseModel):
 
 
 class ACPMessage(BaseModel):
+    """Унифицированная модель JSON-RPC сообщения в клиенте.
+
+    Модель поддерживает три формы:
+    - request (есть `method` и `id`),
+    - notification (есть `method`, нет `id`),
+    - response (нет `method`, есть `result` или `error`).
+
+    Пример использования:
+        msg = ACPMessage.request("session/list", {})
+        wire = msg.to_dict()
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     jsonrpc: Literal["2.0"] = "2.0"
@@ -30,6 +62,17 @@ class ACPMessage(BaseModel):
 
     @model_validator(mode="after")
     def validate_shape(self) -> ACPMessage:
+        """Проверяет, что поля сообщения соответствуют форме JSON-RPC.
+
+        Валидатор не допускает:
+        - `result/error` в request или notification,
+        - отсутствие `result` и `error` в response,
+        - одновременное наличие `result` и `error`.
+
+        Пример использования:
+            ACPMessage.model_validate({"jsonrpc": "2.0", "id": "1", "result": {}})
+        """
+
         # Отличаем явно переданные поля от отсутствующих для корректной проверки контракта.
         has_result = "result" in self.model_fields_set
         has_error = "error" in self.model_fields_set and self.error is not None
@@ -56,28 +99,72 @@ class ACPMessage(BaseModel):
         *,
         request_id: JsonRpcId | None = None,
     ) -> ACPMessage:
+        """Создает request-сообщение JSON-RPC с авто-генерацией `id`.
+
+        Если `request_id` не передан, будет сгенерирован короткий hex-идентификатор.
+
+        Пример использования:
+            ACPMessage.request("initialize", {"protocolVersion": 1})
+        """
+
         generated_id = request_id if request_id is not None else uuid4().hex[:8]
         return cls(id=generated_id, method=method, params=params or {})
 
     @classmethod
     def notification(cls, method: str, params: dict[str, Any] | None = None) -> ACPMessage:
+        """Создает notification-сообщение JSON-RPC без поля `id`.
+
+        Пример использования:
+            ACPMessage.notification("session/cancel", {"sessionId": "sess_1"})
+        """
+
         return cls(id=None, method=method, params=params or {})
 
     @classmethod
     def from_json(cls, raw: str) -> ACPMessage:
+        """Десериализует JSON-строку в типизированный `ACPMessage`.
+
+        Пример использования:
+            ACPMessage.from_json('{"jsonrpc":"2.0","id":"1","result":{}}')
+        """
+
         return cls.model_validate_json(raw)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ACPMessage:
+        """Десериализует словарь в `ACPMessage` c legacy-совместимостью.
+
+        Вход может содержать старое поле `type`; оно игнорируется.
+
+        Пример использования:
+            ACPMessage.from_dict({"jsonrpc": "2.0", "id": "1", "result": {}})
+        """
+
         # В клиенте игнорируем legacy `type`, чтобы принимать старые ответы без падения.
         normalized = dict(data)
         normalized.pop("type", None)
         return cls.model_validate(normalized)
 
     def to_json(self) -> str:
+        """Сериализует сообщение в компактную JSON-строку для транспорта.
+
+        Пример использования:
+            wire = ACPMessage.request("ping", {}).to_json()
+        """
+
         return json.dumps(self.to_dict(), separators=(",", ":"))
 
     def to_dict(self) -> dict[str, Any]:
+        """Преобразует сообщение в словарь wire-формата JSON-RPC.
+
+        Метод аккуратно формирует payload:
+        - request/notification содержат `method` и опционально `params`,
+        - response всегда содержит `id` и одно из `result/error`.
+
+        Пример использования:
+            payload = ACPMessage(id="1", result=None).to_dict()
+        """
+
         payload: dict[str, Any] = {"jsonrpc": self.jsonrpc}
 
         if self.method is not None:
@@ -97,6 +184,14 @@ class ACPMessage(BaseModel):
 
 
 class SessionUpdatePayload(BaseModel):
+    """Полезная нагрузка события `session/update`.
+
+    Поле `sessionUpdate` задает тип события, остальные поля зависят от него.
+
+    Пример использования:
+        SessionUpdatePayload.model_validate({"sessionUpdate": "agent_message_chunk"})
+    """
+
     # Дискриминатор типа события в `session/update`.
     sessionUpdate: str
     # Дальнейшие поля зависят от конкретного типа update.
@@ -104,6 +199,17 @@ class SessionUpdatePayload(BaseModel):
 
 
 class SessionUpdateParams(BaseModel):
+    """Параметры notification `session/update`.
+
+    Содержат `sessionId` и вложенный объект update.
+
+    Пример использования:
+        SessionUpdateParams.model_validate({
+            "sessionId": "sess_1",
+            "update": {"sessionUpdate": "session_info_update"},
+        })
+    """
+
     # Идентификатор сессии, к которой относится update.
     sessionId: str
     # Полезная нагрузка update-события.
@@ -112,6 +218,14 @@ class SessionUpdateParams(BaseModel):
 
 
 class SessionUpdateNotification(BaseModel):
+    """Типизированное уведомление `session/update`.
+
+    Модель используется в клиенте для безопасной обработки replay/update-потока.
+
+    Пример использования:
+        SessionUpdateNotification.model_validate(payload)
+    """
+
     # Notification всегда в формате JSON-RPC 2.0.
     jsonrpc: Literal["2.0"] = "2.0"
     # Для данного помощника принимаем только `session/update`.
@@ -121,6 +235,14 @@ class SessionUpdateNotification(BaseModel):
 
 
 def parse_session_update_notification(payload: dict[str, Any]) -> SessionUpdateNotification | None:
+    """Пытается распарсить словарь как `session/update` notification.
+
+    Возвращает `None`, если передан payload другого метода.
+
+    Пример использования:
+        parsed = parse_session_update_notification(raw_payload)
+    """
+
     # Если это не `session/update`, возвращаем None для удобной фильтрации.
     if payload.get("method") != "session/update":
         return None
@@ -128,6 +250,15 @@ def parse_session_update_notification(payload: dict[str, Any]) -> SessionUpdateN
 
 
 def parse_json_params(value: str | None) -> dict[str, Any]:
+    """Парсит значение `--params` из CLI в JSON-объект.
+
+    Функция принимает только JSON-объект на верхнем уровне, чтобы параметры
+    запроса всегда имели формат `dict[str, Any]`.
+
+    Пример использования:
+        params = parse_json_params('{"sessionId":"sess_1"}')
+    """
+
     # CLI принимает params строкой; здесь приводим к JSON-объекту для ACP запроса.
     if value is None:
         return {}

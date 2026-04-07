@@ -1,3 +1,13 @@
+"""In-memory реализация ACP-протокола для demo/интеграционных сценариев.
+
+Модуль инкапсулирует обработку JSON-RPC методов (`initialize`, `session/*`,
+legacy `ping/echo/shutdown`) и формирует поток `session/update` событий.
+
+Пример использования:
+    protocol = ACPProtocol()
+    outcome = protocol.handle(ACPMessage.request("initialize", {}))
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -11,6 +21,15 @@ from .messages import ACPMessage, JsonRpcId
 
 @dataclass(slots=True)
 class SessionState:
+    """Состояние ACP-сессии, хранимое в памяти сервера.
+
+    Объект содержит контекст работы сессии, историю, конфигурацию и состояние
+    инструментальных вызовов.
+
+    Пример использования:
+        state = SessionState(session_id="sess_1", cwd="/tmp", mcp_servers=[])
+    """
+
     session_id: str
     cwd: str
     mcp_servers: list[dict[str, Any]]
@@ -34,6 +53,15 @@ class SessionState:
 
 @dataclass(slots=True)
 class ToolCallState:
+    """Состояние одного tool call внутри prompt-turn.
+
+    Используется для управления жизненным циклом `pending -> in_progress -> ...`
+    и генерации корректных `tool_call_update` уведомлений.
+
+    Пример использования:
+        call = ToolCallState("call_001", "Demo", "other", "pending")
+    """
+
     # Идентификатор связывает `tool_call` и `tool_call_update` события.
     tool_call_id: str
     # Заголовок для отображения в клиенте.
@@ -48,12 +76,37 @@ class ToolCallState:
 
 @dataclass(slots=True)
 class ProtocolOutcome:
+    """Результат обработки входящего ACP-сообщения.
+
+    Включает финальный response (если нужен) и список промежуточных
+    notifications, которые транспорт должен отправить в указанном порядке.
+
+    Пример использования:
+        outcome = ProtocolOutcome(response=ACPMessage.response("id", {}))
+    """
+
     response: ACPMessage | None = None
     notifications: list[ACPMessage] = field(default_factory=list)
 
 
 class ACPProtocol:
+    """Диспетчер ACP-методов и in-memory реализация сессионного протокола.
+
+    Класс принимает валидированные JSON-RPC сообщения и возвращает
+    `ProtocolOutcome` для транспортного слоя.
+
+    Пример использования:
+        protocol = ACPProtocol()
+        outcome = protocol.handle(ACPMessage.request("initialize", {}))
+    """
+
     def __init__(self) -> None:
+        """Инициализирует протокол и пустое хранилище сессий.
+
+        Пример использования:
+            protocol = ACPProtocol()
+        """
+
         self._sessions: dict[str, SessionState] = {}
 
     _config_specs: dict[str, dict[str, Any]] = {
@@ -89,6 +142,14 @@ class ACPProtocol:
     }
 
     def handle(self, message: ACPMessage) -> ProtocolOutcome:
+        """Обрабатывает входящее сообщение и маршрутизирует его по ACP-методу.
+
+        Метод является основной точкой входа для HTTP/WS транспорта.
+
+        Пример использования:
+            outcome = protocol.handle(ACPMessage.request("session/list", {}))
+        """
+
         # Сервер принимает только входящие requests/notifications.
         if message.method is None:
             return ProtocolOutcome(
@@ -144,6 +205,12 @@ class ACPProtocol:
         )
 
     def _initialize(self, request_id: JsonRpcId | None) -> ACPMessage:
+        """Формирует ответ на `initialize` с перечнем возможностей агента.
+
+        Пример использования:
+            response = protocol._initialize("req_1")
+        """
+
         # Инициализация capability negotiation для ACP v1.
         result = {
             "protocolVersion": 1,
@@ -170,6 +237,15 @@ class ACPProtocol:
         return ACPMessage.response(request_id, result)
 
     def _session_new(self, request_id: JsonRpcId | None, params: dict[str, Any]) -> ACPMessage:
+        """Создает новую in-memory сессию и возвращает ее идентификатор.
+
+        Метод валидирует `cwd`, инициализирует config options и дефолтные
+        slash-команды.
+
+        Пример использования:
+            response = protocol._session_new("req_1", {"cwd": "/tmp", "mcpServers": []})
+        """
+
         # По спецификации cwd должен быть абсолютным путем.
         cwd = params.get("cwd")
         if not isinstance(cwd, str) or not Path(cwd).is_absolute():
@@ -211,6 +287,18 @@ class ACPProtocol:
         request_id: JsonRpcId | None,
         params: dict[str, Any],
     ) -> ProtocolOutcome:
+        """Загружает существующую сессию и реплеит состояние через updates.
+
+        Возвращает `result: null` и набор `session/update` уведомлений:
+        история сообщений, config options, команды и session info.
+
+        Пример использования:
+            outcome = protocol._session_load(
+                "req_1",
+                {"sessionId": "sess_1", "cwd": "/tmp", "mcpServers": []},
+            )
+        """
+
         # Загрузка поддерживает in-memory сессии и реплей накопленной истории в `session/update`.
         session_id = params.get("sessionId")
         cwd = params.get("cwd")
@@ -326,6 +414,12 @@ class ACPProtocol:
         )
 
     def _session_list(self, request_id: JsonRpcId | None, params: dict[str, Any]) -> ACPMessage:
+        """Возвращает список сессий с опциональной фильтрацией по `cwd`.
+
+        Пример использования:
+            response = protocol._session_list("req_1", {"cwd": "/tmp"})
+        """
+
         # Поддерживаем фильтрацию сессий по cwd для клиентских списков.
         cwd_filter = params.get("cwd")
         if cwd_filter is not None and (
@@ -355,6 +449,15 @@ class ACPProtocol:
     def _session_prompt(
         self, request_id: JsonRpcId | None, params: dict[str, Any]
     ) -> ProtocolOutcome:
+        """Обрабатывает пользовательский prompt-turn и формирует updates.
+
+        Метод валидирует контент, добавляет сообщение агента, обновляет историю,
+        публикует `session_info_update` и `available_commands_update`.
+
+        Пример использования:
+            outcome = protocol._session_prompt("req_1", {"sessionId": "sess_1", "prompt": []})
+        """
+
         session_id = params.get("sessionId")
         prompt = params.get("prompt")
 
@@ -485,6 +588,14 @@ class ACPProtocol:
     def _session_cancel(
         self, request_id: JsonRpcId | None, params: dict[str, Any]
     ) -> ProtocolOutcome:
+        """Отменяет текущий turn сессии и активные tool calls.
+
+        Если запрос пришел как notification (без `id`), response не возвращается.
+
+        Пример использования:
+            outcome = protocol._session_cancel(None, {"sessionId": "sess_1"})
+        """
+
         session_id = params.get("sessionId")
         notifications: list[ACPMessage] = []
         if isinstance(session_id, str) and session_id in self._sessions:
@@ -514,6 +625,18 @@ class ACPProtocol:
         request_id: JsonRpcId | None,
         params: dict[str, Any],
     ) -> ProtocolOutcome:
+        """Изменяет значение конфигурационной опции сессии.
+
+        В случае успеха возвращает новый snapshot `configOptions` и отправляет
+        `config_option_update` + `session_info_update`.
+
+        Пример использования:
+            outcome = protocol._session_set_config_option(
+                "req_1",
+                {"sessionId": "sess_1", "configId": "mode", "value": "code"},
+            )
+        """
+
         # Конфиг опции валидируем по локальной спецификации и допустимым значениям.
         session_id = params.get("sessionId")
         config_id = params.get("configId")
@@ -601,6 +724,12 @@ class ACPProtocol:
         )
 
     def _build_config_options(self, values: dict[str, str]) -> list[dict[str, Any]]:
+        """Строит wire-представление списка config options для клиента.
+
+        Пример использования:
+            options = protocol._build_config_options({"mode": "ask", "model": "baseline"})
+        """
+
         options: list[dict[str, Any]] = []
         for config_id, spec in self._config_specs.items():
             options.append(
@@ -620,6 +749,15 @@ class ACPProtocol:
         request_id: JsonRpcId | None,
         prompt: list[Any],
     ) -> ACPMessage | None:
+        """Проверяет корректность ContentBlock-массива для `session/prompt`.
+
+        Поддерживаются типы `text` и `resource_link`.
+        При ошибке возвращается `ACPMessage.error_response`, иначе `None`.
+
+        Пример использования:
+            error = protocol._validate_prompt_content("req_1", [{"type": "text", "text": "hi"}])
+        """
+
         for block in prompt:
             if not isinstance(block, dict):
                 return ACPMessage.error_response(
@@ -660,6 +798,19 @@ class ACPProtocol:
         session_id: str,
         prompt_text: str,
     ) -> list[ACPMessage]:
+        """Генерирует demo-последовательность `tool_call`/`tool_call_update`.
+
+        Включается маркером `[tool]` в тексте prompt и используется как
+        каркас для протокольной совместимости и тестов.
+
+        Пример использования:
+            updates = protocol._build_tool_call_updates(
+                session=state,
+                session_id="sess_1",
+                prompt_text="run [tool]",
+            )
+        """
+
         # Демо-режим: tool-call генерируется только по явному маркеру в тексте.
         if "[tool]" not in prompt_text:
             return []
@@ -733,6 +884,12 @@ class ACPProtocol:
         return [created, in_progress, completed]
 
     def _create_tool_call(self, session: SessionState, *, title: str, kind: str) -> str:
+        """Создает запись нового tool call в состоянии сессии.
+
+        Пример использования:
+            tool_call_id = protocol._create_tool_call(state, title="Demo", kind="other")
+        """
+
         # Локально монотонный ID делает тесты предсказуемыми и читабельными.
         session.tool_call_counter += 1
         tool_call_id = f"call_{session.tool_call_counter:03d}"
@@ -752,6 +909,12 @@ class ACPProtocol:
         *,
         content: list[dict[str, Any]] | None = None,
     ) -> None:
+        """Обновляет статус tool call с проверкой допустимых переходов.
+
+        Пример использования:
+            protocol._update_tool_call_status(state, "call_001", "in_progress")
+        """
+
         state = session.tool_calls.get(tool_call_id)
         if state is None:
             return
@@ -773,6 +936,12 @@ class ACPProtocol:
             state.content = content
 
     def _cancel_active_tool_calls(self, session: SessionState, session_id: str) -> list[ACPMessage]:
+        """Отменяет все незавершенные tool calls и формирует update-события.
+
+        Пример использования:
+            updates = protocol._cancel_active_tool_calls(state, "sess_1")
+        """
+
         # Финальные статусы не трогаем, отменяем только активные вызовы.
         notifications: list[ACPMessage] = []
         for tool_call in session.tool_calls.values():
@@ -801,6 +970,16 @@ class ACPProtocol:
         title: str | None,
         updated_at: str,
     ) -> ACPMessage:
+        """Создает notification `session_info_update` для `session/update`.
+
+        Пример использования:
+            note = protocol._session_info_notification(
+                session_id="sess_1",
+                title="My session",
+                updated_at="2026-04-07T00:00:00Z",
+            )
+        """
+
         return ACPMessage.notification(
             "session/update",
             {
@@ -814,6 +993,12 @@ class ACPProtocol:
         )
 
     def _build_default_commands(self) -> list[dict[str, Any]]:
+        """Возвращает базовый набор команд для demo-сессий.
+
+        Пример использования:
+            commands = protocol._build_default_commands()
+        """
+
         # Базовый список slash-команд для демонстрации протокольного update.
         return [
             {
