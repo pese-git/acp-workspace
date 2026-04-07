@@ -2,10 +2,13 @@ import pytest
 
 from acp_client.messages import (
     ACPMessage,
+    InitializeResult,
+    JsonRpcError,
     PlanUpdate,
     RequestPermissionRequest,
     ToolCallCreatedUpdate,
     ToolCallStateUpdate,
+    parse_initialize_result,
     parse_json_params,
     parse_plan_update,
     parse_request_permission_request,
@@ -158,3 +161,35 @@ def test_parse_plan_update() -> None:
     parsed = parse_plan_update(notification)
     assert isinstance(parsed, PlanUpdate)
     assert parsed.entries[0].priority == "high"
+
+
+def test_parse_initialize_result_success() -> None:
+    response = ACPMessage.response(
+        "init_1",
+        {
+            "protocolVersion": 1,
+            "agentCapabilities": {
+                "loadSession": True,
+                "promptCapabilities": {"image": False},
+                "mcpCapabilities": {"http": False, "sse": False},
+                "sessionCapabilities": {"list": {}},
+            },
+            "agentInfo": {"name": "acp-server", "version": "0.1.0"},
+            "authMethods": [],
+        },
+    )
+
+    parsed = parse_initialize_result(response)
+    assert isinstance(parsed, InitializeResult)
+    assert parsed.protocolVersion == 1
+    assert parsed.agentCapabilities.loadSession is True
+
+
+def test_parse_initialize_result_error_response_raises() -> None:
+    response = ACPMessage(
+        id="init_1",
+        error=JsonRpcError(code=-32602, message="Invalid params"),
+    )
+
+    with pytest.raises(ValueError):
+        parse_initialize_result(response)

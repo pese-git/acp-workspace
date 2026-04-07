@@ -8,9 +8,11 @@ from aiohttp import ClientSession, WSMsgType
 
 from .messages import (
     ACPMessage,
+    InitializeResult,
     PlanUpdate,
     SessionUpdateNotification,
     ToolCallUpdate,
+    parse_initialize_result,
     parse_plan_update,
     parse_request_permission_request,
     parse_session_update_notification,
@@ -69,6 +71,34 @@ class ACPClient:
             on_update=on_update,
             on_permission=on_permission,
         )
+
+    async def initialize(
+        self,
+        *,
+        protocol_version: int = 1,
+        client_capabilities: dict[str, Any] | None = None,
+        client_info: dict[str, Any] | None = None,
+        transport: Literal["http", "ws"] = "http",
+    ) -> InitializeResult:
+        """Выполняет `initialize` и возвращает типизированный negotiated result.
+
+        Пример использования:
+            result = await client.initialize(transport="ws")
+        """
+
+        params: dict[str, Any] = {
+            "protocolVersion": protocol_version,
+            "clientCapabilities": client_capabilities or {},
+        }
+        if client_info is not None:
+            params["clientInfo"] = client_info
+
+        response = await self.request(
+            method="initialize",
+            params=params,
+            transport=transport,
+        )
+        return parse_initialize_result(response)
 
     async def _request_http(self, method: str, params: dict | None = None) -> ACPMessage:
         """Отправляет одиночный JSON-RPC request через HTTP endpoint `/acp`.

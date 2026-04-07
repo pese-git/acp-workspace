@@ -193,6 +193,44 @@ class ACPMessage(BaseModel):
         return payload
 
 
+class AgentCapabilities(BaseModel):
+    """Ключевые capability-поля агента из ответа `initialize`.
+
+    Пример использования:
+        AgentCapabilities.model_validate({
+            "loadSession": True,
+            "promptCapabilities": {},
+            "mcpCapabilities": {},
+            "sessionCapabilities": {},
+        })
+    """
+
+    loadSession: bool = False
+    promptCapabilities: dict[str, Any] = {}
+    mcpCapabilities: dict[str, Any] = {}
+    sessionCapabilities: dict[str, Any] = {}
+    model_config = ConfigDict(extra="allow")
+
+
+class InitializeResult(BaseModel):
+    """Типизированный `result` успешного ответа на `initialize`.
+
+    Пример использования:
+        InitializeResult.model_validate({
+            "protocolVersion": 1,
+            "agentCapabilities": {"loadSession": True},
+            "agentInfo": {"name": "agent", "version": "1.0.0"},
+            "authMethods": [],
+        })
+    """
+
+    protocolVersion: int
+    agentCapabilities: AgentCapabilities
+    agentInfo: dict[str, Any] | None = None
+    authMethods: list[Any] = []
+    model_config = ConfigDict(extra="allow")
+
+
 class SessionUpdatePayload(BaseModel):
     """Полезная нагрузка события `session/update`.
 
@@ -455,6 +493,24 @@ def parse_request_permission_request(payload: dict[str, Any]) -> RequestPermissi
     if payload.get("method") != "session/request_permission":
         return None
     return RequestPermissionRequest.model_validate(payload)
+
+
+def parse_initialize_result(message: ACPMessage) -> InitializeResult:
+    """Преобразует JSON-RPC response в типизированный `initialize` result.
+
+    Бросает `ValueError`, если response содержит `error` или не имеет корректного
+    объекта `result`.
+
+    Пример использования:
+        parsed = parse_initialize_result(response)
+    """
+
+    if message.error is not None:
+        msg = f"Initialize failed: {message.error.code} {message.error.message}"
+        raise ValueError(msg)
+    if not isinstance(message.result, dict):
+        raise ValueError("Initialize response must contain object result")
+    return InitializeResult.model_validate(message.result)
 
 
 def parse_json_params(value: str | None) -> dict[str, Any]:

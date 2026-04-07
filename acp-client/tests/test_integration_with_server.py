@@ -46,6 +46,51 @@ async def test_http_client_server_ping() -> None:
 
 
 @pytest.mark.asyncio
+async def test_initialize_helper_parses_response() -> None:
+    async def handle_http_request(request: web.Request) -> web.Response:
+        payload = await request.json()
+        assert payload["method"] == "initialize"
+        return web.json_response(
+            {
+                "jsonrpc": "2.0",
+                "id": payload["id"],
+                "result": {
+                    "protocolVersion": 1,
+                    "agentCapabilities": {
+                        "loadSession": True,
+                        "promptCapabilities": {
+                            "image": False,
+                            "audio": False,
+                            "embeddedContext": False,
+                        },
+                        "mcpCapabilities": {"http": False, "sse": False},
+                        "sessionCapabilities": {"list": {}},
+                    },
+                    "agentInfo": {"name": "acp-server", "version": "0.1.0"},
+                    "authMethods": [],
+                },
+            }
+        )
+
+    port = _get_free_port()
+    app = web.Application()
+    app.router.add_post("/acp", handle_http_request)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="127.0.0.1", port=port)
+    await site.start()
+
+    try:
+        client = ACPClient(host="127.0.0.1", port=port)
+        result = await client.initialize(transport="http")
+        assert result.protocolVersion == 1
+        assert result.agentCapabilities.loadSession is True
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
 async def test_list_all_sessions_walks_http_pagination() -> None:
     pages = [
         {
