@@ -1,8 +1,7 @@
-"""HTTP/WS транспорт ACP-сервера.
+"""WebSocket транспорт ACP-сервера.
 
-Модуль поднимает два endpoint:
-- `POST /acp` для одиночных request/response,
-- `GET /acp/ws` для двустороннего потока с `session/update`.
+Модуль поднимает endpoint `GET /acp/ws` для двустороннего потока с
+`session/update` и server->client RPC.
 
 Пример использования:
     server = ACPHttpServer(host="127.0.0.1", port=8080)
@@ -14,14 +13,13 @@ from __future__ import annotations
 import asyncio
 
 from aiohttp import WSMsgType, web
-from pydantic import ValidationError
 
 from .messages import ACPMessage
 from .protocol import ACPProtocol, ProtocolOutcome
 
 
 class ACPHttpServer:
-    """Транспортный слой ACP поверх aiohttp (HTTP + WebSocket).
+    """Транспортный слой ACP поверх aiohttp (WebSocket-only).
 
     Класс принимает wire-сообщения, передает их в `ACPProtocol` и отправляет
     обратно response/notifications в правильном порядке.
@@ -43,102 +41,26 @@ class ACPHttpServer:
         self.protocol = ACPProtocol()
 
     async def run(self) -> None:
-        """Запускает HTTP и WS endpoints и держит процесс живым.
+        """Запускает WS endpoint и держит процесс живым.
 
         Пример использования:
             await ACPHttpServer().run()
         """
 
         app = web.Application()
-        app.router.add_post("/acp", self.handle_http_request)
         app.router.add_get("/acp/ws", self.handle_ws_request)
 
         runner = web.AppRunner(app)
         await runner.setup()
         site = web.TCPSite(runner, host=self.host, port=self.port)
         await site.start()
-        print(f"ACP HTTP/WS server listening on http://{self.host}:{self.port}")
+        print(f"ACP WS server listening on ws://{self.host}:{self.port}/acp/ws")
 
         try:
             while True:
                 await asyncio.sleep(3600)
         finally:
             await runner.cleanup()
-
-    async def handle_http_request(self, request: web.Request) -> web.Response:
-        """Обрабатывает единичный JSON-RPC запрос через HTTP.
-
-        Пример использования:
-            # вызывается aiohttp автоматически на POST /acp
-        """
-
-        try:
-            payload = await request.json()
-            acp_request = ACPMessage.from_dict(payload)
-            outcome = self.protocol.handle(acp_request)
-            if (
-                outcome.response is None
-                and acp_request.method == "session/prompt"
-                and isinstance(acp_request.params, dict)
-            ):
-                # HTTP не поддерживает agent->client RPC roundtrip (fs/*, permission).
-                # Если prompt запросил такой flow, возвращаем явную ошибку.
-                requires_bidirectional_rpc = any(
-                    notification.method
-                    in {
-                        "fs/read_text_file",
-                        "fs/write_text_file",
-                        "terminal/create",
-                        "terminal/output",
-                        "terminal/wait_for_exit",
-                        "terminal/release",
-                        "terminal/kill",
-                    }
-                    for notification in outcome.notifications
-                )
-                if requires_bidirectional_rpc:
-                    session_id = acp_request.params.get("sessionId")
-                    if isinstance(session_id, str):
-                        self.protocol.handle(
-                            ACPMessage.notification(
-                                "session/cancel",
-                                {"sessionId": session_id},
-                            )
-                        )
-                    error = ACPMessage.error_response(
-                        acp_request.id,
-                        code=-32000,
-                        message="fs client RPC requires WebSocket transport",
-                    )
-                    return web.json_response(error.to_dict(), status=200)
-
-                # Для HTTP финализируем deferred prompt сразу, чтобы не терять response.
-                session_id = acp_request.params.get("sessionId")
-                if isinstance(session_id, str):
-                    completed = self.protocol.complete_active_turn(
-                        session_id, stop_reason="end_turn"
-                    )
-                    if completed is not None:
-                        return web.json_response(completed.to_dict(), status=200)
-            if outcome.response is None:
-                return web.Response(status=204)
-            return web.json_response(outcome.response.to_dict(), status=200)
-        except ValidationError as exc:
-            error = ACPMessage.error_response(
-                None,
-                code=-32600,
-                message="Invalid Request",
-                data=str(exc),
-            )
-            return web.json_response(error.to_dict(), status=400)
-        except Exception as exc:
-            error = ACPMessage.error_response(
-                None,
-                code=-32700,
-                message="Parse error",
-                data=str(exc),
-            )
-            return web.json_response(error.to_dict(), status=400)
 
     async def handle_ws_request(self, request: web.Request) -> web.WebSocketResponse:
         """Обрабатывает WebSocket-сессию с поддержкой update-потока.

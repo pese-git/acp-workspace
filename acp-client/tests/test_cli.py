@@ -14,7 +14,6 @@ def test_run_client_show_updates_for_session_load(monkeypatch, capsys) -> None:
         session_id: str,
         cwd: str,
         mcp_servers: list[dict[str, Any]] | None = None,
-        transport: str = "ws",
     ) -> tuple[ACPMessage, list[SessionUpdateNotification]]:
         # Возвращаем минимальный валидный ответ и одно типизированное replay-событие.
         response = ACPMessage(id="req_1", result=None)
@@ -37,8 +36,6 @@ def test_run_client_show_updates_for_session_load(monkeypatch, capsys) -> None:
         "sys.argv",
         [
             "acp-client",
-            "--transport",
-            "ws",
             "--method",
             "session/load",
             "--params",

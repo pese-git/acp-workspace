@@ -17,8 +17,8 @@
 | `session/update: tool_call*` | Done | Создание/обновление/replay поддержаны. |
 | `session/update: plan` | Partial | Реализовано и типизировано, пока в demo-сценарии. |
 | `available_commands_update` | Done | Snapshot команд отправляется на prompt/load. |
-| HTTP transport | Done | Рабочий запрос-ответ и совместимость с deferred turn. |
-| WebSocket transport | Partial | Поддержан поток updates и deferred response; требуются дополнительные hardening-сценарии. |
+| HTTP transport | Removed | Проект переведен в WS-only режим, HTTP endpoint удален. |
+| WebSocket transport | Done | Поддержан update-поток, deferred response и agent->client RPC (permission/fs/terminal). |
 
 ## Приоритетный backlog
 

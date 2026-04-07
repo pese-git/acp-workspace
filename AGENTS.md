@@ -49,9 +49,9 @@ uv run --directory acp-client python -m pytest
 - Сервер:
   - `acp-server/src/acp_server/protocol.py` — обработка ACP-методов
   - `acp-server/src/acp_server/server.py` — TCP транспорт
-  - `acp-server/src/acp_server/http_server.py` — HTTP/WS транспорт
+  - `acp-server/src/acp_server/http_server.py` — WS транспорт
 - Клиент:
-  - `acp-client/src/acp_client/client.py` — TCP/HTTP/WS запросы
+  - `acp-client/src/acp_client/client.py` — TCP/WS запросы
   - `acp-client/src/acp_client/cli.py` — CLI
 - Сообщения:
   - `acp-server/src/acp_server/messages.py`

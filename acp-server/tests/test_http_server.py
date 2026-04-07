@@ -19,12 +19,11 @@ def _get_free_port() -> int:
 
 
 async def _start_test_server() -> tuple[web.AppRunner, int]:
-    """Поднимает aiohttp-приложение с ACP HTTP/WS handlers."""
+    """Поднимает aiohttp-приложение с ACP WS handler."""
 
     port = _get_free_port()
     server = ACPHttpServer(host="127.0.0.1", port=port)
     app = web.Application()
-    app.router.add_post("/acp", server.handle_http_request)
     app.router.add_get("/acp/ws", server.handle_ws_request)
 
     runner = web.AppRunner(app)
@@ -54,45 +53,6 @@ async def _ws_initialize(ws: Any) -> None:
     payload = await asyncio.wait_for(ws.receive_json(), timeout=1.0)
     assert payload["id"] == "init_1"
     assert payload.get("error") is None
-
-
-@pytest.mark.asyncio
-async def test_http_prompt_with_pending_tool_returns_end_turn() -> None:
-    runner, port = await _start_test_server()
-
-    try:
-        async with ClientSession() as session:
-            new_response = await session.post(
-                f"http://127.0.0.1:{port}/acp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": "new_1",
-                    "method": "session/new",
-                    "params": {"cwd": "/tmp", "mcpServers": []},
-                },
-            )
-            new_payload = await new_response.json()
-            session_id = new_payload["result"]["sessionId"]
-
-            prompt_response = await session.post(
-                f"http://127.0.0.1:{port}/acp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": "prompt_1",
-                    "method": "session/prompt",
-                    "params": {
-                        "sessionId": session_id,
-                        "prompt": [{"type": "text", "text": "/tool-pending run"}],
-                    },
-                },
-            )
-            prompt_payload = await prompt_response.json()
-
-            assert prompt_response.status == 200
-            assert prompt_payload["id"] == "prompt_1"
-            assert prompt_payload["result"] == {"stopReason": "end_turn"}
-    finally:
-        await runner.cleanup()
 
 
 @pytest.mark.asyncio

@@ -4,7 +4,7 @@
 Для `session/load` поддержан режим показа replay/update-событий.
 
 Пример использования:
-    acp-client --transport ws --method session/load --show-updates --params '{...}'
+    acp-client --method session/load --show-updates --params '{...}'
 """
 
 from __future__ import annotations
@@ -32,7 +32,6 @@ def run_client() -> None:
     """
 
     parser = argparse.ArgumentParser(prog="acp-client")
-    parser.add_argument("--transport", choices=["http", "ws"], default="http")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)
     parser.add_argument("--method", required=True)
@@ -65,7 +64,6 @@ def run_client() -> None:
                 session_id=session_id,
                 cwd=cwd,
                 mcp_servers=[item for item in mcp_servers if isinstance(item, dict)],
-                transport=args.transport,
             )
         )
         payload: dict[str, Any] = {
@@ -80,7 +78,6 @@ def run_client() -> None:
         client.request(
             method=args.method,
             params=params,
-            transport=args.transport,
         )
     )
     print(json.dumps(response.to_dict(), indent=2, ensure_ascii=False))

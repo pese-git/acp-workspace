@@ -1,5 +1,5 @@
 .PHONY: server-sync server-check client-sync client-check check \
-	run-server-http run-server-ws ping-http ping-ws
+	run-server-ws ping-ws
 
 HOST ?= 127.0.0.1
 HTTP_PORT ?= 8080
@@ -22,14 +22,8 @@ client-check:
 
 check: server-check client-check
 
-run-server-http:
-	uv run --directory acp-server acp-server --transport http --host $(HOST) --port $(HTTP_PORT)
-
 run-server-ws:
-	uv run --directory acp-server acp-server --transport ws --host $(HOST) --port $(HTTP_PORT)
-
-ping-http:
-	uv run --directory acp-client acp-client --transport http --host $(HOST) --port $(HTTP_PORT) --method ping
+	uv run --directory acp-server acp-server --host $(HOST) --port $(HTTP_PORT)
 
 ping-ws:
-	uv run --directory acp-client acp-client --transport ws --host $(HOST) --port $(HTTP_PORT) --method ping
+	uv run --directory acp-client acp-client --host $(HOST) --port $(HTTP_PORT) --method ping

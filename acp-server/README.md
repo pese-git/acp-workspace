@@ -1,8 +1,7 @@
 # ACP Server
 
-Серверная часть Agent Client Protocol (ACP) с транспортами:
+Серверная часть Agent Client Protocol (ACP) с WebSocket транспортом:
 
-- HTTP (`POST /acp`)
 - WebSocket (`GET /acp/ws`)
 
 ## Установка
@@ -14,8 +13,7 @@ uv sync
 ## Запуск
 
 ```bash
-uv run acp-server --transport http --host 127.0.0.1 --port 8080
-uv run acp-server --transport ws --host 127.0.0.1 --port 8080
+uv run acp-server --host 127.0.0.1 --port 8080
 ```
 
 ## ACP методы
@@ -41,7 +39,6 @@ uv run acp-server --transport ws --host 127.0.0.1 --port 8080
 - Для demo-сценариев с маркером `[plan]` сервер отправляет `session/update` с `sessionUpdate: "plan"`.
 - Для demo-сценариев также поддержаны slash-команды `/plan`, `/tool`, `/tool-pending` (с fallback на старые маркеры).
 - Если turn отменяется методом `session/cancel`, исходный `session/prompt` завершается с `stopReason: "cancelled"`.
-- Через HTTP deferred-turn сразу финализируется в том же запросе, чтобы клиент всегда получил JSON-RPC response.
 
 ### Поведение `session/list`
 

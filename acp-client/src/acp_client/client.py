@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from typing import Any, Literal
+from typing import Any
 
 from aiohttp import ClientSession, WSMsgType
 
@@ -38,7 +38,7 @@ type TerminalKillHandler = Callable[[str], bool]
 
 
 class ACPClient:
-    """Асинхронный ACP-клиент с поддержкой HTTP и WebSocket транспорта.
+    """Асинхронный ACP-клиент с WebSocket транспортом.
 
     Класс предоставляет:
     - универсальный метод `request`,
@@ -47,7 +47,7 @@ class ACPClient:
 
     Пример использования:
         client = ACPClient(host="127.0.0.1", port=8080)
-        response = await client.request("initialize", transport="http")
+        response = await client.request("initialize")
     """
 
     def __init__(self, host: str = "127.0.0.1", port: int = 8765) -> None:
@@ -83,7 +83,6 @@ class ACPClient:
         self,
         method: str,
         params: dict | None = None,
-        transport: Literal["http", "ws"] = "http",
         on_update: Callable[[dict], None] | None = None,
         on_permission: PermissionHandler | None = None,
         on_fs_read: FsReadHandler | None = None,
@@ -94,18 +93,16 @@ class ACPClient:
         on_terminal_release: TerminalReleaseHandler | None = None,
         on_terminal_kill: TerminalKillHandler | None = None,
     ) -> ACPMessage:
-        """Выполняет ACP-запрос через выбранный транспорт.
+        """Выполняет ACP-запрос через WebSocket транспорт.
 
         Для WS может принимать `on_update`, который вызывается на каждый
         `session/update` до финального response. Также может принимать
         `on_permission` для обработки `session/request_permission`.
 
         Пример использования:
-            await client.request("session/list", transport="http")
+            await client.request("session/list")
         """
 
-        if transport == "http":
-            return await self._request_http(method=method, params=params)
         return await self._request_ws(
             method=method,
             params=params,
@@ -126,12 +123,11 @@ class ACPClient:
         protocol_version: int = 1,
         client_capabilities: dict[str, Any] | None = None,
         client_info: dict[str, Any] | None = None,
-        transport: Literal["http", "ws"] = "http",
     ) -> InitializeResult:
         """Выполняет `initialize` и возвращает типизированный negotiated result.
 
         Пример использования:
-            result = await client.initialize(transport="ws")
+            result = await client.initialize()
         """
 
         params: dict[str, Any] = {
@@ -144,26 +140,8 @@ class ACPClient:
         response = await self.request(
             method="initialize",
             params=params,
-            transport=transport,
         )
         return parse_initialize_result(response)
-
-    async def _request_http(self, method: str, params: dict | None = None) -> ACPMessage:
-        """Отправляет одиночный JSON-RPC request через HTTP endpoint `/acp`.
-
-        Пример использования:
-            response = await client._request_http("ping", {})
-        """
-
-        request = ACPMessage.request(method=method, params=params)
-        url = f"http://{self.host}:{self.port}/acp"
-
-        async with (
-            ClientSession() as session,
-            session.post(url, json=request.to_dict()) as response,
-        ):
-            payload = await response.json()
-            return ACPMessage.from_dict(payload)
 
     async def _request_ws(
         self,
@@ -517,7 +495,6 @@ class ACPClient:
         session_id: str,
         cwd: str,
         mcp_servers: list[dict[str, Any]] | None = None,
-        transport: Literal["http", "ws"] = "ws",
     ) -> tuple[ACPMessage, list[dict[str, Any]]]:
         """Выполняет `session/load` и возвращает response вместе с raw updates.
 
@@ -528,7 +505,6 @@ class ACPClient:
             response, updates = await client.load_session(
                 session_id="sess_1",
                 cwd="/tmp",
-                transport="ws",
             )
         """
 
@@ -541,7 +517,6 @@ class ACPClient:
         response = await self.request(
             method="session/load",
             params=params,
-            transport=transport,
             on_update=updates.append,
         )
         return response, updates
@@ -552,7 +527,6 @@ class ACPClient:
         session_id: str,
         cwd: str,
         mcp_servers: list[dict[str, Any]] | None = None,
-        transport: Literal["http", "ws"] = "ws",
     ) -> tuple[ACPMessage, list[SessionUpdateNotification]]:
         """Выполняет `session/load` и возвращает типизированные update-события.
 
@@ -563,7 +537,6 @@ class ACPClient:
             response, updates = await client.load_session_parsed(
                 session_id="sess_1",
                 cwd="/tmp",
-                transport="ws",
             )
         """
 
@@ -571,7 +544,6 @@ class ACPClient:
             session_id=session_id,
             cwd=cwd,
             mcp_servers=mcp_servers,
-            transport=transport,
         )
 
         parsed_updates: list[SessionUpdateNotification] = []
@@ -591,7 +563,6 @@ class ACPClient:
         session_id: str,
         cwd: str,
         mcp_servers: list[dict[str, Any]] | None = None,
-        transport: Literal["http", "ws"] = "ws",
     ) -> tuple[ACPMessage, list[ToolCallUpdate]]:
         """Выполняет `session/load` и выделяет только tool-call update-события.
 
@@ -602,7 +573,6 @@ class ACPClient:
             response, tool_updates = await client.load_session_tool_updates(
                 session_id="sess_1",
                 cwd="/tmp",
-                transport="ws",
             )
         """
 
@@ -610,7 +580,6 @@ class ACPClient:
             session_id=session_id,
             cwd=cwd,
             mcp_servers=mcp_servers,
-            transport=transport,
         )
         tool_updates: list[ToolCallUpdate] = []
         for update in updates:
@@ -626,7 +595,6 @@ class ACPClient:
         session_id: str,
         cwd: str,
         mcp_servers: list[dict[str, Any]] | None = None,
-        transport: Literal["http", "ws"] = "ws",
     ) -> tuple[ACPMessage, list[PlanUpdate]]:
         """Выполняет `session/load` и выделяет только plan update-события.
 
@@ -637,7 +605,6 @@ class ACPClient:
             response, plans = await client.load_session_plan_updates(
                 session_id="sess_1",
                 cwd="/tmp",
-                transport="ws",
             )
         """
 
@@ -645,7 +612,6 @@ class ACPClient:
             session_id=session_id,
             cwd=cwd,
             mcp_servers=mcp_servers,
-            transport=transport,
         )
         plan_updates: list[PlanUpdate] = []
         for update in updates:
@@ -660,12 +626,11 @@ class ACPClient:
         *,
         cwd: str | None = None,
         cursor: str | None = None,
-        transport: Literal["http", "ws"] = "http",
     ) -> ACPMessage:
         """Запрашивает одну страницу `session/list` с optional фильтрами.
 
         Пример использования:
-            response = await client.list_sessions(cwd="/tmp", transport="http")
+            response = await client.list_sessions(cwd="/tmp")
         """
 
         params: dict[str, Any] = {}
@@ -673,13 +638,12 @@ class ACPClient:
             params["cwd"] = cwd
         if cursor is not None:
             params["cursor"] = cursor
-        return await self.request(method="session/list", params=params, transport=transport)
+        return await self.request(method="session/list", params=params)
 
     async def list_all_sessions(
         self,
         *,
         cwd: str | None = None,
-        transport: Literal["http", "ws"] = "http",
     ) -> list[dict[str, Any]]:
         """Возвращает все сессии, последовательно проходя cursor-пагинацию.
 
@@ -687,14 +651,14 @@ class ACPClient:
         исключением `RuntimeError`, чтобы клиент явно увидел нарушение контракта.
 
         Пример использования:
-            sessions = await client.list_all_sessions(cwd="/tmp", transport="http")
+            sessions = await client.list_all_sessions(cwd="/tmp")
         """
 
         collected: list[dict[str, Any]] = []
         cursor: str | None = None
 
         while True:
-            response = await self.list_sessions(cwd=cwd, cursor=cursor, transport=transport)
+            response = await self.list_sessions(cwd=cwd, cursor=cursor)
             if not isinstance(response.result, dict):
                 msg = "Invalid session/list result: expected object"
                 raise RuntimeError(msg)
@@ -722,7 +686,6 @@ class ACPClient:
         *,
         cwd: str | None = None,
         cursor: str | None = None,
-        transport: Literal["http", "ws"] = "http",
     ) -> SessionListResult:
         """Запрашивает страницу `session/list` и валидирует ответ.
 
@@ -730,14 +693,13 @@ class ACPClient:
             page = await client.list_sessions_parsed(cwd="/tmp")
         """
 
-        response = await self.list_sessions(cwd=cwd, cursor=cursor, transport=transport)
+        response = await self.list_sessions(cwd=cwd, cursor=cursor)
         return parse_session_list_result(response)
 
     async def list_all_sessions_parsed(
         self,
         *,
         cwd: str | None = None,
-        transport: Literal["http", "ws"] = "http",
     ) -> list[SessionListItem]:
         """Возвращает все сессии как типизированные элементы `SessionListItem`.
 
@@ -752,7 +714,6 @@ class ACPClient:
             page = await self.list_sessions_parsed(
                 cwd=cwd,
                 cursor=cursor,
-                transport=transport,
             )
             collected.extend(page.sessions)
             if page.nextCursor is None:
@@ -766,12 +727,11 @@ class ACPClient:
         *,
         cwd: str,
         mcp_servers: list[dict[str, Any]] | None = None,
-        transport: Literal["http", "ws"] = "http",
     ) -> SessionSetupResult:
         """Создает сессию через `session/new` и валидирует ответ.
 
         Пример использования:
-            created = await client.create_session_parsed(cwd="/tmp", transport="http")
+            created = await client.create_session_parsed(cwd="/tmp")
         """
 
         response = await self.request(
@@ -780,7 +740,6 @@ class ACPClient:
                 "cwd": cwd,
                 "mcpServers": mcp_servers or [],
             },
-            transport=transport,
         )
         return parse_session_setup_result(response, method_name="session/new")
 
@@ -790,7 +749,6 @@ class ACPClient:
         session_id: str,
         cwd: str,
         mcp_servers: list[dict[str, Any]] | None = None,
-        transport: Literal["http", "ws"] = "ws",
     ) -> tuple[SessionSetupResult, list[SessionUpdateNotification]]:
         """Загружает сессию и возвращает typed state + typed replay updates.
 
@@ -805,7 +763,6 @@ class ACPClient:
             session_id=session_id,
             cwd=cwd,
             mcp_servers=mcp_servers,
-            transport=transport,
         )
         parsed = parse_session_setup_result(response, method_name="session/load")
         return parsed, updates
@@ -816,7 +773,6 @@ class ACPClient:
         session_id: str,
         cwd: str,
         mcp_servers: list[dict[str, Any]] | None = None,
-        transport: Literal["http", "ws"] = "ws",
     ) -> tuple[ACPMessage, list[StructuredSessionUpdate]]:
         """Загружает сессию и возвращает только известные typed update payload.
 
@@ -831,7 +787,6 @@ class ACPClient:
             session_id=session_id,
             cwd=cwd,
             mcp_servers=mcp_servers,
-            transport=transport,
         )
         structured: list[StructuredSessionUpdate] = []
         for update in updates:
@@ -847,19 +802,14 @@ class ACPClient:
         session_id: str,
         config_id: str,
         value: str,
-        transport: Literal["http", "ws"] = "ws",
     ) -> tuple[ACPMessage, list[StructuredSessionUpdate]]:
         """Меняет config option и возвращает typed update-события из WS-потока.
-
-        Для HTTP-транспорта список updates обычно пустой, так как notification-
-        поток в этом режиме не передается отдельными сообщениями.
 
         Пример использования:
             response, updates = await client.set_config_option_with_updates(
                 session_id="sess_1",
                 config_id="mode",
                 value="code",
-                transport="ws",
             )
         """
 
@@ -871,7 +821,6 @@ class ACPClient:
                 "configId": config_id,
                 "value": value,
             },
-            transport=transport,
             on_update=raw_updates.append,
         )
 
