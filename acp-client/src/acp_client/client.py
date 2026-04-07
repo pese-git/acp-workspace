@@ -7,7 +7,7 @@ from typing import Any
 import structlog
 from aiohttp import ClientSession, WSMsgType
 
-from .handlers import build_permission_result, handle_server_fs_request
+from .handlers import build_permission_result, handle_server_fs_request, handle_server_terminal_request
 from .helpers import (
     extract_plan_updates,
     extract_structured_updates,
@@ -372,7 +372,7 @@ class ACPClient:
                 await ws.send_str(handled_fs_request.to_json())
                 continue
 
-            handled_terminal_request = self._handle_server_terminal_request(
+            handled_terminal_request = handle_server_terminal_request(
                 payload=payload,
                 on_terminal_create=on_terminal_create,
                 on_terminal_output=on_terminal_output,
@@ -388,154 +388,6 @@ class ACPClient:
             if response.id != request_id:
                 continue
             return response
-
-    def _handle_server_terminal_request(
-        self,
-        *,
-        payload: dict[str, Any],
-        on_terminal_create: TerminalCreateHandler | None,
-        on_terminal_output: TerminalOutputHandler | None,
-        on_terminal_wait_for_exit: TerminalWaitHandler | None,
-        on_terminal_release: TerminalReleaseHandler | None,
-        on_terminal_kill: TerminalKillHandler | None,
-    ) -> ACPMessage | None:
-        """Обрабатывает server-originated `terminal/*` запрос и строит response.
-
-        Пример использования:
-            response = client._handle_server_terminal_request(payload=data, ...)
-        """
-
-        method = payload.get("method")
-        request_id = payload.get("id")
-        raw_params = payload.get("params")
-        params: dict[str, Any] = raw_params if isinstance(raw_params, dict) else {}
-
-        if method == "terminal/create":
-            if on_terminal_create is None:
-                return ACPMessage(
-                    id=request_id,
-                    error=JsonRpcError(
-                        code=-32601,
-                        message="Client does not support terminal/create",
-                    ),
-                )
-            command = params.get("command")
-            if not isinstance(command, str):
-                return ACPMessage(
-                    id=request_id,
-                    error=JsonRpcError(
-                        code=-32602,
-                        message="Invalid params: command must be a string",
-                    ),
-                )
-            return ACPMessage.response(request_id, {"terminalId": on_terminal_create(command)})
-
-        if method == "terminal/output":
-            if on_terminal_output is None:
-                return ACPMessage(
-                    id=request_id,
-                    error=JsonRpcError(
-                        code=-32601,
-                        message="Client does not support terminal/output",
-                    ),
-                )
-            terminal_id = params.get("terminalId")
-            if not isinstance(terminal_id, str):
-                return ACPMessage(
-                    id=request_id,
-                    error=JsonRpcError(
-                        code=-32602,
-                        message="Invalid params: terminalId must be a string",
-                    ),
-                )
-            return ACPMessage.response(
-                request_id,
-                {
-                    "output": on_terminal_output(terminal_id),
-                    "truncated": False,
-                    "exitStatus": None,
-                },
-            )
-
-        if method == "terminal/wait_for_exit":
-            if on_terminal_wait_for_exit is None:
-                return ACPMessage(
-                    id=request_id,
-                    error=JsonRpcError(
-                        code=-32601,
-                        message="Client does not support terminal/wait_for_exit",
-                    ),
-                )
-            terminal_id = params.get("terminalId")
-            if not isinstance(terminal_id, str):
-                return ACPMessage(
-                    id=request_id,
-                    error=JsonRpcError(
-                        code=-32602,
-                        message="Invalid params: terminalId must be a string",
-                    ),
-                )
-            wait_result = on_terminal_wait_for_exit(terminal_id)
-            exit_code: int | None
-            signal: str | None
-            if isinstance(wait_result, tuple):
-                tuple_exit_code, tuple_signal = wait_result
-                exit_code = tuple_exit_code if isinstance(tuple_exit_code, int) else None
-                signal = tuple_signal if isinstance(tuple_signal, str) else None
-            else:
-                exit_code = wait_result if isinstance(wait_result, int) else None
-                signal = None
-            return ACPMessage.response(
-                request_id,
-                {
-                    "exitCode": exit_code,
-                    "signal": signal,
-                },
-            )
-
-        if method == "terminal/release":
-            if on_terminal_release is None:
-                return ACPMessage(
-                    id=request_id,
-                    error=JsonRpcError(
-                        code=-32601,
-                        message="Client does not support terminal/release",
-                    ),
-                )
-            terminal_id = params.get("terminalId")
-            if not isinstance(terminal_id, str):
-                return ACPMessage(
-                    id=request_id,
-                    error=JsonRpcError(
-                        code=-32602,
-                        message="Invalid params: terminalId must be a string",
-                    ),
-                )
-            on_terminal_release(terminal_id)
-            return ACPMessage.response(request_id, {})
-
-        if method == "terminal/kill":
-            if on_terminal_kill is None:
-                return ACPMessage(
-                    id=request_id,
-                    error=JsonRpcError(
-                        code=-32601,
-                        message="Client does not support terminal/kill",
-                    ),
-                )
-            terminal_id = params.get("terminalId")
-            if not isinstance(terminal_id, str):
-                return ACPMessage(
-                    id=request_id,
-                    error=JsonRpcError(
-                        code=-32602,
-                        message="Invalid params: terminalId must be a string",
-                    ),
-                )
-            _ = on_terminal_kill(terminal_id)
-            return ACPMessage.response(request_id, {})
-
-        return None
 
     async def _perform_ws_initialize(self, ws: Any) -> InitializeResult:
         """Выполняет ACP initialize в открытом WS-соединении.
