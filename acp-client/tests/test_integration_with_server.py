@@ -271,6 +271,83 @@ async def test_load_session_tool_updates_filters_non_tool_events() -> None:
 
 
 @pytest.mark.asyncio
+async def test_load_session_plan_updates_filters_non_plan_events() -> None:
+    async def handle_ws_request(request: web.Request) -> web.WebSocketResponse:
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        async for message in ws:
+            payload = json.loads(message.data)
+            assert payload["method"] == "session/load"
+            await ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "session/update",
+                    "params": {
+                        "sessionId": "sess_4",
+                        "update": {
+                            "sessionUpdate": "agent_message_chunk",
+                            "content": {"type": "text", "text": "hello"},
+                        },
+                    },
+                }
+            )
+            await ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "session/update",
+                    "params": {
+                        "sessionId": "sess_4",
+                        "update": {
+                            "sessionUpdate": "plan",
+                            "entries": [
+                                {
+                                    "content": "Проверить входные данные",
+                                    "priority": "high",
+                                    "status": "in_progress",
+                                }
+                            ],
+                        },
+                    },
+                }
+            )
+            await ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": payload["id"],
+                    "result": {
+                        "configOptions": [],
+                        "modes": {"availableModes": [], "currentModeId": "ask"},
+                    },
+                }
+            )
+            break
+        return ws
+
+    port = _get_free_port()
+    app = web.Application()
+    app.router.add_get("/acp/ws", handle_ws_request)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="127.0.0.1", port=port)
+    await site.start()
+
+    try:
+        client = ACPClient(host="127.0.0.1", port=port)
+        response, plan_updates = await client.load_session_plan_updates(
+            session_id="sess_4",
+            cwd="/tmp",
+            mcp_servers=[],
+            transport="ws",
+        )
+        assert isinstance(response.result, dict)
+        assert len(plan_updates) == 1
+        assert plan_updates[0].entries[0].priority == "high"
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
 async def test_ws_client_receives_updates() -> None:
     async def handle_ws_request(request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse()

@@ -8,8 +8,10 @@ from aiohttp import ClientSession, WSMsgType
 
 from .messages import (
     ACPMessage,
+    PlanUpdate,
     SessionUpdateNotification,
     ToolCallUpdate,
+    parse_plan_update,
     parse_request_permission_request,
     parse_session_update_notification,
     parse_tool_call_update,
@@ -268,3 +270,38 @@ class ACPClient:
                 continue
             tool_updates.append(parsed)
         return response, tool_updates
+
+    async def load_session_plan_updates(
+        self,
+        *,
+        session_id: str,
+        cwd: str,
+        mcp_servers: list[dict[str, Any]] | None = None,
+        transport: Literal["http", "ws"] = "ws",
+    ) -> tuple[ACPMessage, list[PlanUpdate]]:
+        """Выполняет `session/load` и выделяет только plan update-события.
+
+        Метод полезен клиентам, которые показывают пользователю только текущий
+        план выполнения без остальных `session/update` событий.
+
+        Пример использования:
+            response, plans = await client.load_session_plan_updates(
+                session_id="sess_1",
+                cwd="/tmp",
+                transport="ws",
+            )
+        """
+
+        response, updates = await self.load_session_parsed(
+            session_id=session_id,
+            cwd=cwd,
+            mcp_servers=mcp_servers,
+            transport=transport,
+        )
+        plan_updates: list[PlanUpdate] = []
+        for update in updates:
+            parsed = parse_plan_update(update)
+            if parsed is None:
+                continue
+            plan_updates.append(parsed)
+        return response, plan_updates
