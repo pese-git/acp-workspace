@@ -1,6 +1,13 @@
 import pytest
 
-from acp_client.messages import ACPMessage, parse_json_params, parse_session_update_notification
+from acp_client.messages import (
+    ACPMessage,
+    ToolCallCreatedUpdate,
+    ToolCallStateUpdate,
+    parse_json_params,
+    parse_session_update_notification,
+    parse_tool_call_update,
+)
 
 
 def test_parse_json_params_object() -> None:
@@ -45,3 +52,55 @@ def test_parse_session_update_notification_ignores_other_methods() -> None:
     }
     parsed = parse_session_update_notification(payload)
     assert parsed is None
+
+
+def test_parse_tool_call_created_update() -> None:
+    notification = parse_session_update_notification(
+        {
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": "sess_1",
+                "update": {
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "call_001",
+                    "title": "Demo tool",
+                    "kind": "other",
+                    "status": "pending",
+                },
+            },
+        }
+    )
+    assert notification is not None
+
+    parsed = parse_tool_call_update(notification)
+    assert isinstance(parsed, ToolCallCreatedUpdate)
+    assert parsed.toolCallId == "call_001"
+
+
+def test_parse_tool_call_state_update() -> None:
+    notification = parse_session_update_notification(
+        {
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": "sess_1",
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "call_001",
+                    "status": "completed",
+                    "content": [
+                        {
+                            "type": "content",
+                            "content": {"type": "text", "text": "ok"},
+                        }
+                    ],
+                },
+            },
+        }
+    )
+    assert notification is not None
+
+    parsed = parse_tool_call_update(notification)
+    assert isinstance(parsed, ToolCallStateUpdate)
+    assert parsed.status == "completed"

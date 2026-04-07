@@ -376,6 +376,41 @@ class ACPProtocol:
                         )
                     )
 
+        # Реплеим текущее состояние tool calls, чтобы клиент восстановил UI.
+        for tool_call in session.tool_calls.values():
+            notifications.append(
+                ACPMessage.notification(
+                    "session/update",
+                    {
+                        "sessionId": session_id,
+                        "update": {
+                            "sessionUpdate": "tool_call",
+                            "toolCallId": tool_call.tool_call_id,
+                            "title": tool_call.title,
+                            "kind": tool_call.kind,
+                            "status": "pending",
+                        },
+                    },
+                )
+            )
+            if tool_call.status != "pending":
+                update_payload: dict[str, Any] = {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": tool_call.tool_call_id,
+                    "status": tool_call.status,
+                }
+                if tool_call.content:
+                    update_payload["content"] = tool_call.content
+                notifications.append(
+                    ACPMessage.notification(
+                        "session/update",
+                        {
+                            "sessionId": session_id,
+                            "update": update_payload,
+                        },
+                    )
+                )
+
         notifications.append(
             ACPMessage.notification(
                 "session/update",
@@ -713,15 +748,55 @@ class ACPProtocol:
                 request_id,
                 {"configOptions": config_options},
             ),
-            notifications=[
-                config_notification,
-                self._session_info_notification(
-                    session_id=session_id,
-                    title=None,
-                    updated_at=session.updated_at,
-                ),
-            ],
+            notifications=self._build_config_update_notifications(
+                session_id=session_id,
+                config_id=config_id,
+                session=session,
+                config_notification=config_notification,
+            ),
         )
+
+    def _build_config_update_notifications(
+        self,
+        *,
+        session_id: str,
+        config_id: str,
+        session: SessionState,
+        config_notification: ACPMessage,
+    ) -> list[ACPMessage]:
+        """Формирует набор notifications после обновления config option.
+
+        Пример использования:
+            notes = protocol._build_config_update_notifications(
+                session_id="sess_1",
+                config_id="mode",
+                session=state,
+                config_notification=cfg_note,
+            )
+        """
+
+        notifications: list[ACPMessage] = [config_notification]
+        if config_id == "mode":
+            notifications.append(
+                ACPMessage.notification(
+                    "session/update",
+                    {
+                        "sessionId": session_id,
+                        "update": {
+                            "sessionUpdate": "current_mode_update",
+                            "currentModeId": session.config_values.get("mode", "ask"),
+                        },
+                    },
+                )
+            )
+        notifications.append(
+            self._session_info_notification(
+                session_id=session_id,
+                title=None,
+                updated_at=session.updated_at,
+            )
+        )
+        return notifications
 
     def _build_config_options(self, values: dict[str, str]) -> list[dict[str, Any]]:
         """Строит wire-представление списка config options для клиента.

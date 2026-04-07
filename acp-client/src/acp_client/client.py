@@ -6,7 +6,13 @@ from typing import Any, Literal
 
 from aiohttp import ClientSession, WSMsgType
 
-from .messages import ACPMessage, SessionUpdateNotification, parse_session_update_notification
+from .messages import (
+    ACPMessage,
+    SessionUpdateNotification,
+    ToolCallUpdate,
+    parse_session_update_notification,
+    parse_tool_call_update,
+)
 
 
 class ACPClient:
@@ -181,3 +187,38 @@ class ACPClient:
             parsed_updates.append(parsed)
 
         return raw_response, parsed_updates
+
+    async def load_session_tool_updates(
+        self,
+        *,
+        session_id: str,
+        cwd: str,
+        mcp_servers: list[dict[str, Any]] | None = None,
+        transport: Literal["http", "ws"] = "ws",
+    ) -> tuple[ACPMessage, list[ToolCallUpdate]]:
+        """Выполняет `session/load` и выделяет только tool-call update-события.
+
+        Метод удобен для UI/логики, которым важны только статусы инструментов,
+        без разбора остальных событий `session/update`.
+
+        Пример использования:
+            response, tool_updates = await client.load_session_tool_updates(
+                session_id="sess_1",
+                cwd="/tmp",
+                transport="ws",
+            )
+        """
+
+        response, updates = await self.load_session_parsed(
+            session_id=session_id,
+            cwd=cwd,
+            mcp_servers=mcp_servers,
+            transport=transport,
+        )
+        tool_updates: list[ToolCallUpdate] = []
+        for update in updates:
+            parsed = parse_tool_call_update(update)
+            if parsed is None:
+                continue
+            tool_updates.append(parsed)
+        return response, tool_updates

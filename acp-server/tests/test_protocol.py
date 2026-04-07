@@ -95,11 +95,13 @@ def test_set_config_option_updates_value() -> None:
     config_options = updated.response.result["configOptions"]
     mode = next(option for option in config_options if option["id"] == "mode")
     assert mode["currentValue"] == "code"
-    assert len(updated.notifications) == 2
+    assert len(updated.notifications) == 3
     assert updated.notifications[0].params is not None
     assert updated.notifications[0].params["update"]["sessionUpdate"] == "config_option_update"
     assert updated.notifications[1].params is not None
-    assert updated.notifications[1].params["update"]["sessionUpdate"] == "session_info_update"
+    assert updated.notifications[1].params["update"]["sessionUpdate"] == "current_mode_update"
+    assert updated.notifications[2].params is not None
+    assert updated.notifications[2].params["update"]["sessionUpdate"] == "session_info_update"
 
 
 def test_prompt_rejects_unsupported_content_type() -> None:
@@ -239,3 +241,42 @@ def test_session_load_replays_history_and_config() -> None:
     assert "config_option_update" in replay_updates
     assert "session_info_update" in replay_updates
     assert "available_commands_update" in replay_updates
+
+
+def test_session_load_replays_tool_call_state() -> None:
+    protocol = ACPProtocol()
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    prompt_outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "run [tool] with [tool-pending]"}],
+            },
+        )
+    )
+    assert prompt_outcome.response is not None
+
+    loaded = protocol.handle(
+        ACPMessage.request(
+            "session/load",
+            {
+                "sessionId": session_id,
+                "cwd": "/tmp",
+                "mcpServers": [],
+            },
+        )
+    )
+    assert loaded.response is not None
+
+    replay_updates = [
+        notification.params["update"]["sessionUpdate"]
+        for notification in loaded.notifications
+        if notification.params is not None
+    ]
+    assert "tool_call" in replay_updates
+    assert "tool_call_update" in replay_updates

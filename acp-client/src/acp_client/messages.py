@@ -234,6 +234,52 @@ class SessionUpdateNotification(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ToolCallCreatedUpdate(BaseModel):
+    """Типизированный payload для события `tool_call`.
+
+    Используется, когда агент объявляет новый вызов инструмента.
+
+    Пример использования:
+        ToolCallCreatedUpdate.model_validate({
+            "sessionUpdate": "tool_call",
+            "toolCallId": "call_001",
+            "title": "Demo tool",
+            "kind": "other",
+            "status": "pending",
+        })
+    """
+
+    sessionUpdate: Literal["tool_call"]
+    toolCallId: str
+    title: str
+    kind: str
+    status: Literal["pending"]
+    model_config = ConfigDict(extra="allow")
+
+
+class ToolCallStateUpdate(BaseModel):
+    """Типизированный payload для события `tool_call_update`.
+
+    Используется при изменении статуса уже созданного вызова инструмента.
+
+    Пример использования:
+        ToolCallStateUpdate.model_validate({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "call_001",
+            "status": "completed",
+        })
+    """
+
+    sessionUpdate: Literal["tool_call_update"]
+    toolCallId: str
+    status: Literal["in_progress", "completed", "cancelled", "failed"]
+    content: list[dict[str, Any]] | None = None
+    model_config = ConfigDict(extra="allow")
+
+
+type ToolCallUpdate = ToolCallCreatedUpdate | ToolCallStateUpdate
+
+
 def parse_session_update_notification(payload: dict[str, Any]) -> SessionUpdateNotification | None:
     """Пытается распарсить словарь как `session/update` notification.
 
@@ -247,6 +293,25 @@ def parse_session_update_notification(payload: dict[str, Any]) -> SessionUpdateN
     if payload.get("method") != "session/update":
         return None
     return SessionUpdateNotification.model_validate(payload)
+
+
+def parse_tool_call_update(update: SessionUpdateNotification) -> ToolCallUpdate | None:
+    """Пытается распарсить `session/update` как tool-call событие.
+
+    Возвращает `None`, если update относится к другому типу событий
+    (`agent_message_chunk`, `session_info_update`, и т.д.).
+
+    Пример использования:
+        parsed = parse_tool_call_update(notification)
+    """
+
+    payload = update.params.update.model_dump()
+    session_update_type = payload.get("sessionUpdate")
+    if session_update_type == "tool_call":
+        return ToolCallCreatedUpdate.model_validate(payload)
+    if session_update_type == "tool_call_update":
+        return ToolCallStateUpdate.model_validate(payload)
+    return None
 
 
 def parse_json_params(value: str | None) -> dict[str, Any]:
