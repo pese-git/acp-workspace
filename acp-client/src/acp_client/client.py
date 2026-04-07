@@ -7,7 +7,7 @@ from typing import Any
 import structlog
 from aiohttp import ClientSession, WSMsgType
 
-from .handlers import build_permission_result
+from .handlers import build_permission_result, handle_server_fs_request
 from .helpers import (
     extract_plan_updates,
     extract_structured_updates,
@@ -363,7 +363,7 @@ class ACPClient:
                 )
                 continue
 
-            handled_fs_request = self._handle_server_fs_request(
+            handled_fs_request = handle_server_fs_request(
                 payload=payload,
                 on_fs_read=on_fs_read,
                 on_fs_write=on_fs_write,
@@ -388,67 +388,6 @@ class ACPClient:
             if response.id != request_id:
                 continue
             return response
-
-    def _handle_server_fs_request(
-        self,
-        *,
-        payload: dict[str, Any],
-        on_fs_read: FsReadHandler | None,
-        on_fs_write: FsWriteHandler | None,
-    ) -> ACPMessage | None:
-        """Обрабатывает server-originated `fs/*` запрос и строит response.
-
-        Пример использования:
-            response = client._handle_server_fs_request(payload=data, ...)
-        """
-
-        method = payload.get("method")
-        request_id = payload.get("id")
-        params = payload.get("params")
-
-        if method == "fs/read_text_file":
-            if on_fs_read is None:
-                return ACPMessage(
-                    id=request_id,
-                    error=JsonRpcError(
-                        code=-32601,
-                        message="Client does not support fs/read_text_file",
-                    ),
-                )
-            path = params.get("path") if isinstance(params, dict) else None
-            if not isinstance(path, str):
-                return ACPMessage(
-                    id=request_id,
-                    error=JsonRpcError(
-                        code=-32602,
-                        message="Invalid params: path must be a string",
-                    ),
-                )
-            return ACPMessage.response(request_id, {"content": on_fs_read(path)})
-
-        if method == "fs/write_text_file":
-            if on_fs_write is None:
-                return ACPMessage(
-                    id=request_id,
-                    error=JsonRpcError(
-                        code=-32601,
-                        message="Client does not support fs/write_text_file",
-                    ),
-                )
-            path = params.get("path") if isinstance(params, dict) else None
-            content = params.get("content") if isinstance(params, dict) else None
-            if not isinstance(path, str) or not isinstance(content, str):
-                return ACPMessage(
-                    id=request_id,
-                    error=JsonRpcError(
-                        code=-32602,
-                        message="Invalid params: path and content must be strings",
-                    ),
-                )
-            _ = on_fs_write(path, content)
-            return ACPMessage.response(request_id, {})
-
-        return None
 
     def _handle_server_terminal_request(
         self,
