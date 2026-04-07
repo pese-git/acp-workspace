@@ -181,7 +181,7 @@ def test_cancel_marks_active_tool_call_as_cancelled() -> None:
             },
         )
     )
-    assert prompt_outcome.response is not None
+    assert prompt_outcome.response is None
 
     tool_call_update = next(
         notification
@@ -196,6 +196,9 @@ def test_cancel_marks_active_tool_call_as_cancelled() -> None:
         ACPMessage.notification("session/cancel", {"sessionId": created_id})
     )
 
+    assert len(cancel_outcome.followup_responses) == 1
+    assert cancel_outcome.followup_responses[0].result == {"stopReason": "cancelled"}
+
     cancelled_updates = [
         notification
         for notification in cancel_outcome.notifications
@@ -208,6 +211,29 @@ def test_cancel_marks_active_tool_call_as_cancelled() -> None:
         and notification.params["update"]["toolCallId"] == tool_call_id
         for notification in cancelled_updates
     )
+
+
+def test_deferred_prompt_can_be_completed_without_cancel() -> None:
+    protocol = ACPProtocol()
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    prompt_outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "run [tool] with [tool-pending]"}],
+            },
+        )
+    )
+    assert prompt_outcome.response is None
+
+    completed_response = protocol.complete_active_turn(session_id, stop_reason="end_turn")
+    assert completed_response is not None
+    assert completed_response.result == {"stopReason": "end_turn"}
 
 
 def test_cancel_without_active_turn_does_not_affect_next_prompt() -> None:
@@ -324,7 +350,7 @@ def test_session_load_replays_tool_call_state() -> None:
             },
         )
     )
-    assert prompt_outcome.response is not None
+    assert prompt_outcome.response is None
 
     loaded = protocol.handle(
         ACPMessage.request(

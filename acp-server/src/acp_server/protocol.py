@@ -102,6 +102,8 @@ class ProtocolOutcome:
 
     response: ACPMessage | None = None
     notifications: list[ACPMessage] = field(default_factory=list)
+    # Дополнительные response-сообщения для отложенных JSON-RPC запросов (WS).
+    followup_responses: list[ACPMessage] = field(default_factory=list)
 
 
 class ACPProtocol:
@@ -586,10 +588,6 @@ class ACPProtocol:
             )
 
         session.active_turn = ActiveTurnState(prompt_request_id=request_id, session_id=session_id)
-        if session.active_turn.cancel_requested:
-            return ProtocolOutcome(
-                response=ACPMessage.response(request_id, {"stopReason": "cancelled"})
-            )
 
         # Извлекаем первый text-блок для демо-ответа и формирования заголовка сессии.
         text_blocks: list[str] = []
@@ -672,6 +670,12 @@ class ACPProtocol:
             )
         )
 
+        should_defer_completion = "[tool-pending]" in text_preview
+        if should_defer_completion:
+            # Для незавершенных tool-call оставляем prompt-request «в полете».
+            # Финальный response будет отправлен позже (автозавершение или cancel).
+            return ProtocolOutcome(response=None, notifications=notifications)
+
         outcome = ProtocolOutcome(
             response=ACPMessage.response(request_id, {"stopReason": "end_turn"}),
             notifications=notifications,
@@ -694,8 +698,10 @@ class ACPProtocol:
         notifications: list[ACPMessage] = []
         if isinstance(session_id, str) and session_id in self._sessions:
             session = self._sessions[session_id]
-            if session.active_turn is not None:
-                session.active_turn.cancel_requested = True
+            cancelled_prompt_response = self._finalize_active_turn(
+                session=session,
+                stop_reason="cancelled",
+            )
             # При отмене переводим все незавершенные tool calls в `cancelled`.
             notifications = self._cancel_active_tool_calls(session=session, session_id=session_id)
             session.updated_at = datetime.now(UTC).isoformat()
@@ -706,14 +712,56 @@ class ACPProtocol:
                     updated_at=session.updated_at,
                 )
             )
+            followup_responses: list[ACPMessage] = []
+            if cancelled_prompt_response is not None:
+                followup_responses.append(cancelled_prompt_response)
+        else:
+            followup_responses = []
 
         if request_id is None:
-            return ProtocolOutcome(response=None, notifications=notifications)
+            return ProtocolOutcome(
+                response=None,
+                notifications=notifications,
+                followup_responses=followup_responses,
+            )
 
         return ProtocolOutcome(
             response=ACPMessage.response(request_id, None),
             notifications=notifications,
+            followup_responses=followup_responses,
         )
+
+    def complete_active_turn(
+        self, session_id: str, *, stop_reason: str = "end_turn"
+    ) -> ACPMessage | None:
+        """Завершает активный prompt-turn и возвращает финальный response.
+
+        Используется транспортом WS для отложенного ответа на `session/prompt`.
+
+        Пример использования:
+            response = protocol.complete_active_turn("sess_1", stop_reason="end_turn")
+        """
+
+        session = self._sessions.get(session_id)
+        if session is None:
+            return None
+        return self._finalize_active_turn(session=session, stop_reason=stop_reason)
+
+    def _finalize_active_turn(
+        self, session: SessionState, *, stop_reason: str
+    ) -> ACPMessage | None:
+        """Финализирует текущий active turn и очищает его состояние.
+
+        Пример использования:
+            response = protocol._finalize_active_turn(state, stop_reason="cancelled")
+        """
+
+        active_turn = session.active_turn
+        if active_turn is None or active_turn.prompt_request_id is None:
+            return None
+
+        session.active_turn = None
+        return ACPMessage.response(active_turn.prompt_request_id, {"stopReason": stop_reason})
 
     def _session_set_config_option(
         self,

@@ -105,34 +105,96 @@ class ACPHttpServer:
 
         ws = web.WebSocketResponse()
         await ws.prepare(request)
+        # Храним отложенные завершения prompt-turn по sessionId в рамках WS-соединения.
+        deferred_prompt_tasks: dict[str, asyncio.Task[None]] = {}
 
-        async for message in ws:
-            if message.type == WSMsgType.TEXT:
-                method_name: str | None = None
-                try:
-                    acp_request = ACPMessage.from_json(message.data)
-                    method_name = acp_request.method
-                    outcome = self.protocol.handle(acp_request)
-                except Exception as exc:
-                    outcome = ProtocolOutcome(
-                        response=ACPMessage.error_response(
-                            None,
-                            code=-32700,
-                            message="Parse error",
-                            data=str(exc),
+        try:
+            async for message in ws:
+                if message.type == WSMsgType.TEXT:
+                    method_name: str | None = None
+                    session_id: str | None = None
+                    try:
+                        acp_request = ACPMessage.from_json(message.data)
+                        method_name = acp_request.method
+                        if isinstance(acp_request.params, dict):
+                            raw_session_id = acp_request.params.get("sessionId")
+                            if isinstance(raw_session_id, str):
+                                session_id = raw_session_id
+                        outcome = self.protocol.handle(acp_request)
+                    except Exception as exc:
+                        outcome = ProtocolOutcome(
+                            response=ACPMessage.error_response(
+                                None,
+                                code=-32700,
+                                message="Parse error",
+                                data=str(exc),
+                            )
                         )
-                    )
 
-                for notification in outcome.notifications:
-                    await ws.send_str(notification.to_json())
+                    if method_name == "session/cancel" and session_id is not None:
+                        task = deferred_prompt_tasks.pop(session_id, None)
+                        if task is not None:
+                            task.cancel()
 
-                if outcome.response is not None:
-                    await ws.send_str(outcome.response.to_json())
+                    if (
+                        method_name == "session/prompt"
+                        and session_id is not None
+                        and outcome.response is None
+                    ):
+                        task = deferred_prompt_tasks.pop(session_id, None)
+                        if task is not None:
+                            task.cancel()
+                        deferred_prompt_tasks[session_id] = asyncio.create_task(
+                            self._complete_deferred_prompt(
+                                ws=ws,
+                                session_id=session_id,
+                                deferred_prompt_tasks=deferred_prompt_tasks,
+                            )
+                        )
 
-                if method_name == "shutdown":
-                    await ws.close()
+                    for notification in outcome.notifications:
+                        await ws.send_str(notification.to_json())
+
+                    if outcome.response is not None:
+                        await ws.send_str(outcome.response.to_json())
+                    for followup_response in outcome.followup_responses:
+                        await ws.send_str(followup_response.to_json())
+
+                    if method_name == "shutdown":
+                        await ws.close()
+                        break
+                elif message.type in {WSMsgType.ERROR, WSMsgType.CLOSE, WSMsgType.CLOSING}:
                     break
-            elif message.type in {WSMsgType.ERROR, WSMsgType.CLOSE, WSMsgType.CLOSING}:
-                break
+        finally:
+            for task in deferred_prompt_tasks.values():
+                task.cancel()
 
         return ws
+
+    async def _complete_deferred_prompt(
+        self,
+        *,
+        ws: web.WebSocketResponse,
+        session_id: str,
+        deferred_prompt_tasks: dict[str, asyncio.Task[None]],
+    ) -> None:
+        """Завершает отложенный `session/prompt` и отправляет финальный response.
+
+        Метод нужен для demo-эмуляции in-flight turn, который можно отменить через
+        `session/cancel` до отправки финального `stopReason`.
+
+        Пример использования:
+            task = asyncio.create_task(server._complete_deferred_prompt(...))
+        """
+
+        try:
+            # Небольшая задержка оставляет окно для входящего `session/cancel`.
+            await asyncio.sleep(0.05)
+            response = self.protocol.complete_active_turn(session_id, stop_reason="end_turn")
+            if response is not None and not ws.closed:
+                await ws.send_str(response.to_json())
+        except asyncio.CancelledError:
+            # Нормальная ветка: отмена задачи при `session/cancel`.
+            return
+        finally:
+            deferred_prompt_tasks.pop(session_id, None)
