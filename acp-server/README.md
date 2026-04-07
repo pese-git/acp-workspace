@@ -28,6 +28,12 @@ uv run acp-server --transport ws --host 127.0.0.1 --port 8080
 - `session/cancel`
 - `session/set_config_option`
 
+### Поведение `session/prompt` и `session/cancel`
+
+- Через WebSocket сервер поддерживает отложенное завершение prompt-turn.
+- Если turn отменяется методом `session/cancel`, исходный `session/prompt` завершается с `stopReason: "cancelled"`.
+- Через HTTP deferred-turn сразу финализируется в том же запросе, чтобы клиент всегда получил JSON-RPC response.
+
 Временные legacy-методы:
 
 - `ping`

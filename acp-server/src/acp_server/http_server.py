@@ -76,6 +76,19 @@ class ACPHttpServer:
             payload = await request.json()
             acp_request = ACPMessage.from_dict(payload)
             outcome = self.protocol.handle(acp_request)
+            if (
+                outcome.response is None
+                and acp_request.method == "session/prompt"
+                and isinstance(acp_request.params, dict)
+            ):
+                # Для HTTP финализируем deferred prompt сразу, чтобы не терять response.
+                session_id = acp_request.params.get("sessionId")
+                if isinstance(session_id, str):
+                    completed = self.protocol.complete_active_turn(
+                        session_id, stop_reason="end_turn"
+                    )
+                    if completed is not None:
+                        return web.json_response(completed.to_dict(), status=200)
             if outcome.response is None:
                 return web.Response(status=204)
             return web.json_response(outcome.response.to_dict(), status=200)
