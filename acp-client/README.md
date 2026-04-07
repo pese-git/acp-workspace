@@ -19,6 +19,7 @@ uv run acp-client --host 127.0.0.1 --port 8080 --method session/load --params '{
 ## Полезные helper-методы ACPClient
 
 - `initialize(...)` — выполняет handshake и возвращает типизированный результат согласования.
+- `authenticate(...)` — типизированный helper для ACP `authenticate`.
 - `prompt(...)` — типизированный helper для `session/prompt` с optional `_meta.promptDirectives`.
 - `open_ws_session().prompt(...)` — typed helper для `session/prompt` в persistent WS-сессии.
 - `create_session_parsed(...)` — типизированный helper для ответа `session/new`.

@@ -6,7 +6,7 @@
 
 | Область | Статус | Примечание |
 | --- | --- | --- |
-| `authenticate` | Partial | Метод реализован, `auth_required` для `session/new`/`session/load` поддержан при включенном `require_auth`; production auth-backend пока не подключен. |
+| `authenticate` | Partial | Метод реализован, `auth_required` для `session/new`/`session/load` поддержан при включенном `require_auth`; добавлены client helpers (`authenticate`) и WS integration coverage, production auth-backend пока не подключен. |
 | `initialize` | Done | Версия и capability negotiation реализованы; runtime-ветки запускаются только при согласованных client capabilities. |
 | `session/new` | Done | Поддерживается создание сессии, `configOptions` и legacy `modes`. |
 | `session/load` | Done | Поддерживается replay истории и ключевых `session/update` событий. |

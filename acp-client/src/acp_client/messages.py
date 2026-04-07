@@ -227,7 +227,21 @@ class InitializeResult(BaseModel):
     protocolVersion: int
     agentCapabilities: AgentCapabilities
     agentInfo: dict[str, Any] | None = None
-    authMethods: list[Any] = []
+    authMethods: list[AuthMethod] = []
+    model_config = ConfigDict(extra="allow")
+
+
+class AuthMethod(BaseModel):
+    """Описание одного метода аутентификации из `initialize`.
+
+    Пример использования:
+        AuthMethod.model_validate({"id": "local", "name": "Local", "type": "api_key"})
+    """
+
+    id: str
+    name: str | None = None
+    description: str | None = None
+    type: str | None = None
     model_config = ConfigDict(extra="allow")
 
 
@@ -871,6 +885,18 @@ class PromptResult(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class AuthenticateResult(BaseModel):
+    """Типизированный `result` ответа на `authenticate`.
+
+    По схеме ACP ответ — пустой объект с optional `_meta`.
+
+    Пример использования:
+        AuthenticateResult.model_validate({})
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
 def parse_session_update_notification(payload: dict[str, Any]) -> SessionUpdateNotification | None:
     """Пытается распарсить словарь как `session/update` notification.
 
@@ -1035,6 +1061,23 @@ def parse_prompt_result(message: ACPMessage) -> PromptResult:
     if not isinstance(message.result, dict):
         raise ValueError("session/prompt response must contain object result")
     return PromptResult.model_validate(message.result)
+
+
+def parse_authenticate_result(message: ACPMessage) -> AuthenticateResult:
+    """Преобразует response `authenticate` в типизированный результат.
+
+    Бросает `ValueError`, если response содержит ошибку или невалидный `result`.
+
+    Пример использования:
+        parsed = parse_authenticate_result(response)
+    """
+
+    if message.error is not None:
+        msg = f"authenticate failed: {message.error.code} {message.error.message}"
+        raise ValueError(msg)
+    if not isinstance(message.result, dict):
+        raise ValueError("authenticate response must contain object result")
+    return AuthenticateResult.model_validate(message.result)
 
 
 def parse_json_params(value: str | None) -> dict[str, Any]:

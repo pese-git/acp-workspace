@@ -679,6 +679,42 @@ async def test_ws_client_does_not_initialize_before_non_session_method() -> None
 
 
 @pytest.mark.asyncio
+async def test_client_authenticate_sends_method_id_and_parses_empty_result() -> None:
+    async def handle_ws_request(request: web.Request) -> web.WebSocketResponse:
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        async for message in ws:
+            payload = json.loads(message.data)
+            assert payload["method"] == "authenticate"
+            assert payload["params"]["methodId"] == "local"
+            await ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": payload["id"],
+                    "result": {},
+                }
+            )
+            break
+        return ws
+
+    port = _get_free_port()
+    app = web.Application()
+    app.router.add_get("/acp/ws", handle_ws_request)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="127.0.0.1", port=port)
+    await site.start()
+
+    try:
+        client = ACPClient(host="127.0.0.1", port=port)
+        result = await client.authenticate(method_id="local")
+        assert result.model_dump() == {}
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
 async def test_set_config_option_with_updates_returns_structured_updates() -> None:
     async def handle_ws_request(request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse()

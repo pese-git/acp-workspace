@@ -26,6 +26,7 @@ from acp_client.messages import (
     ToolCallLocation,
     ToolCallStateUpdate,
     ToolCallTerminalContent,
+    parse_authenticate_result,
     parse_initialize_result,
     parse_json_params,
     parse_plan_update,
@@ -272,6 +273,32 @@ def test_parse_initialize_result_success() -> None:
     assert parsed.agentCapabilities.loadSession is True
 
 
+def test_parse_initialize_result_parses_auth_methods() -> None:
+    response = ACPMessage.response(
+        "init_2",
+        {
+            "protocolVersion": 1,
+            "agentCapabilities": {
+                "loadSession": True,
+                "promptCapabilities": {"image": False},
+                "mcpCapabilities": {"http": False, "sse": False},
+                "sessionCapabilities": {"list": {}},
+            },
+            "authMethods": [
+                {
+                    "id": "local",
+                    "name": "Local authentication",
+                    "type": "api_key",
+                }
+            ],
+        },
+    )
+
+    parsed = parse_initialize_result(response)
+    assert len(parsed.authMethods) == 1
+    assert parsed.authMethods[0].id == "local"
+
+
 def test_parse_initialize_result_error_response_raises() -> None:
     response = ACPMessage(
         id="init_1",
@@ -280,6 +307,13 @@ def test_parse_initialize_result_error_response_raises() -> None:
 
     with pytest.raises(ValueError):
         parse_initialize_result(response)
+
+
+def test_parse_authenticate_result_success() -> None:
+    response = ACPMessage.response("auth_1", {})
+
+    parsed = parse_authenticate_result(response)
+    assert parsed.model_dump() == {}
 
 
 def test_parse_session_list_result_success() -> None:

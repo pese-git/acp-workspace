@@ -18,11 +18,11 @@ def _get_free_port() -> int:
         return int(sock.getsockname()[1])
 
 
-async def _start_test_server() -> tuple[web.AppRunner, int]:
+async def _start_test_server(*, require_auth: bool = False) -> tuple[web.AppRunner, int]:
     """Поднимает aiohttp-приложение с ACP WS handler."""
 
     port = _get_free_port()
-    server = ACPHttpServer(host="127.0.0.1", port=port)
+    server = ACPHttpServer(host="127.0.0.1", port=port, require_auth=require_auth)
     app = web.Application()
     app.router.add_get("/acp/ws", server.handle_ws_request)
 
@@ -201,6 +201,57 @@ async def test_ws_rejects_session_methods_before_initialize() -> None:
 
                 assert payload["id"] == "new_1"
                 assert payload["error"]["code"] == -32000
+            finally:
+                await ws.close()
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_ws_requires_authenticate_when_server_auth_enabled() -> None:
+    runner, port = await _start_test_server(require_auth=True)
+
+    try:
+        async with ClientSession() as session:
+            ws = await session.ws_connect(f"http://127.0.0.1:{port}/acp/ws")
+            try:
+                await _ws_initialize(ws)
+
+                await ws.send_json(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": "new_1",
+                        "method": "session/new",
+                        "params": {"cwd": "/tmp", "mcpServers": []},
+                    }
+                )
+                unauthorized = await asyncio.wait_for(ws.receive_json(), timeout=1.0)
+                assert unauthorized["id"] == "new_1"
+                assert unauthorized["error"]["message"] == "auth_required"
+
+                await ws.send_json(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": "auth_1",
+                        "method": "authenticate",
+                        "params": {"methodId": "local"},
+                    }
+                )
+                authenticated = await asyncio.wait_for(ws.receive_json(), timeout=1.0)
+                assert authenticated["id"] == "auth_1"
+                assert authenticated["result"] == {}
+
+                await ws.send_json(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": "new_2",
+                        "method": "session/new",
+                        "params": {"cwd": "/tmp", "mcpServers": []},
+                    }
+                )
+                authorized = await asyncio.wait_for(ws.receive_json(), timeout=1.0)
+                assert authorized["id"] == "new_2"
+                assert isinstance(authorized.get("result", {}).get("sessionId"), str)
             finally:
                 await ws.close()
     finally:

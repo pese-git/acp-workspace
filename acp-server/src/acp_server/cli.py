@@ -24,8 +24,13 @@ def run_server() -> None:
     parser = argparse.ArgumentParser(prog="acp-server")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)
+    parser.add_argument(
+        "--require-auth",
+        action="store_true",
+        help="Требовать authenticate перед session/new и session/load",
+    )
     args = parser.parse_args()
 
-    server = ACPHttpServer(host=args.host, port=args.port)
+    server = ACPHttpServer(host=args.host, port=args.port, require_auth=args.require_auth)
 
     asyncio.run(server.run())

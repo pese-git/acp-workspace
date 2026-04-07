@@ -33,6 +33,8 @@ uv sync --directory acp-client
 
 ```bash
 make run-server-ws
+# с обязательной аутентификацией
+uv run --directory acp-server acp-server --host 127.0.0.1 --port 8080 --require-auth
 ```
 
 2) Отправить запрос с клиента:

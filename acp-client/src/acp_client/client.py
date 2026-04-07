@@ -8,6 +8,7 @@ from aiohttp import ClientSession, WSMsgType
 
 from .messages import (
     ACPMessage,
+    AuthenticateResult,
     InitializeResult,
     JsonRpcError,
     PlanUpdate,
@@ -18,6 +19,7 @@ from .messages import (
     SessionUpdateNotification,
     StructuredSessionUpdate,
     ToolCallUpdate,
+    parse_authenticate_result,
     parse_initialize_result,
     parse_plan_update,
     parse_prompt_result,
@@ -154,6 +156,21 @@ class ACPClient:
             params=params,
         )
         return parse_initialize_result(response)
+
+    async def authenticate(self, *, method_id: str) -> AuthenticateResult:
+        """Выполняет `authenticate` для указанного auth method id.
+
+        Пример использования:
+            result = await client.authenticate(method_id="local")
+        """
+
+        response = await self.request(
+            method="authenticate",
+            params={
+                "methodId": method_id,
+            },
+        )
+        return parse_authenticate_result(response)
 
     async def prompt(
         self,
