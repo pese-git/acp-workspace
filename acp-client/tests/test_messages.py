@@ -14,8 +14,12 @@ from acp_client.messages import (
     SessionListResult,
     SessionSetupResult,
     ThoughtChunkUpdate,
+    ToolCallContentBlock,
     ToolCallCreatedUpdate,
+    ToolCallDiffContent,
+    ToolCallLocation,
     ToolCallStateUpdate,
+    ToolCallTerminalContent,
     parse_initialize_result,
     parse_json_params,
     parse_plan_update,
@@ -122,6 +126,50 @@ def test_parse_tool_call_state_update() -> None:
     parsed = parse_tool_call_update(notification)
     assert isinstance(parsed, ToolCallStateUpdate)
     assert parsed.status == "completed"
+
+
+def test_parse_tool_call_state_update_with_typed_content_and_locations() -> None:
+    notification = parse_session_update_notification(
+        {
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": "sess_1",
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "call_002",
+                    "status": "in_progress",
+                    "locations": [{"path": "src/main.py", "line": 7}],
+                    "content": [
+                        {
+                            "type": "content",
+                            "content": {"type": "text", "text": "step 1"},
+                        },
+                        {
+                            "type": "diff",
+                            "path": "README.md",
+                            "oldText": "old",
+                            "newText": "new",
+                        },
+                        {
+                            "type": "terminal",
+                            "terminalId": "term_1",
+                        },
+                    ],
+                },
+            },
+        }
+    )
+    assert notification is not None
+
+    parsed = parse_tool_call_update(notification)
+    assert isinstance(parsed, ToolCallStateUpdate)
+    assert parsed.locations is not None
+    assert isinstance(parsed.locations[0], ToolCallLocation)
+    assert parsed.content is not None
+    assert isinstance(parsed.content[0], ToolCallContentBlock)
+    assert isinstance(parsed.content[1], ToolCallDiffContent)
+    assert isinstance(parsed.content[2], ToolCallTerminalContent)
 
 
 def test_parse_request_permission_request() -> None:

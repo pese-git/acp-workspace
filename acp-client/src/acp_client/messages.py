@@ -490,6 +490,93 @@ class SessionUpdateNotification(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+type ToolKind = Literal[
+    "read",
+    "edit",
+    "delete",
+    "move",
+    "search",
+    "execute",
+    "think",
+    "fetch",
+    "switch_mode",
+    "other",
+]
+
+
+type ToolCallStatus = Literal[
+    "pending",
+    "in_progress",
+    "completed",
+    "failed",
+    "cancelled",
+]
+
+
+class ToolCallLocation(BaseModel):
+    """Локация файла, затронутого вызовом инструмента.
+
+    Пример использования:
+        ToolCallLocation.model_validate({"path": "src/main.py", "line": 42})
+    """
+
+    path: str
+    line: int | None = None
+    model_config = ConfigDict(extra="allow")
+
+
+class ToolCallContentBlock(BaseModel):
+    """Контент-элемент tool call с обычным ACP ContentBlock.
+
+    Пример использования:
+        ToolCallContentBlock.model_validate({
+            "type": "content",
+            "content": {"type": "text", "text": "done"},
+        })
+    """
+
+    type: Literal["content"]
+    content: dict[str, Any]
+    model_config = ConfigDict(extra="allow")
+
+
+class ToolCallDiffContent(BaseModel):
+    """Контент-элемент tool call для diff-представления изменений файла.
+
+    Пример использования:
+        ToolCallDiffContent.model_validate({
+            "type": "diff",
+            "path": "README.md",
+            "oldText": "old",
+            "newText": "new",
+        })
+    """
+
+    type: Literal["diff"]
+    path: str
+    newText: str
+    oldText: str | None = None
+    model_config = ConfigDict(extra="allow")
+
+
+class ToolCallTerminalContent(BaseModel):
+    """Контент-элемент tool call со ссылкой на терминал клиента.
+
+    Пример использования:
+        ToolCallTerminalContent.model_validate({
+            "type": "terminal",
+            "terminalId": "term_1",
+        })
+    """
+
+    type: Literal["terminal"]
+    terminalId: str
+    model_config = ConfigDict(extra="allow")
+
+
+type ToolCallContent = ToolCallContentBlock | ToolCallDiffContent | ToolCallTerminalContent
+
+
 class ToolCallCreatedUpdate(BaseModel):
     """Типизированный payload для события `tool_call`.
 
@@ -508,8 +595,12 @@ class ToolCallCreatedUpdate(BaseModel):
     sessionUpdate: Literal["tool_call"]
     toolCallId: str
     title: str
-    kind: str
-    status: Literal["pending"]
+    kind: ToolKind | None = None
+    status: ToolCallStatus | None = None
+    content: list[ToolCallContent] | None = None
+    locations: list[ToolCallLocation] | None = None
+    rawInput: dict[str, Any] | None = None
+    rawOutput: dict[str, Any] | None = None
     model_config = ConfigDict(extra="allow")
 
 
@@ -528,8 +619,13 @@ class ToolCallStateUpdate(BaseModel):
 
     sessionUpdate: Literal["tool_call_update"]
     toolCallId: str
-    status: Literal["in_progress", "completed", "cancelled", "failed"]
-    content: list[dict[str, Any]] | None = None
+    status: ToolCallStatus | None = None
+    title: str | None = None
+    kind: ToolKind | None = None
+    content: list[ToolCallContent] | None = None
+    locations: list[ToolCallLocation] | None = None
+    rawInput: dict[str, Any] | None = None
+    rawOutput: dict[str, Any] | None = None
     model_config = ConfigDict(extra="allow")
 
 
