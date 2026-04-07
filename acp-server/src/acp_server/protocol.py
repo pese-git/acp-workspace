@@ -906,7 +906,7 @@ class ACPProtocol:
                 text_blocks.append(block["text"])
         text_preview = text_blocks[0] if text_blocks else "Prompt received"
         prompt_for_title = text_preview.strip()
-        directives = self._extract_prompt_directives(text_preview)
+        directives = self._resolve_prompt_directives(params=params, text_preview=text_preview)
         tool_runtime_available = self._can_run_tool_runtime(session)
         should_run_tool_flow = directives.request_tool and tool_runtime_available
         tool_title = self._resolve_demo_tool_title(directives.tool_kind)
@@ -2553,6 +2553,74 @@ class ACPProtocol:
             terminal_command=terminal_command,
             forced_stop_reason=forced_stop_reason,
         )
+
+    def _resolve_prompt_directives(
+        self,
+        *,
+        params: dict[str, Any],
+        text_preview: str,
+    ) -> PromptDirectives:
+        """Формирует итоговые prompt-directives из текста и structured `_meta`.
+
+        Structured overrides позволяют управлять demo-оркестрацией без
+        специальных slash-триггеров внутри пользовательского текста.
+
+        Пример использования:
+            directives = protocol._resolve_prompt_directives(params=params, text_preview="hello")
+        """
+
+        directives = self._extract_prompt_directives(text_preview)
+        raw_meta = params.get("_meta")
+        if not isinstance(raw_meta, dict):
+            return directives
+        raw_overrides = raw_meta.get("promptDirectives")
+        if not isinstance(raw_overrides, dict):
+            return directives
+
+        request_tool = raw_overrides.get("requestTool")
+        if isinstance(request_tool, bool):
+            directives.request_tool = request_tool
+
+        keep_tool_pending = raw_overrides.get("keepToolPending")
+        if isinstance(keep_tool_pending, bool):
+            directives.keep_tool_pending = keep_tool_pending
+
+        publish_plan = raw_overrides.get("publishPlan")
+        if isinstance(publish_plan, bool):
+            directives.publish_plan = publish_plan
+
+        raw_tool_kind = raw_overrides.get("toolKind")
+        if isinstance(raw_tool_kind, str):
+            normalized_kind = self._normalize_tool_kind(raw_tool_kind.strip().lower())
+            if normalized_kind is not None:
+                directives.tool_kind = normalized_kind
+
+        fs_read_path = raw_overrides.get("fsReadPath")
+        if isinstance(fs_read_path, str) and fs_read_path.strip():
+            directives.fs_read_path = fs_read_path.strip()
+
+        fs_write_path = raw_overrides.get("fsWritePath")
+        if isinstance(fs_write_path, str) and fs_write_path.strip():
+            directives.fs_write_path = fs_write_path.strip()
+
+        fs_write_content = raw_overrides.get("fsWriteContent")
+        if isinstance(fs_write_content, str):
+            directives.fs_write_content = fs_write_content
+
+        terminal_command = raw_overrides.get("terminalCommand")
+        if isinstance(terminal_command, str) and terminal_command.strip():
+            directives.terminal_command = terminal_command.strip()
+
+        forced_stop_reason = raw_overrides.get("forcedStopReason")
+        if isinstance(forced_stop_reason, str):
+            normalized_reason = self._normalize_stop_reason(forced_stop_reason)
+            directives.forced_stop_reason = normalized_reason
+
+        if directives.keep_tool_pending:
+            # Pending-tool сценарий не имеет смысла без явного tool-flow.
+            directives.request_tool = True
+
+        return directives
 
     def _resolve_prompt_stop_reason(self, directives: PromptDirectives) -> str:
         """Возвращает stopReason для текущего prompt-turn.

@@ -226,6 +226,43 @@ def test_prompt_with_plan_slash_command_emits_plan_update() -> None:
     assert isinstance(plan_updates[0].params["update"].get("entries"), list)
 
 
+def test_prompt_with_meta_directive_emits_plan_update_without_slash() -> None:
+    protocol = ACPProtocol()
+
+    new_session = protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
+    assert new_session.response is not None
+    assert isinstance(new_session.response.result, dict)
+    session_id = new_session.response.result["sessionId"]
+
+    outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "build execution plan"}],
+                "_meta": {
+                    "promptDirectives": {
+                        "publishPlan": True,
+                    }
+                },
+            },
+        )
+    )
+
+    assert outcome.response is not None
+    plan_updates = [
+        notification
+        for notification in outcome.notifications
+        if notification.method == "session/update"
+        and isinstance(notification.params, dict)
+        and isinstance(notification.params.get("update"), dict)
+        and notification.params["update"].get("sessionUpdate") == "plan"
+    ]
+    assert len(plan_updates) == 1
+
+
 def test_prompt_with_legacy_marker_does_not_emit_plan_update() -> None:
     protocol = ACPProtocol()
 
@@ -252,6 +289,82 @@ def test_prompt_with_legacy_marker_does_not_emit_plan_update() -> None:
         and notification.params["update"].get("sessionUpdate") == "plan"
         for notification in outcome.notifications
     )
+
+
+def test_prompt_with_meta_directive_requests_tool_without_slash() -> None:
+    protocol = ACPProtocol()
+    _initialize_with_tool_runtime(protocol)
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "run a network action"}],
+                "_meta": {
+                    "promptDirectives": {
+                        "requestTool": True,
+                        "toolKind": "fetch",
+                    }
+                },
+            },
+        )
+    )
+
+    assert outcome.response is None
+    assert any(
+        notification.method == "session/request_permission"
+        and isinstance(notification.params, dict)
+        and isinstance(notification.params.get("toolCall"), dict)
+        and notification.params["toolCall"].get("kind") == "fetch"
+        for notification in outcome.notifications
+    )
+
+
+def test_prompt_with_meta_pending_tool_keeps_turn_open() -> None:
+    protocol = ACPProtocol()
+    _initialize_with_tool_runtime(protocol)
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "do something"}],
+                "_meta": {
+                    "promptDirectives": {
+                        "keepToolPending": True,
+                    }
+                },
+            },
+        )
+    )
+
+    assert outcome.response is None
+    updates = [
+        notification.params["update"]
+        for notification in outcome.notifications
+        if notification.method == "session/update"
+        and isinstance(notification.params, dict)
+        and isinstance(notification.params.get("update"), dict)
+    ]
+    assert any(update.get("sessionUpdate") == "tool_call" for update in updates)
+    assert any(
+        notification.method == "session/request_permission"
+        for notification in outcome.notifications
+    )
+
+    completed_response = protocol.complete_active_turn(session_id)
+    assert completed_response is not None
+    assert completed_response.result == {"stopReason": "end_turn"}
 
 
 def test_session_new_returns_modes_state() -> None:
@@ -511,6 +624,32 @@ def test_prompt_can_finish_with_refusal_stop_reason() -> None:
     assert outcome.response.result == {"stopReason": "refusal"}
 
 
+def test_prompt_can_finish_with_meta_forced_stop_reason() -> None:
+    protocol = ACPProtocol()
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "plain prompt"}],
+                "_meta": {
+                    "promptDirectives": {
+                        "forcedStopReason": "max_tokens",
+                    }
+                },
+            },
+        )
+    )
+
+    assert outcome.response is not None
+    assert outcome.response.result == {"stopReason": "max_tokens"}
+
+
 def test_session_list_returns_created_session() -> None:
     protocol = ACPProtocol()
     created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
@@ -642,7 +781,8 @@ def test_prompt_can_emit_tool_call_updates() -> None:
             "session/prompt",
             {
                 "sessionId": created_id,
-                "prompt": [{"type": "text", "text": "/tool run for me"}],
+                "prompt": [{"type": "text", "text": "run tool for me"}],
+                "_meta": {"promptDirectives": {"requestTool": True}},
             },
         )
     )
@@ -684,7 +824,8 @@ def test_prompt_fs_read_emits_client_rpc_request_when_capability_enabled() -> No
             "session/prompt",
             {
                 "sessionId": session_id,
-                "prompt": [{"type": "text", "text": "/fs-read README.md"}],
+                "prompt": [{"type": "text", "text": "read file"}],
+                "_meta": {"promptDirectives": {"fsReadPath": "README.md"}},
             },
         )
     )
@@ -717,7 +858,8 @@ def test_fs_read_response_completes_turn_with_completed_tool_update() -> None:
             "session/prompt",
             {
                 "sessionId": session_id,
-                "prompt": [{"type": "text", "text": "/fs-read README.md"}],
+                "prompt": [{"type": "text", "text": "read file"}],
+                "_meta": {"promptDirectives": {"fsReadPath": "README.md"}},
             },
         )
     )
@@ -767,7 +909,13 @@ def test_fs_write_response_contains_diff_tool_content() -> None:
             "session/prompt",
             {
                 "sessionId": session_id,
-                "prompt": [{"type": "text", "text": "/fs-write notes.txt updated"}],
+                "prompt": [{"type": "text", "text": "write file"}],
+                "_meta": {
+                    "promptDirectives": {
+                        "fsWritePath": "notes.txt",
+                        "fsWriteContent": "updated",
+                    }
+                },
             },
         )
     )
@@ -827,7 +975,8 @@ def test_prompt_fs_read_without_capability_does_not_emit_fs_rpc() -> None:
             "session/prompt",
             {
                 "sessionId": session_id,
-                "prompt": [{"type": "text", "text": "/fs-read README.md"}],
+                "prompt": [{"type": "text", "text": "read file"}],
+                "_meta": {"promptDirectives": {"fsReadPath": "README.md"}},
             },
         )
     )
@@ -861,7 +1010,8 @@ def test_fs_read_client_error_marks_tool_as_failed() -> None:
             "session/prompt",
             {
                 "sessionId": session_id,
-                "prompt": [{"type": "text", "text": "/fs-read README.md"}],
+                "prompt": [{"type": "text", "text": "read file"}],
+                "_meta": {"promptDirectives": {"fsReadPath": "README.md"}},
             },
         )
     )
@@ -913,7 +1063,8 @@ def test_prompt_terminal_run_emits_terminal_create_request() -> None:
             "session/prompt",
             {
                 "sessionId": session_id,
-                "prompt": [{"type": "text", "text": "/term-run ls -la"}],
+                "prompt": [{"type": "text", "text": "run command"}],
+                "_meta": {"promptDirectives": {"terminalCommand": "ls -la"}},
             },
         )
     )
@@ -945,7 +1096,8 @@ def test_terminal_rpc_chain_completes_prompt_turn() -> None:
             "session/prompt",
             {
                 "sessionId": session_id,
-                "prompt": [{"type": "text", "text": "/term-run ls"}],
+                "prompt": [{"type": "text", "text": "run command"}],
+                "_meta": {"promptDirectives": {"terminalCommand": "ls"}},
             },
         )
     )
@@ -1023,7 +1175,8 @@ def test_cancel_during_terminal_flow_emits_kill_and_release_requests() -> None:
             "session/prompt",
             {
                 "sessionId": session_id,
-                "prompt": [{"type": "text", "text": "/term-run sleep 10"}],
+                "prompt": [{"type": "text", "text": "run command"}],
+                "_meta": {"promptDirectives": {"terminalCommand": "sleep 10"}},
             },
         )
     )
@@ -1065,7 +1218,8 @@ def test_cancel_marks_active_tool_call_as_cancelled() -> None:
             "session/prompt",
             {
                 "sessionId": created_id,
-                "prompt": [{"type": "text", "text": "/tool-pending run"}],
+                "prompt": [{"type": "text", "text": "run tool"}],
+                "_meta": {"promptDirectives": {"keepToolPending": True}},
             },
         )
     )
@@ -1114,7 +1268,8 @@ def test_deferred_prompt_can_be_completed_without_cancel() -> None:
             "session/prompt",
             {
                 "sessionId": session_id,
-                "prompt": [{"type": "text", "text": "/tool-pending run"}],
+                "prompt": [{"type": "text", "text": "run tool"}],
+                "_meta": {"promptDirectives": {"keepToolPending": True}},
             },
         )
     )
@@ -1177,7 +1332,8 @@ def test_permission_selected_completes_prompt_turn() -> None:
             "session/prompt",
             {
                 "sessionId": session_id,
-                "prompt": [{"type": "text", "text": "/tool run"}],
+                "prompt": [{"type": "text", "text": "run tool"}],
+                "_meta": {"promptDirectives": {"requestTool": True}},
             },
         )
     )
@@ -1227,7 +1383,8 @@ def test_permission_cancelled_finishes_turn_with_cancelled() -> None:
             "session/prompt",
             {
                 "sessionId": session_id,
-                "prompt": [{"type": "text", "text": "/tool run"}],
+                "prompt": [{"type": "text", "text": "run tool"}],
+                "_meta": {"promptDirectives": {"requestTool": True}},
             },
         )
     )
@@ -1263,7 +1420,8 @@ def test_permission_reject_option_finishes_turn_with_cancelled() -> None:
             "session/prompt",
             {
                 "sessionId": session_id,
-                "prompt": [{"type": "text", "text": "/tool run"}],
+                "prompt": [{"type": "text", "text": "run tool"}],
+                "_meta": {"promptDirectives": {"requestTool": True}},
             },
         )
     )
@@ -1299,7 +1457,8 @@ def test_late_permission_response_after_cancel_is_ignored() -> None:
             "session/prompt",
             {
                 "sessionId": session_id,
-                "prompt": [{"type": "text", "text": "/tool run"}],
+                "prompt": [{"type": "text", "text": "run tool"}],
+                "_meta": {"promptDirectives": {"requestTool": True}},
             },
         )
     )
@@ -1358,7 +1517,8 @@ def test_permission_allow_always_applies_to_next_tool_call() -> None:
             "session/prompt",
             {
                 "sessionId": session_id,
-                "prompt": [{"type": "text", "text": "/tool run"}],
+                "prompt": [{"type": "text", "text": "run tool"}],
+                "_meta": {"promptDirectives": {"requestTool": True}},
             },
         )
     )
@@ -1389,7 +1549,8 @@ def test_permission_allow_always_applies_to_next_tool_call() -> None:
             "session/prompt",
             {
                 "sessionId": session_id,
-                "prompt": [{"type": "text", "text": "/tool run again"}],
+                "prompt": [{"type": "text", "text": "run tool again"}],
+                "_meta": {"promptDirectives": {"requestTool": True}},
             },
         )
     )
@@ -1414,7 +1575,8 @@ def test_permission_reject_always_applies_to_next_tool_call() -> None:
             "session/prompt",
             {
                 "sessionId": session_id,
-                "prompt": [{"type": "text", "text": "/tool run"}],
+                "prompt": [{"type": "text", "text": "run tool"}],
+                "_meta": {"promptDirectives": {"requestTool": True}},
             },
         )
     )
@@ -1445,7 +1607,8 @@ def test_permission_reject_always_applies_to_next_tool_call() -> None:
             "session/prompt",
             {
                 "sessionId": session_id,
-                "prompt": [{"type": "text", "text": "/tool run again"}],
+                "prompt": [{"type": "text", "text": "run tool again"}],
+                "_meta": {"promptDirectives": {"requestTool": True}},
             },
         )
     )
@@ -1470,7 +1633,8 @@ def test_permission_policy_is_scoped_by_tool_kind() -> None:
             "session/prompt",
             {
                 "sessionId": session_id,
-                "prompt": [{"type": "text", "text": "/tool execute run"}],
+                "prompt": [{"type": "text", "text": "execute tool"}],
+                "_meta": {"promptDirectives": {"requestTool": True, "toolKind": "execute"}},
             },
         )
     )
@@ -1503,7 +1667,8 @@ def test_permission_policy_is_scoped_by_tool_kind() -> None:
             "session/prompt",
             {
                 "sessionId": session_id,
-                "prompt": [{"type": "text", "text": "/tool execute run again"}],
+                "prompt": [{"type": "text", "text": "execute tool again"}],
+                "_meta": {"promptDirectives": {"requestTool": True, "toolKind": "execute"}},
             },
         )
     )
@@ -1518,7 +1683,8 @@ def test_permission_policy_is_scoped_by_tool_kind() -> None:
             "session/prompt",
             {
                 "sessionId": session_id,
-                "prompt": [{"type": "text", "text": "/tool edit file"}],
+                "prompt": [{"type": "text", "text": "edit file"}],
+                "_meta": {"promptDirectives": {"requestTool": True, "toolKind": "edit"}},
             },
         )
     )
@@ -1542,7 +1708,8 @@ def test_prompt_tool_flow_supports_fetch_kind() -> None:
             "session/prompt",
             {
                 "sessionId": session_id,
-                "prompt": [{"type": "text", "text": "/tool fetch latest"}],
+                "prompt": [{"type": "text", "text": "fetch latest"}],
+                "_meta": {"promptDirectives": {"requestTool": True, "toolKind": "fetch"}},
             },
         )
     )
@@ -1644,7 +1811,8 @@ def test_session_load_replays_last_plan_update() -> None:
             "session/prompt",
             {
                 "sessionId": session_id,
-                "prompt": [{"type": "text", "text": "/plan compose"}],
+                "prompt": [{"type": "text", "text": "compose plan"}],
+                "_meta": {"promptDirectives": {"publishPlan": True}},
             },
         )
     )
@@ -1710,7 +1878,8 @@ def test_session_load_replays_tool_call_state() -> None:
             "session/prompt",
             {
                 "sessionId": session_id,
-                "prompt": [{"type": "text", "text": "/tool-pending run"}],
+                "prompt": [{"type": "text", "text": "run tool"}],
+                "_meta": {"promptDirectives": {"keepToolPending": True}},
             },
         )
     )

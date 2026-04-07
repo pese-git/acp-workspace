@@ -11,6 +11,7 @@ from .messages import (
     InitializeResult,
     JsonRpcError,
     PlanUpdate,
+    PromptResult,
     SessionListItem,
     SessionListResult,
     SessionSetupResult,
@@ -19,6 +20,7 @@ from .messages import (
     ToolCallUpdate,
     parse_initialize_result,
     parse_plan_update,
+    parse_prompt_result,
     parse_request_permission_request,
     parse_session_list_result,
     parse_session_setup_result,
@@ -152,6 +154,59 @@ class ACPClient:
             params=params,
         )
         return parse_initialize_result(response)
+
+    async def prompt(
+        self,
+        *,
+        session_id: str,
+        prompt: list[dict[str, Any]],
+        prompt_directives: dict[str, Any] | None = None,
+        on_update: Callable[[dict], None] | None = None,
+        on_permission: PermissionHandler | None = None,
+        on_fs_read: FsReadHandler | None = None,
+        on_fs_write: FsWriteHandler | None = None,
+        on_terminal_create: TerminalCreateHandler | None = None,
+        on_terminal_output: TerminalOutputHandler | None = None,
+        on_terminal_wait_for_exit: TerminalWaitHandler | None = None,
+        on_terminal_release: TerminalReleaseHandler | None = None,
+        on_terminal_kill: TerminalKillHandler | None = None,
+    ) -> PromptResult:
+        """Выполняет `session/prompt` и возвращает типизированный stop reason.
+
+        При передаче `prompt_directives` клиент добавляет structured-overrides в
+        `_meta.promptDirectives`, что позволяет управлять demo-flow без slash-команд.
+
+        Пример использования:
+            result = await client.prompt(
+                session_id="sess_1",
+                prompt=[{"type": "text", "text": "build plan"}],
+                prompt_directives={"publishPlan": True},
+            )
+        """
+
+        params: dict[str, Any] = {
+            "sessionId": session_id,
+            "prompt": prompt,
+        }
+        if isinstance(prompt_directives, dict) and prompt_directives:
+            params["_meta"] = {
+                "promptDirectives": prompt_directives,
+            }
+
+        response = await self.request(
+            method="session/prompt",
+            params=params,
+            on_update=on_update,
+            on_permission=on_permission,
+            on_fs_read=on_fs_read,
+            on_fs_write=on_fs_write,
+            on_terminal_create=on_terminal_create,
+            on_terminal_output=on_terminal_output,
+            on_terminal_wait_for_exit=on_terminal_wait_for_exit,
+            on_terminal_release=on_terminal_release,
+            on_terminal_kill=on_terminal_kill,
+        )
+        return parse_prompt_result(response)
 
     async def _request_ws(
         self,
