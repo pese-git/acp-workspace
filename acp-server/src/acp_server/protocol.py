@@ -127,6 +127,7 @@ class PromptDirectives:
     fs_write_path: str | None = None
     fs_write_content: str | None = None
     terminal_command: str | None = None
+    forced_stop_reason: str | None = None
 
 
 @dataclass(slots=True)
@@ -269,6 +270,13 @@ class ACPProtocol:
         },
     }
     _supported_protocol_versions = (1,)
+    _supported_stop_reasons = {
+        "end_turn",
+        "max_tokens",
+        "max_turn_requests",
+        "refusal",
+        "cancelled",
+    }
     # Размер страницы для `session/list`; cursor указывает смещение в этом срезе.
     _session_list_page_size = 50
 
@@ -955,7 +963,7 @@ class ACPProtocol:
         )
 
         should_request_permission = False
-        prompt_stop_reason = "end_turn"
+        prompt_stop_reason = self._resolve_prompt_stop_reason(directives)
         if terminal_request is not None:
             if self._can_use_terminal_client_rpc(session):
                 notifications.extend(terminal_request.messages)
@@ -1054,6 +1062,7 @@ class ACPProtocol:
                             "toolCallId": tool_call_id,
                             "title": tool_title,
                             "kind": directives.tool_kind,
+                            "status": "pending",
                         },
                         "options": self._build_permission_options(),
                     },
@@ -1252,7 +1261,10 @@ class ACPProtocol:
         session = self._sessions.get(session_id)
         if session is None:
             return None
-        return self._finalize_active_turn(session=session, stop_reason=stop_reason)
+        return self._finalize_active_turn(
+            session=session,
+            stop_reason=self._normalize_stop_reason(stop_reason),
+        )
 
     def should_auto_complete_active_turn(self, session_id: str) -> bool:
         """Возвращает `True`, если active turn можно безопасно автозавершить.
@@ -1674,7 +1686,10 @@ class ACPProtocol:
             return None
 
         session.active_turn = None
-        return ACPMessage.response(active_turn.prompt_request_id, {"stopReason": stop_reason})
+        return ACPMessage.response(
+            active_turn.prompt_request_id,
+            {"stopReason": self._normalize_stop_reason(stop_reason)},
+        )
 
     def _resolve_permission_response(
         self,
@@ -2475,6 +2490,7 @@ class ACPProtocol:
         fs_write_path: str | None = None
         fs_write_content: str | None = None
         terminal_command: str | None = None
+        forced_stop_reason: str | None = None
 
         stripped_preview = text_preview.strip()
         if stripped_preview.startswith("/fs-read "):
@@ -2494,16 +2510,26 @@ class ACPProtocol:
             raw_command = stripped_preview[len("/term-run ") :].strip()
             if raw_command:
                 terminal_command = raw_command
+        if stripped_preview.startswith("/stop-max-tokens"):
+            forced_stop_reason = "max_tokens"
+        if stripped_preview.startswith("/stop-max-turn-requests"):
+            forced_stop_reason = "max_turn_requests"
+        if stripped_preview.startswith("/refuse"):
+            forced_stop_reason = "refusal"
 
         # Поддерживаем опциональный kind в `/tool <kind> ...` и
         # `/tool-pending <kind> ...` для policy-scope beyond `other`.
         if stripped_preview.startswith("/tool "):
             candidate = stripped_preview[len("/tool ") :].split(" ", 1)[0].strip().lower()
-            if candidate in {"other", "read", "write", "execute", "search"}:
+            if candidate == "write":
+                candidate = "edit"
+            if candidate in {"other", "read", "edit", "execute", "search"}:
                 tool_kind = candidate
         if stripped_preview.startswith("/tool-pending "):
             candidate = stripped_preview[len("/tool-pending ") :].split(" ", 1)[0].strip().lower()
-            if candidate in {"other", "read", "write", "execute", "search"}:
+            if candidate == "write":
+                candidate = "edit"
+            if candidate in {"other", "read", "edit", "execute", "search"}:
                 tool_kind = candidate
 
         return PromptDirectives(
@@ -2515,7 +2541,30 @@ class ACPProtocol:
             fs_write_path=fs_write_path,
             fs_write_content=fs_write_content,
             terminal_command=terminal_command,
+            forced_stop_reason=forced_stop_reason,
         )
+
+    def _resolve_prompt_stop_reason(self, directives: PromptDirectives) -> str:
+        """Возвращает stopReason для текущего prompt-turn.
+
+        Пример использования:
+            reason = protocol._resolve_prompt_stop_reason(directives)
+        """
+
+        if directives.forced_stop_reason is not None:
+            return self._normalize_stop_reason(directives.forced_stop_reason)
+        return "end_turn"
+
+    def _normalize_stop_reason(self, stop_reason: str) -> str:
+        """Нормализует stopReason к поддерживаемому значению ACP.
+
+        Пример использования:
+            reason = protocol._normalize_stop_reason("max_tokens")
+        """
+
+        if stop_reason in self._supported_stop_reasons:
+            return stop_reason
+        return "end_turn"
 
     def _resolve_demo_tool_title(self, kind: str) -> str:
         """Возвращает человекочитаемый title для demo tool-call по kind.
@@ -2526,7 +2575,7 @@ class ACPProtocol:
 
         titles = {
             "read": "Tool read operation",
-            "write": "Tool write operation",
+            "edit": "Tool edit operation",
             "execute": "Tool execution",
             "search": "Tool search operation",
             "other": "Tool operation",

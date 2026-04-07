@@ -782,6 +782,20 @@ class PermissionOption(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class PermissionToolCall(BaseModel):
+    """Типизированное описание tool call в `session/request_permission`.
+
+    Пример использования:
+        PermissionToolCall.model_validate({"toolCallId": "call_001", "title": "Run"})
+    """
+
+    toolCallId: str
+    title: str | None = None
+    kind: ToolKind | None = None
+    status: ToolCallStatus | None = None
+    model_config = ConfigDict(extra="allow")
+
+
 class RequestPermissionPayload(BaseModel):
     """Параметры запроса `session/request_permission` от агента к клиенту.
 
@@ -794,7 +808,7 @@ class RequestPermissionPayload(BaseModel):
     """
 
     sessionId: str
-    toolCall: dict[str, Any]
+    toolCall: PermissionToolCall
     options: list[PermissionOption]
     model_config = ConfigDict(extra="allow")
 
@@ -835,6 +849,26 @@ class SelectedPermissionOutcome(BaseModel):
 
 
 type PermissionOutcome = CancelledPermissionOutcome | SelectedPermissionOutcome
+
+
+type StopReason = Literal[
+    "end_turn",
+    "max_tokens",
+    "max_turn_requests",
+    "refusal",
+    "cancelled",
+]
+
+
+class PromptResult(BaseModel):
+    """Типизированный `result` ответа на `session/prompt`.
+
+    Пример использования:
+        PromptResult.model_validate({"stopReason": "end_turn"})
+    """
+
+    stopReason: StopReason
+    model_config = ConfigDict(extra="allow")
 
 
 def parse_session_update_notification(payload: dict[str, Any]) -> SessionUpdateNotification | None:
@@ -984,6 +1018,23 @@ def parse_session_setup_result(message: ACPMessage, *, method_name: str) -> Sess
         msg = f"{method_name} response must contain object result"
         raise ValueError(msg)
     return SessionSetupResult.model_validate(message.result)
+
+
+def parse_prompt_result(message: ACPMessage) -> PromptResult:
+    """Преобразует response `session/prompt` в типизированный `PromptResult`.
+
+    Бросает `ValueError`, если response содержит ошибку или невалидный `result`.
+
+    Пример использования:
+        parsed = parse_prompt_result(response)
+    """
+
+    if message.error is not None:
+        msg = f"session/prompt failed: {message.error.code} {message.error.message}"
+        raise ValueError(msg)
+    if not isinstance(message.result, dict):
+        raise ValueError("session/prompt response must contain object result")
+    return PromptResult.model_validate(message.result)
 
 
 def parse_json_params(value: str | None) -> dict[str, Any]:

@@ -43,6 +43,7 @@ make ping-ws
 
 ## Поддерживаемые методы
 
+- `authenticate`
 - `initialize`
 - `session/new`
 - `session/load`
@@ -50,6 +51,8 @@ make ping-ws
 - `session/prompt`
 - `session/cancel`
 - `session/set_config_option`
+
+Профиль реализации в этом репозитории: только ACP over WebSocket (`GET /acp/ws`).
 
 Временные legacy-методы (для обратной совместимости):
 

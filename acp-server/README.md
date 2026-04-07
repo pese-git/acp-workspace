@@ -18,6 +18,7 @@ uv run acp-server --host 127.0.0.1 --port 8080
 
 ## ACP методы
 
+- `authenticate`
 - `initialize`
 - `session/new`
 - `session/load`
@@ -25,6 +26,8 @@ uv run acp-server --host 127.0.0.1 --port 8080
 - `session/prompt`
 - `session/cancel`
 - `session/set_config_option`
+
+Профиль транспорта: только WebSocket (`GET /acp/ws`).
 
 ### Поведение `initialize`
 

@@ -29,6 +29,7 @@ from acp_client.messages import (
     parse_initialize_result,
     parse_json_params,
     parse_plan_update,
+    parse_prompt_result,
     parse_request_permission_request,
     parse_session_list_result,
     parse_session_setup_result,
@@ -352,6 +353,17 @@ def test_parse_session_setup_result_error_response_raises() -> None:
 
     with pytest.raises(ValueError):
         parse_session_setup_result(response, method_name="session/load")
+
+
+@pytest.mark.parametrize(
+    "stop_reason",
+    ["end_turn", "max_tokens", "max_turn_requests", "refusal", "cancelled"],
+)
+def test_parse_prompt_result_accepts_all_supported_stop_reasons(stop_reason: str) -> None:
+    response = ACPMessage.response("prompt_1", {"stopReason": stop_reason})
+
+    parsed = parse_prompt_result(response)
+    assert parsed.stopReason == stop_reason
 
 
 def test_parse_structured_session_update_for_message_chunk() -> None:
