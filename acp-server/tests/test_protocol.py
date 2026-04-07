@@ -120,7 +120,7 @@ def test_session_prompt_sends_update() -> None:
     assert "available_commands_update" in update_types
 
 
-def test_prompt_with_plan_marker_emits_plan_update() -> None:
+def test_prompt_with_plan_slash_command_emits_plan_update() -> None:
     protocol = ACPProtocol()
 
     new_session = protocol.handle(
@@ -152,7 +152,7 @@ def test_prompt_with_plan_marker_emits_plan_update() -> None:
     assert isinstance(plan_updates[0].params["update"].get("entries"), list)
 
 
-def test_prompt_with_plan_slash_command_emits_plan_update() -> None:
+def test_prompt_with_legacy_marker_does_not_emit_plan_update() -> None:
     protocol = ACPProtocol()
 
     new_session = protocol.handle(
@@ -167,13 +167,13 @@ def test_prompt_with_plan_slash_command_emits_plan_update() -> None:
             "session/prompt",
             {
                 "sessionId": session_id,
-                "prompt": [{"type": "text", "text": "/plan собрать шаги"}],
+                "prompt": [{"type": "text", "text": "[plan] собрать шаги"}],
             },
         )
     )
 
     assert outcome.response is not None
-    assert any(
+    assert not any(
         notification.params is not None
         and notification.params["update"].get("sessionUpdate") == "plan"
         for notification in outcome.notifications

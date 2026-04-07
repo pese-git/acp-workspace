@@ -36,8 +36,8 @@ uv run acp-server --host 127.0.0.1 --port 8080
 
 - Через WebSocket сервер поддерживает отложенное завершение prompt-turn.
 - В режиме `ask` сервер отправляет клиенту JSON-RPC request `session/request_permission` перед выполнением tool call.
-- Для demo-сценариев с маркером `[plan]` сервер отправляет `session/update` с `sessionUpdate: "plan"`.
-- Для demo-сценариев также поддержаны slash-команды `/plan`, `/tool`, `/tool-pending` (с fallback на старые маркеры).
+- Для demo-сценариев поддержаны slash-команды `/plan`, `/tool`, `/tool-pending`.
+- Legacy marker-триггеры (`[plan]`, `[tool]`, `[tool-pending]`) больше не обрабатываются.
 - Если turn отменяется методом `session/cancel`, исходный `session/prompt` завершается с `stopReason: "cancelled"`.
 
 ### Поведение `session/list`

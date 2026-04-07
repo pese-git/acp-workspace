@@ -105,8 +105,8 @@ class ActiveTurnState:
 class PromptDirectives:
     """Нормализованные флаги поведения prompt-turn из пользовательского ввода.
 
-    Используются для постепенного ухода от marker-based demo-логики к
-    более явным протокольным триггерам (например, slash-команды).
+    Используются для детерминированной slash-driven оркестрации prompt-turn
+    без legacy marker-триггеров.
 
     Пример использования:
         directives = PromptDirectives(request_tool=True, keep_tool_pending=False)
@@ -2269,9 +2269,8 @@ class ACPProtocol:
     def _extract_prompt_directives(self, text_preview: str) -> PromptDirectives:
         """Извлекает служебные флаги turn из текстового preview prompt.
 
-        Основной путь — slash-команды (`/plan`, `/tool`, `/tool-pending`).
-        Legacy-маркеры (`[plan]`, `[tool]`, `[tool-pending]`) обрабатываются
-        только в явном mock-режиме через `/mock-markers`.
+        Поддерживаются только slash-команды (`/plan`, `/tool`, `/tool-pending`
+        и RPC-команды `/fs-read`, `/fs-write`, `/term-run`).
 
         Пример использования:
             directives = protocol._extract_prompt_directives("/tool /plan")
@@ -2309,12 +2308,6 @@ class ACPProtocol:
             raw_command = stripped_preview[len("/term-run ") :].strip()
             if raw_command:
                 terminal_command = raw_command
-
-        # Опциональный mock-режим для старых сценариев и backward-совместимости.
-        if "/mock-markers" in normalized_tokens:
-            has_plan_directive = has_plan_directive or "[plan]" in text_preview
-            has_tool_directive = has_tool_directive or "[tool]" in text_preview
-            has_pending_directive = has_pending_directive or "[tool-pending]" in text_preview
 
         return PromptDirectives(
             request_tool=has_tool_directive or has_pending_directive,
