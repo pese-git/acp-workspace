@@ -1136,3 +1136,115 @@ async def test_ws_client_handles_fs_write_request() -> None:
         assert response.result == {"stopReason": "end_turn"}
     finally:
         await runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_ws_client_handles_terminal_requests() -> None:
+    async def handle_ws_request(request: web.Request) -> web.WebSocketResponse:
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        async for message in ws:
+            prompt_payload = json.loads(message.data)
+            if await _maybe_reply_initialize(ws, prompt_payload):
+                continue
+            assert prompt_payload["method"] == "session/prompt"
+
+            await ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": "term_create_1",
+                    "method": "terminal/create",
+                    "params": {
+                        "sessionId": "sess_1",
+                        "command": "ls",
+                    },
+                }
+            )
+            create_response = await ws.receive_json()
+            assert create_response["id"] == "term_create_1"
+            assert create_response["result"]["terminalId"] == "term_1"
+
+            await ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": "term_output_1",
+                    "method": "terminal/output",
+                    "params": {
+                        "sessionId": "sess_1",
+                        "terminalId": "term_1",
+                    },
+                }
+            )
+            output_response = await ws.receive_json()
+            assert output_response["id"] == "term_output_1"
+            assert output_response["result"]["output"] == "line-1"
+
+            await ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": "term_wait_1",
+                    "method": "terminal/wait_for_exit",
+                    "params": {
+                        "sessionId": "sess_1",
+                        "terminalId": "term_1",
+                    },
+                }
+            )
+            wait_response = await ws.receive_json()
+            assert wait_response["id"] == "term_wait_1"
+            assert wait_response["result"]["exitCode"] == 0
+
+            await ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": "term_release_1",
+                    "method": "terminal/release",
+                    "params": {
+                        "sessionId": "sess_1",
+                        "terminalId": "term_1",
+                    },
+                }
+            )
+            release_response = await ws.receive_json()
+            assert release_response["id"] == "term_release_1"
+            assert release_response["result"]["ok"] is True
+
+            await ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": prompt_payload["id"],
+                    "result": {"stopReason": "end_turn"},
+                }
+            )
+            break
+        return ws
+
+    port = _get_free_port()
+    app = web.Application()
+    app.router.add_get("/acp/ws", handle_ws_request)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="127.0.0.1", port=port)
+    await site.start()
+
+    released_terminal_ids: list[str] = []
+
+    try:
+        client = ACPClient(host="127.0.0.1", port=port)
+
+        response = await client.request(
+            method="session/prompt",
+            params={"sessionId": "sess_1", "prompt": [{"type": "text", "text": "/term-run"}]},
+            transport="ws",
+            on_terminal_create=lambda _command: "term_1",
+            on_terminal_output=lambda _terminal_id: "line-1",
+            on_terminal_wait_for_exit=lambda _terminal_id: 0,
+            on_terminal_release=lambda terminal_id: released_terminal_ids.append(terminal_id),
+            on_terminal_kill=lambda _terminal_id: True,
+        )
+
+        assert response.result == {"stopReason": "end_turn"}
+        assert released_terminal_ids == ["term_1"]
+    finally:
+        await runner.cleanup()

@@ -84,7 +84,16 @@ class ACPHttpServer:
                 # HTTP не поддерживает agent->client RPC roundtrip (fs/*, permission).
                 # Если prompt запросил такой flow, возвращаем явную ошибку.
                 requires_bidirectional_rpc = any(
-                    notification.method in {"fs/read_text_file", "fs/write_text_file"}
+                    notification.method
+                    in {
+                        "fs/read_text_file",
+                        "fs/write_text_file",
+                        "terminal/create",
+                        "terminal/output",
+                        "terminal/wait_for_exit",
+                        "terminal/release",
+                        "terminal/kill",
+                    }
                     for notification in outcome.notifications
                 )
                 if requires_bidirectional_rpc:

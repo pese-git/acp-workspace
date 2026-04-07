@@ -30,6 +30,11 @@ from .messages import (
 type PermissionHandler = Callable[[dict[str, Any]], str | None]
 type FsReadHandler = Callable[[str], str]
 type FsWriteHandler = Callable[[str, str], str | None]
+type TerminalCreateHandler = Callable[[str], str]
+type TerminalOutputHandler = Callable[[str], str]
+type TerminalWaitHandler = Callable[[str], int]
+type TerminalReleaseHandler = Callable[[str], None]
+type TerminalKillHandler = Callable[[str], bool]
 
 
 class ACPClient:
@@ -83,6 +88,11 @@ class ACPClient:
         on_permission: PermissionHandler | None = None,
         on_fs_read: FsReadHandler | None = None,
         on_fs_write: FsWriteHandler | None = None,
+        on_terminal_create: TerminalCreateHandler | None = None,
+        on_terminal_output: TerminalOutputHandler | None = None,
+        on_terminal_wait_for_exit: TerminalWaitHandler | None = None,
+        on_terminal_release: TerminalReleaseHandler | None = None,
+        on_terminal_kill: TerminalKillHandler | None = None,
     ) -> ACPMessage:
         """Выполняет ACP-запрос через выбранный транспорт.
 
@@ -103,6 +113,11 @@ class ACPClient:
             on_permission=on_permission,
             on_fs_read=on_fs_read,
             on_fs_write=on_fs_write,
+            on_terminal_create=on_terminal_create,
+            on_terminal_output=on_terminal_output,
+            on_terminal_wait_for_exit=on_terminal_wait_for_exit,
+            on_terminal_release=on_terminal_release,
+            on_terminal_kill=on_terminal_kill,
         )
 
     async def initialize(
@@ -158,6 +173,11 @@ class ACPClient:
         on_permission: PermissionHandler | None = None,
         on_fs_read: FsReadHandler | None = None,
         on_fs_write: FsWriteHandler | None = None,
+        on_terminal_create: TerminalCreateHandler | None = None,
+        on_terminal_output: TerminalOutputHandler | None = None,
+        on_terminal_wait_for_exit: TerminalWaitHandler | None = None,
+        on_terminal_release: TerminalReleaseHandler | None = None,
+        on_terminal_kill: TerminalKillHandler | None = None,
     ) -> ACPMessage:
         """Отправляет request через WebSocket и слушает updates до финала.
 
@@ -213,6 +233,18 @@ class ACPClient:
                 )
                 if handled_fs_request is not None:
                     await ws.send_str(handled_fs_request.to_json())
+                    continue
+
+                handled_terminal_request = self._handle_server_terminal_request(
+                    payload=payload,
+                    on_terminal_create=on_terminal_create,
+                    on_terminal_output=on_terminal_output,
+                    on_terminal_wait_for_exit=on_terminal_wait_for_exit,
+                    on_terminal_release=on_terminal_release,
+                    on_terminal_kill=on_terminal_kill,
+                )
+                if handled_terminal_request is not None:
+                    await ws.send_str(handled_terminal_request.to_json())
                     continue
 
                 response = ACPMessage.from_dict(payload)
@@ -283,6 +315,133 @@ class ACPClient:
                     "newText": content,
                 },
             )
+
+        return None
+
+    def _handle_server_terminal_request(
+        self,
+        *,
+        payload: dict[str, Any],
+        on_terminal_create: TerminalCreateHandler | None,
+        on_terminal_output: TerminalOutputHandler | None,
+        on_terminal_wait_for_exit: TerminalWaitHandler | None,
+        on_terminal_release: TerminalReleaseHandler | None,
+        on_terminal_kill: TerminalKillHandler | None,
+    ) -> ACPMessage | None:
+        """Обрабатывает server-originated `terminal/*` запрос и строит response.
+
+        Пример использования:
+            response = client._handle_server_terminal_request(payload=data, ...)
+        """
+
+        method = payload.get("method")
+        request_id = payload.get("id")
+        raw_params = payload.get("params")
+        params: dict[str, Any] = raw_params if isinstance(raw_params, dict) else {}
+
+        if method == "terminal/create":
+            if on_terminal_create is None:
+                return ACPMessage(
+                    id=request_id,
+                    error=JsonRpcError(
+                        code=-32601,
+                        message="Client does not support terminal/create",
+                    ),
+                )
+            command = params.get("command")
+            if not isinstance(command, str):
+                return ACPMessage(
+                    id=request_id,
+                    error=JsonRpcError(
+                        code=-32602,
+                        message="Invalid params: command must be a string",
+                    ),
+                )
+            return ACPMessage.response(request_id, {"terminalId": on_terminal_create(command)})
+
+        if method == "terminal/output":
+            if on_terminal_output is None:
+                return ACPMessage(
+                    id=request_id,
+                    error=JsonRpcError(
+                        code=-32601,
+                        message="Client does not support terminal/output",
+                    ),
+                )
+            terminal_id = params.get("terminalId")
+            if not isinstance(terminal_id, str):
+                return ACPMessage(
+                    id=request_id,
+                    error=JsonRpcError(
+                        code=-32602,
+                        message="Invalid params: terminalId must be a string",
+                    ),
+                )
+            return ACPMessage.response(request_id, {"output": on_terminal_output(terminal_id)})
+
+        if method == "terminal/wait_for_exit":
+            if on_terminal_wait_for_exit is None:
+                return ACPMessage(
+                    id=request_id,
+                    error=JsonRpcError(
+                        code=-32601,
+                        message="Client does not support terminal/wait_for_exit",
+                    ),
+                )
+            terminal_id = params.get("terminalId")
+            if not isinstance(terminal_id, str):
+                return ACPMessage(
+                    id=request_id,
+                    error=JsonRpcError(
+                        code=-32602,
+                        message="Invalid params: terminalId must be a string",
+                    ),
+                )
+            return ACPMessage.response(
+                request_id,
+                {"exitCode": on_terminal_wait_for_exit(terminal_id)},
+            )
+
+        if method == "terminal/release":
+            if on_terminal_release is None:
+                return ACPMessage(
+                    id=request_id,
+                    error=JsonRpcError(
+                        code=-32601,
+                        message="Client does not support terminal/release",
+                    ),
+                )
+            terminal_id = params.get("terminalId")
+            if not isinstance(terminal_id, str):
+                return ACPMessage(
+                    id=request_id,
+                    error=JsonRpcError(
+                        code=-32602,
+                        message="Invalid params: terminalId must be a string",
+                    ),
+                )
+            on_terminal_release(terminal_id)
+            return ACPMessage.response(request_id, {"ok": True})
+
+        if method == "terminal/kill":
+            if on_terminal_kill is None:
+                return ACPMessage(
+                    id=request_id,
+                    error=JsonRpcError(
+                        code=-32601,
+                        message="Client does not support terminal/kill",
+                    ),
+                )
+            terminal_id = params.get("terminalId")
+            if not isinstance(terminal_id, str):
+                return ACPMessage(
+                    id=request_id,
+                    error=JsonRpcError(
+                        code=-32602,
+                        message="Invalid params: terminalId must be a string",
+                    ),
+                )
+            return ACPMessage.response(request_id, {"killed": on_terminal_kill(terminal_id)})
 
         return None
 

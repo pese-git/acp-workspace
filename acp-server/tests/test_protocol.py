@@ -608,6 +608,169 @@ def test_fs_read_client_error_marks_tool_as_failed() -> None:
     )
 
 
+def test_prompt_terminal_run_emits_terminal_create_request() -> None:
+    protocol = ACPProtocol()
+    protocol.handle(
+        ACPMessage.request(
+            "initialize",
+            {
+                "protocolVersion": 1,
+                "clientCapabilities": {
+                    "fs": {"readTextFile": False, "writeTextFile": False},
+                    "terminal": True,
+                },
+            },
+        )
+    )
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "/term-run ls -la"}],
+            },
+        )
+    )
+    assert outcome.response is None
+    assert any(notification.method == "terminal/create" for notification in outcome.notifications)
+
+
+def test_terminal_rpc_chain_completes_prompt_turn() -> None:
+    protocol = ACPProtocol()
+    protocol.handle(
+        ACPMessage.request(
+            "initialize",
+            {
+                "protocolVersion": 1,
+                "clientCapabilities": {
+                    "fs": {"readTextFile": False, "writeTextFile": False},
+                    "terminal": True,
+                },
+            },
+        )
+    )
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    prompt_outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "/term-run ls"}],
+            },
+        )
+    )
+    assert prompt_outcome.response is None
+
+    create_request = next(
+        notification
+        for notification in prompt_outcome.notifications
+        if notification.method == "terminal/create"
+    )
+    assert create_request.id is not None
+
+    output_step = protocol.handle_client_response(
+        ACPMessage.response(create_request.id, {"terminalId": "term_1"})
+    )
+    output_request = next(
+        notification
+        for notification in output_step.notifications
+        if notification.method == "terminal/output"
+    )
+    assert output_request.id is not None
+
+    wait_step = protocol.handle_client_response(
+        ACPMessage.response(output_request.id, {"output": "hello"})
+    )
+    wait_request = next(
+        notification
+        for notification in wait_step.notifications
+        if notification.method == "terminal/wait_for_exit"
+    )
+    assert wait_request.id is not None
+
+    release_step = protocol.handle_client_response(
+        ACPMessage.response(wait_request.id, {"exitCode": 0})
+    )
+    release_request = next(
+        notification
+        for notification in release_step.notifications
+        if notification.method == "terminal/release"
+    )
+    assert release_request.id is not None
+
+    done = protocol.handle_client_response(ACPMessage.response(release_request.id, {"ok": True}))
+    assert len(done.followup_responses) == 1
+    assert done.followup_responses[0].result == {"stopReason": "end_turn"}
+    assert any(
+        notification.params is not None
+        and notification.params["update"].get("sessionUpdate") == "tool_call_update"
+        and notification.params["update"].get("status") == "completed"
+        for notification in done.notifications
+    )
+
+
+def test_cancel_during_terminal_flow_emits_kill_and_release_requests() -> None:
+    protocol = ACPProtocol()
+    protocol.handle(
+        ACPMessage.request(
+            "initialize",
+            {
+                "protocolVersion": 1,
+                "clientCapabilities": {
+                    "fs": {"readTextFile": False, "writeTextFile": False},
+                    "terminal": True,
+                },
+            },
+        )
+    )
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    prompt_outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "/term-run sleep 10"}],
+            },
+        )
+    )
+    assert prompt_outcome.response is None
+    create_request = next(
+        notification
+        for notification in prompt_outcome.notifications
+        if notification.method == "terminal/create"
+    )
+    assert create_request.id is not None
+
+    _ = protocol.handle_client_response(
+        ACPMessage.response(create_request.id, {"terminalId": "term_1"})
+    )
+
+    cancel_outcome = protocol.handle(
+        ACPMessage.request(
+            "session/cancel",
+            {
+                "sessionId": session_id,
+            },
+        )
+    )
+    methods = [notification.method for notification in cancel_outcome.notifications]
+    assert "terminal/kill" in methods
+    assert "terminal/release" in methods
+
+
 def test_cancel_marks_active_tool_call_as_cancelled() -> None:
     protocol = ACPProtocol()
     created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))

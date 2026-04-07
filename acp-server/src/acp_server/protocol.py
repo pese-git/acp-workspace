@@ -118,6 +118,7 @@ class PromptDirectives:
     fs_read_path: str | None = None
     fs_write_path: str | None = None
     fs_write_content: str | None = None
+    terminal_command: str | None = None
 
 
 @dataclass(slots=True)
@@ -141,6 +142,9 @@ class PendingClientRequestState:
     tool_call_id: str
     path: str
     expected_new_text: str | None = None
+    terminal_id: str | None = None
+    terminal_output: str | None = None
+    terminal_exit_code: int | None = None
 
 
 @dataclass(slots=True)
@@ -861,6 +865,11 @@ class ACPProtocol:
                 )
             )
 
+        terminal_request = self._build_terminal_client_request(
+            session=session,
+            session_id=session_id,
+            directives=directives,
+        )
         fs_request = self._build_fs_client_request(
             session=session,
             session_id=session_id,
@@ -868,7 +877,31 @@ class ACPProtocol:
         )
 
         should_request_permission = False
-        if fs_request is not None:
+        if terminal_request is not None:
+            if self._can_use_terminal_client_rpc():
+                notifications.extend(terminal_request.messages)
+                session.active_turn.pending_client_request = terminal_request.pending_request
+                session.active_turn.phase = "waiting_client_rpc"
+            else:
+                notifications.append(
+                    ACPMessage.notification(
+                        "session/update",
+                        {
+                            "sessionId": session_id,
+                            "update": {
+                                "sessionUpdate": "agent_message_chunk",
+                                "content": {
+                                    "type": "text",
+                                    "text": (
+                                        "Terminal RPC is unavailable for this "
+                                        "client capabilities profile."
+                                    ),
+                                },
+                            },
+                        },
+                    )
+                )
+        elif fs_request is not None:
             if self._can_use_fs_client_rpc(fs_request.kind):
                 notifications.extend(fs_request.messages)
                 session.active_turn.pending_client_request = fs_request.pending_request
@@ -1037,12 +1070,39 @@ class ACPProtocol:
         notifications: list[ACPMessage] = []
         if isinstance(session_id, str) and session_id in self._sessions:
             session = self._sessions[session_id]
+            pending = (
+                session.active_turn.pending_client_request
+                if session.active_turn is not None
+                else None
+            )
+            if pending is not None and pending.terminal_id is not None:
+                # Для terminal-flow отправляем best-effort cleanup перед завершением turn.
+                notifications.append(
+                    ACPMessage.request(
+                        "terminal/kill",
+                        {
+                            "sessionId": session_id,
+                            "terminalId": pending.terminal_id,
+                        },
+                    )
+                )
+                notifications.append(
+                    ACPMessage.request(
+                        "terminal/release",
+                        {
+                            "sessionId": session_id,
+                            "terminalId": pending.terminal_id,
+                        },
+                    )
+                )
             cancelled_prompt_response = self._finalize_active_turn(
                 session=session,
                 stop_reason="cancelled",
             )
             # При отмене переводим все незавершенные tool calls в `cancelled`.
-            notifications = self._cancel_active_tool_calls(session=session, session_id=session_id)
+            notifications.extend(
+                self._cancel_active_tool_calls(session=session, session_id=session_id)
+            )
             session.updated_at = datetime.now(UTC).isoformat()
             notifications.append(
                 self._session_info_notification(
@@ -1267,6 +1327,168 @@ class ACPProtocol:
                             "toolCallId": pending.tool_call_id,
                             "status": "completed",
                             "content": diff_content,
+                        },
+                    },
+                )
+            )
+        elif pending.kind == "terminal_create":
+            terminal_id = None
+            if isinstance(result, dict) and isinstance(result.get("terminalId"), str):
+                terminal_id = result["terminalId"]
+            if terminal_id is None:
+                self._update_tool_call_status(session, pending.tool_call_id, "failed")
+                notifications.append(
+                    ACPMessage.notification(
+                        "session/update",
+                        {
+                            "sessionId": session_id,
+                            "update": {
+                                "sessionUpdate": "tool_call_update",
+                                "toolCallId": pending.tool_call_id,
+                                "status": "failed",
+                            },
+                        },
+                    )
+                )
+                done = self._finalize_active_turn(session=session, stop_reason="end_turn")
+                return ProtocolOutcome(
+                    notifications=notifications,
+                    followup_responses=[done] if done is not None else [],
+                )
+
+            self._update_tool_call_status(session, pending.tool_call_id, "in_progress")
+            notifications.append(
+                ACPMessage.notification(
+                    "session/update",
+                    {
+                        "sessionId": session_id,
+                        "update": {
+                            "sessionUpdate": "tool_call_update",
+                            "toolCallId": pending.tool_call_id,
+                            "status": "in_progress",
+                            "content": [{"type": "terminal", "terminalId": terminal_id}],
+                        },
+                    },
+                )
+            )
+
+            output_request = ACPMessage.request(
+                "terminal/output",
+                {
+                    "sessionId": session_id,
+                    "terminalId": terminal_id,
+                },
+            )
+            if output_request.id is None:
+                return None
+            session.active_turn.pending_client_request = PendingClientRequestState(
+                request_id=output_request.id,
+                kind="terminal_output",
+                tool_call_id=pending.tool_call_id,
+                path=pending.path,
+                terminal_id=terminal_id,
+            )
+            notifications.append(output_request)
+            return ProtocolOutcome(notifications=notifications)
+        elif pending.kind == "terminal_output":
+            terminal_id = pending.terminal_id
+            if terminal_id is None:
+                return None
+            output_text = ""
+            if isinstance(result, dict) and isinstance(result.get("output"), str):
+                output_text = result["output"]
+
+            wait_request = ACPMessage.request(
+                "terminal/wait_for_exit",
+                {
+                    "sessionId": session_id,
+                    "terminalId": terminal_id,
+                },
+            )
+            if wait_request.id is None:
+                return None
+            session.active_turn.pending_client_request = PendingClientRequestState(
+                request_id=wait_request.id,
+                kind="terminal_wait_for_exit",
+                tool_call_id=pending.tool_call_id,
+                path=pending.path,
+                terminal_id=terminal_id,
+                terminal_output=output_text,
+            )
+            notifications.append(wait_request)
+            return ProtocolOutcome(notifications=notifications)
+        elif pending.kind == "terminal_wait_for_exit":
+            terminal_id = pending.terminal_id
+            if terminal_id is None:
+                return None
+            exit_code = None
+            if isinstance(result, dict) and isinstance(result.get("exitCode"), int):
+                exit_code = result["exitCode"]
+
+            release_request = ACPMessage.request(
+                "terminal/release",
+                {
+                    "sessionId": session_id,
+                    "terminalId": terminal_id,
+                },
+            )
+            if release_request.id is None:
+                return None
+            session.active_turn.pending_client_request = PendingClientRequestState(
+                request_id=release_request.id,
+                kind="terminal_release",
+                tool_call_id=pending.tool_call_id,
+                path=pending.path,
+                terminal_id=terminal_id,
+                terminal_output=pending.terminal_output,
+                terminal_exit_code=exit_code,
+            )
+            notifications.append(release_request)
+            return ProtocolOutcome(notifications=notifications)
+        elif pending.kind == "terminal_release":
+            terminal_id = pending.terminal_id
+            if terminal_id is None:
+                return None
+            completion_text = (
+                f"Terminal command finished with exit code {pending.terminal_exit_code}."
+            )
+            if pending.terminal_exit_code is None:
+                completion_text = "Terminal command finished."
+            if pending.terminal_output:
+                completion_text = f"{completion_text} Output: {pending.terminal_output}"
+
+            completed_content = [
+                {
+                    "type": "terminal",
+                    "terminalId": terminal_id,
+                },
+                {
+                    "type": "content",
+                    "content": {
+                        "type": "text",
+                        "text": completion_text,
+                    },
+                },
+            ]
+            self._update_tool_call_status(
+                session,
+                pending.tool_call_id,
+                "completed",
+                content=completed_content,
+            )
+            notifications.append(
+                ACPMessage.notification(
+                    "session/update",
+                    {
+                        "sessionId": session_id,
+                        "update": {
+                            "sessionUpdate": "tool_call_update",
+                            "toolCallId": pending.tool_call_id,
+                            "status": "completed",
+                            "content": completed_content,
+                            "rawOutput": {
+                                "exitCode": pending.terminal_exit_code,
+                            },
                         },
                     },
                 )
@@ -1497,6 +1719,18 @@ class ACPProtocol:
             return caps.fs_write
         return False
 
+    def _can_use_terminal_client_rpc(self) -> bool:
+        """Проверяет доступность terminal/* client RPC в текущем runtime.
+
+        Пример использования:
+            enabled = protocol._can_use_terminal_client_rpc()
+        """
+
+        caps = self._runtime_capabilities
+        if caps is None:
+            return False
+        return caps.terminal
+
     def _build_fs_client_request(
         self,
         *,
@@ -1605,6 +1839,72 @@ class ACPProtocol:
             )
 
         return None
+
+    def _build_terminal_client_request(
+        self,
+        *,
+        session: SessionState,
+        session_id: str,
+        directives: PromptDirectives,
+    ) -> PreparedFsClientRequest | None:
+        """Готовит исходящий terminal/create request и tool_call lifecycle.
+
+        Возвращает структуру того же формата, что и fs-подготовка, чтобы
+        использовать общий пайплайн pending client RPC.
+
+        Пример использования:
+            prepared = protocol._build_terminal_client_request(
+                session=state,
+                session_id="sess_1",
+                directives=directives,
+            )
+        """
+
+        if directives.terminal_command is None:
+            return None
+
+        tool_call_id = self._create_tool_call(
+            session=session,
+            title="Run terminal command",
+            kind="execute",
+        )
+        created = ACPMessage.notification(
+            "session/update",
+            {
+                "sessionId": session_id,
+                "update": {
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": tool_call_id,
+                    "title": "Run terminal command",
+                    "kind": "execute",
+                    "status": "pending",
+                    "rawInput": {
+                        "command": directives.terminal_command,
+                    },
+                },
+            },
+        )
+        terminal_create_request = ACPMessage.request(
+            "terminal/create",
+            {
+                "sessionId": session_id,
+                "command": directives.terminal_command,
+            },
+        )
+        if terminal_create_request.id is None:
+            return None
+
+        pending = PendingClientRequestState(
+            request_id=terminal_create_request.id,
+            kind="terminal_create",
+            tool_call_id=tool_call_id,
+            path=directives.terminal_command,
+        )
+        return PreparedFsClientRequest(
+            kind="terminal_create",
+            messages=[created, terminal_create_request],
+            pending_request=pending,
+        )
 
     def _normalize_session_path(self, cwd: str, candidate: str) -> str | None:
         """Преобразует путь из slash-команды в абсолютный путь в рамках cwd.
@@ -1989,6 +2289,7 @@ class ACPProtocol:
         fs_read_path: str | None = None
         fs_write_path: str | None = None
         fs_write_content: str | None = None
+        terminal_command: str | None = None
 
         stripped_preview = text_preview.strip()
         if stripped_preview.startswith("/fs-read "):
@@ -2004,6 +2305,10 @@ class ACPProtocol:
                 if candidate_path:
                     fs_write_path = candidate_path
                     fs_write_content = candidate_content
+        if stripped_preview.startswith("/term-run "):
+            raw_command = stripped_preview[len("/term-run ") :].strip()
+            if raw_command:
+                terminal_command = raw_command
 
         # Опциональный mock-режим для старых сценариев и backward-совместимости.
         if "/mock-markers" in normalized_tokens:
@@ -2018,6 +2323,7 @@ class ACPProtocol:
             fs_read_path=fs_read_path,
             fs_write_path=fs_write_path,
             fs_write_content=fs_write_content,
+            terminal_command=terminal_command,
         )
 
     def _build_tool_call_updates(

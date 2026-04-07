@@ -316,3 +316,102 @@ async def test_ws_prompt_fs_read_roundtrip_finishes_with_end_turn() -> None:
                 await ws.close()
     finally:
         await runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_ws_prompt_terminal_roundtrip_finishes_with_end_turn() -> None:
+    runner, port = await _start_test_server()
+
+    try:
+        async with ClientSession() as session:
+            ws = await session.ws_connect(f"http://127.0.0.1:{port}/acp/ws")
+            try:
+                await ws.send_json(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": "init_1",
+                        "method": "initialize",
+                        "params": {
+                            "protocolVersion": 1,
+                            "clientCapabilities": {
+                                "fs": {"readTextFile": False, "writeTextFile": False},
+                                "terminal": True,
+                            },
+                        },
+                    }
+                )
+                _ = await asyncio.wait_for(ws.receive_json(), timeout=1.0)
+
+                await ws.send_json(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": "new_1",
+                        "method": "session/new",
+                        "params": {"cwd": "/tmp", "mcpServers": []},
+                    }
+                )
+                new_payload = await asyncio.wait_for(ws.receive_json(), timeout=1.0)
+                session_id = new_payload["result"]["sessionId"]
+
+                await ws.send_json(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": "prompt_1",
+                        "method": "session/prompt",
+                        "params": {
+                            "sessionId": session_id,
+                            "prompt": [{"type": "text", "text": "/term-run ls"}],
+                        },
+                    }
+                )
+
+                received_prompt_response: dict | None = None
+                for _ in range(20):
+                    payload = await asyncio.wait_for(ws.receive_json(), timeout=1.0)
+                    method = payload.get("method")
+                    if method == "terminal/create":
+                        await ws.send_json(
+                            {
+                                "jsonrpc": "2.0",
+                                "id": payload["id"],
+                                "result": {"terminalId": "term_1"},
+                            }
+                        )
+                        continue
+                    if method == "terminal/output":
+                        await ws.send_json(
+                            {
+                                "jsonrpc": "2.0",
+                                "id": payload["id"],
+                                "result": {"output": "ok"},
+                            }
+                        )
+                        continue
+                    if method == "terminal/wait_for_exit":
+                        await ws.send_json(
+                            {
+                                "jsonrpc": "2.0",
+                                "id": payload["id"],
+                                "result": {"exitCode": 0},
+                            }
+                        )
+                        continue
+                    if method == "terminal/release":
+                        await ws.send_json(
+                            {
+                                "jsonrpc": "2.0",
+                                "id": payload["id"],
+                                "result": {"ok": True},
+                            }
+                        )
+                        continue
+                    if payload.get("id") == "prompt_1":
+                        received_prompt_response = payload
+                        break
+
+                assert received_prompt_response is not None
+                assert received_prompt_response["result"] == {"stopReason": "end_turn"}
+            finally:
+                await ws.close()
+    finally:
+        await runner.cleanup()
