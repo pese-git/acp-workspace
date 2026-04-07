@@ -1529,6 +1529,38 @@ def test_permission_policy_is_scoped_by_tool_kind() -> None:
     )
 
 
+def test_prompt_tool_flow_supports_fetch_kind() -> None:
+    protocol = ACPProtocol()
+    _initialize_with_tool_runtime(protocol)
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "/tool fetch latest"}],
+            },
+        )
+    )
+
+    assert outcome.response is None
+    tool_call_updates = [
+        notification
+        for notification in outcome.notifications
+        if notification.method == "session/update"
+        and isinstance(notification.params, dict)
+        and isinstance(notification.params.get("update"), dict)
+        and notification.params["update"].get("sessionUpdate") == "tool_call"
+    ]
+    assert len(tool_call_updates) == 1
+    assert tool_call_updates[0].params is not None
+    assert tool_call_updates[0].params["update"].get("kind") == "fetch"
+
+
 def test_cancel_without_active_turn_does_not_affect_next_prompt() -> None:
     protocol = ACPProtocol()
     created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))

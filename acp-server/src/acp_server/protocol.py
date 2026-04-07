@@ -277,6 +277,18 @@ class ACPProtocol:
         "refusal",
         "cancelled",
     }
+    _supported_tool_kinds = {
+        "read",
+        "edit",
+        "delete",
+        "move",
+        "search",
+        "execute",
+        "think",
+        "fetch",
+        "switch_mode",
+        "other",
+    }
     # Размер страницы для `session/list`; cursor указывает смещение в этом срезе.
     _session_list_page_size = 50
 
@@ -2521,16 +2533,14 @@ class ACPProtocol:
         # `/tool-pending <kind> ...` для policy-scope beyond `other`.
         if stripped_preview.startswith("/tool "):
             candidate = stripped_preview[len("/tool ") :].split(" ", 1)[0].strip().lower()
-            if candidate == "write":
-                candidate = "edit"
-            if candidate in {"other", "read", "edit", "execute", "search"}:
-                tool_kind = candidate
+            normalized_candidate = self._normalize_tool_kind(candidate)
+            if normalized_candidate is not None:
+                tool_kind = normalized_candidate
         if stripped_preview.startswith("/tool-pending "):
             candidate = stripped_preview[len("/tool-pending ") :].split(" ", 1)[0].strip().lower()
-            if candidate == "write":
-                candidate = "edit"
-            if candidate in {"other", "read", "edit", "execute", "search"}:
-                tool_kind = candidate
+            normalized_candidate = self._normalize_tool_kind(candidate)
+            if normalized_candidate is not None:
+                tool_kind = normalized_candidate
 
         return PromptDirectives(
             request_tool=has_tool_directive or has_pending_directive,
@@ -2576,11 +2586,28 @@ class ACPProtocol:
         titles = {
             "read": "Tool read operation",
             "edit": "Tool edit operation",
+            "delete": "Tool delete operation",
+            "move": "Tool move operation",
             "execute": "Tool execution",
             "search": "Tool search operation",
+            "think": "Tool reasoning step",
+            "fetch": "Tool fetch operation",
+            "switch_mode": "Tool mode switch",
             "other": "Tool operation",
         }
         return titles.get(kind, "Tool operation")
+
+    def _normalize_tool_kind(self, candidate: str) -> str | None:
+        """Нормализует tool kind к поддерживаемому множеству ACP.
+
+        Пример использования:
+            kind = protocol._normalize_tool_kind("write")
+        """
+
+        normalized = "edit" if candidate == "write" else candidate
+        if normalized in self._supported_tool_kinds:
+            return normalized
+        return None
 
     def _build_tool_call_updates(
         self,

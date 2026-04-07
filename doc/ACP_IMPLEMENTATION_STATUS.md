@@ -14,7 +14,7 @@
 | `session/prompt` | Partial | Основной поток работает; marker-trigger логика удалена, но остаются demo slash-сценарии. Добавлены stopReason `max_tokens`, `max_turn_requests`, `refusal` для conformance-покрытия. |
 | `session/cancel` | Done | Cancel-flow детерминирован для race с `session/request_permission`, включая late permission responses. |
 | `session/set_config_option` | Done | Реализовано с полным возвратом состояния `configOptions`. |
-| `session/request_permission` | Partial | Базовая server/client оркестрация есть; race с cancel стабилизирован и добавлена persisted policy (`allow_always`/`reject_always`) с scope по tool kind (`other/read/edit/execute/search`), остаются demo-ветки. |
+| `session/request_permission` | Partial | Базовая server/client оркестрация есть; race с cancel стабилизирован и добавлена persisted policy (`allow_always`/`reject_always`) с scope по ACP tool kind (`read/edit/delete/move/search/execute/think/fetch/switch_mode/other`), остаются demo-ветки. |
 | `session/update: tool_call*` | Done | Создание/обновление/replay поддержаны. |
 | `session/update: plan` | Partial | Реализовано и типизировано, пока в demo-сценарии. |
 | `available_commands_update` | Done | Snapshot команд отправляется на prompt/load. |
