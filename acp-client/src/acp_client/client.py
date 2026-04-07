@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
-from typing import Any
+from typing import Any, TypeAlias
 
 import structlog
-from aiohttp import ClientSession, WSMsgType
 
-from .handlers import build_permission_result, handle_server_fs_request, handle_server_terminal_request
 from .helpers import (
     extract_plan_updates,
     extract_structured_updates,
@@ -18,7 +15,6 @@ from .messages import (
     ACPMessage,
     AuthenticateResult,
     InitializeResult,
-    JsonRpcError,
     PlanUpdate,
     PromptResult,
     SessionListItem,
@@ -30,20 +26,22 @@ from .messages import (
     parse_authenticate_result,
     parse_initialize_result,
     parse_prompt_result,
-    parse_request_permission_request,
     parse_session_list_result,
     parse_session_setup_result,
     parse_session_update_notification,
 )
+from .transport import ACPClientWSSession
 
-type PermissionHandler = Callable[[dict[str, Any]], str | None]
-type FsReadHandler = Callable[[str], str]
-type FsWriteHandler = Callable[[str, str], str | None]
-type TerminalCreateHandler = Callable[[str], str]
-type TerminalOutputHandler = Callable[[str], str]
-type TerminalWaitHandler = Callable[[str], int | tuple[int | None, str | None]]
-type TerminalReleaseHandler = Callable[[str], None]
-type TerminalKillHandler = Callable[[str], bool]
+from typing import TypeAlias
+
+PermissionHandler: TypeAlias = Callable[[dict[str, Any]], str | None]
+FsReadHandler: TypeAlias = Callable[[str], str]
+FsWriteHandler: TypeAlias = Callable[[str, str], str | None]
+TerminalCreateHandler: TypeAlias = Callable[[str], str]
+TerminalOutputHandler: TypeAlias = Callable[[str], str]
+TerminalWaitHandler: TypeAlias = Callable[[str], int | tuple[int | None, str | None]]
+TerminalReleaseHandler: TypeAlias = Callable[[str], None]
+TerminalKillHandler: TypeAlias = Callable[[str], bool]
 
 
 class ACPClient:
@@ -315,161 +313,6 @@ class ACPClient:
                 has_error=response.error is not None,
             )
             return response
-
-    async def _await_ws_response(
-        self,
-        *,
-        ws: Any,
-        request_id: Any,
-        on_update: Callable[[dict], None] | None,
-        on_permission: PermissionHandler | None,
-        on_fs_read: FsReadHandler | None,
-        on_fs_write: FsWriteHandler | None,
-        on_terminal_create: TerminalCreateHandler | None,
-        on_terminal_output: TerminalOutputHandler | None,
-        on_terminal_wait_for_exit: TerminalWaitHandler | None,
-        on_terminal_release: TerminalReleaseHandler | None,
-        on_terminal_kill: TerminalKillHandler | None,
-    ) -> ACPMessage:
-        """Ждет финальный response для request ID и обрабатывает server RPC.
-
-        Пример использования:
-            response = await client._await_ws_response(ws=ws, request_id="req_1", ...)
-        """
-
-        while True:
-            message = await ws.receive()
-            if message.type != WSMsgType.TEXT:
-                msg = f"Unexpected WebSocket response type: {message.type}"
-                raise RuntimeError(msg)
-
-            payload = json.loads(message.data)
-            raw_method = payload.get("method") if isinstance(payload, dict) else None
-            if raw_method == "session/update":
-                if on_update is not None:
-                    on_update(payload)
-                continue
-
-            permission_request = None
-            if isinstance(payload, dict):
-                permission_request = parse_request_permission_request(payload)
-            if permission_request is not None:
-                permission_result = build_permission_result(
-                    payload=payload,
-                    on_permission=on_permission,
-                )
-                await ws.send_str(
-                    ACPMessage.response(permission_request.id, permission_result).to_json()
-                )
-                continue
-
-            handled_fs_request = handle_server_fs_request(
-                payload=payload,
-                on_fs_read=on_fs_read,
-                on_fs_write=on_fs_write,
-            )
-            if handled_fs_request is not None:
-                await ws.send_str(handled_fs_request.to_json())
-                continue
-
-            handled_terminal_request = handle_server_terminal_request(
-                payload=payload,
-                on_terminal_create=on_terminal_create,
-                on_terminal_output=on_terminal_output,
-                on_terminal_wait_for_exit=on_terminal_wait_for_exit,
-                on_terminal_release=on_terminal_release,
-                on_terminal_kill=on_terminal_kill,
-            )
-            if handled_terminal_request is not None:
-                await ws.send_str(handled_terminal_request.to_json())
-                continue
-
-            response = ACPMessage.from_dict(payload)
-            if response.id != request_id:
-                continue
-            return response
-
-    async def _perform_ws_initialize(self, ws: Any) -> InitializeResult:
-        """Выполняет ACP initialize в открытом WS-соединении.
-
-        Метод нужен для соблюдения handshake-фазы протокола перед вызовом
-        `session/*` методов в рамках того же WS-канала.
-
-        Пример использования:
-            await client._perform_ws_initialize(ws)
-        """
-
-        init_request = ACPMessage.request(
-            method="initialize",
-            params={
-                "protocolVersion": 1,
-                "clientCapabilities": self._default_client_capabilities(),
-            },
-        )
-        await ws.send_str(init_request.to_json())
-
-        while True:
-            message = await ws.receive()
-            if message.type != WSMsgType.TEXT:
-                msg = f"Unexpected WebSocket response type during initialize: {message.type}"
-                raise RuntimeError(msg)
-
-            payload = json.loads(message.data)
-            raw_method = payload.get("method") if isinstance(payload, dict) else None
-            if raw_method == "session/update":
-                # Инициализация не должна блокироваться на update-событиях.
-                continue
-            response = ACPMessage.from_dict(payload)
-            if response.id != init_request.id:
-                continue
-            if response.error is not None:
-                msg = f"WebSocket initialize failed: {response.error.code} {response.error.message}"
-                raise RuntimeError(msg)
-            return parse_initialize_result(response)
-
-    async def _perform_ws_authenticate(
-        self,
-        ws: Any,
-        *,
-        method_id: str,
-        api_key: str | None = None,
-    ) -> AuthenticateResult:
-        """Выполняет ACP `authenticate` в открытом WS-соединении.
-
-        Пример использования:
-            await client._perform_ws_authenticate(ws, method_id="local")
-        """
-
-        resolved_api_key = api_key if isinstance(api_key, str) and api_key else self.auth_api_key
-        auth_params: dict[str, Any] = {"methodId": method_id}
-        if isinstance(resolved_api_key, str) and resolved_api_key:
-            auth_params["apiKey"] = resolved_api_key
-
-        auth_request = ACPMessage.request(
-            method="authenticate",
-            params=auth_params,
-        )
-        await ws.send_str(auth_request.to_json())
-
-        while True:
-            message = await ws.receive()
-            if message.type != WSMsgType.TEXT:
-                msg = f"Unexpected WebSocket response type during authenticate: {message.type}"
-                raise RuntimeError(msg)
-
-            payload = json.loads(message.data)
-            raw_method = payload.get("method") if isinstance(payload, dict) else None
-            if raw_method == "session/update":
-                continue
-            response = ACPMessage.from_dict(payload)
-            if response.id != auth_request.id:
-                continue
-            if response.error is not None:
-                msg = (
-                    f"WebSocket authenticate failed: {response.error.code} {response.error.message}"
-                )
-                raise RuntimeError(msg)
-            return parse_authenticate_result(response)
 
     async def load_session(
         self,
@@ -812,185 +655,3 @@ class ACPClient:
 
         return response, parsed_updates
 
-
-class ACPClientWSSession:
-    """Persistent WebSocket-сессия для последовательных ACP-запросов.
-
-    Пример использования:
-        async with ACPClient(host="127.0.0.1", port=8080).open_ws_session() as ws_session:
-            await ws_session.request("session/list", params={})
-    """
-
-    def __init__(self, client: ACPClient) -> None:
-        """Создает объект persistent-сессии поверх переданного ACPClient.
-
-        Пример использования:
-            ws_session = ACPClientWSSession(client)
-        """
-
-        self._client = client
-        self._http_session: ClientSession | None = None
-        self._ws: Any | None = None
-        self._initialized = False
-
-    async def __aenter__(self) -> ACPClientWSSession:
-        """Открывает WS-соединение и возвращает текущий session-object.
-
-        Пример использования:
-            async with client.open_ws_session() as ws_session:
-                ...
-        """
-
-        url = f"ws://{self._client.host}:{self._client.port}/acp/ws"
-        self._http_session = ClientSession()
-        self._ws = await self._http_session.ws_connect(url)
-        return self
-
-    async def __aexit__(self, *_: object) -> None:
-        """Закрывает WS и HTTP-сессию независимо от результата операций.
-
-        Пример использования:
-            await ws_session.__aexit__(None, None, None)
-        """
-
-        if self._ws is not None:
-            await self._ws.close()
-            self._ws = None
-        if self._http_session is not None:
-            await self._http_session.close()
-            self._http_session = None
-        self._initialized = False
-
-    async def request(
-        self,
-        method: str,
-        params: dict | None = None,
-        on_update: Callable[[dict], None] | None = None,
-        on_permission: PermissionHandler | None = None,
-        on_fs_read: FsReadHandler | None = None,
-        on_fs_write: FsWriteHandler | None = None,
-        on_terminal_create: TerminalCreateHandler | None = None,
-        on_terminal_output: TerminalOutputHandler | None = None,
-        on_terminal_wait_for_exit: TerminalWaitHandler | None = None,
-        on_terminal_release: TerminalReleaseHandler | None = None,
-        on_terminal_kill: TerminalKillHandler | None = None,
-    ) -> ACPMessage:
-        """Отправляет ACP-запрос в рамках открытой persistent WS-сессии.
-
-        Пример использования:
-            response = await ws_session.request("session/list", params={})
-        """
-
-        if self._ws is None:
-            raise RuntimeError("WebSocket session is not opened")
-
-        should_initialize = method.startswith("session/") and method != "initialize"
-        if should_initialize and not self._initialized:
-            init_result = await self._client._perform_ws_initialize(self._ws)
-            if self._client.auto_authenticate:
-                selected_auth_method = pick_auth_method_id(
-                    init_result,
-                    self._client.preferred_auth_method_id,
-                )
-                if selected_auth_method is not None:
-                    await self._client._perform_ws_authenticate(
-                        self._ws,
-                        method_id=selected_auth_method,
-                        api_key=self._client.auth_api_key,
-                    )
-            self._initialized = True
-
-        request = ACPMessage.request(method=method, params=params)
-        await self._ws.send_str(request.to_json())
-        response = await self._client._await_ws_response(
-            ws=self._ws,
-            request_id=request.id,
-            on_update=on_update,
-            on_permission=on_permission,
-            on_fs_read=on_fs_read,
-            on_fs_write=on_fs_write,
-            on_terminal_create=on_terminal_create,
-            on_terminal_output=on_terminal_output,
-            on_terminal_wait_for_exit=on_terminal_wait_for_exit,
-            on_terminal_release=on_terminal_release,
-            on_terminal_kill=on_terminal_kill,
-        )
-        if method == "initialize" and response.error is None:
-            self._initialized = True
-        return response
-
-    async def authenticate(
-        self, *, method_id: str, api_key: str | None = None
-    ) -> AuthenticateResult:
-        """Выполняет `authenticate` в рамках persistent WS-сессии.
-
-        Пример использования:
-            await ws_session.authenticate(method_id="local")
-        """
-
-        response = await self.request(
-            method="authenticate",
-            params={
-                "methodId": method_id,
-                **(
-                    {"apiKey": api_key}
-                    if isinstance(api_key, str) and api_key
-                    else (
-                        {"apiKey": self._client.auth_api_key}
-                        if isinstance(self._client.auth_api_key, str) and self._client.auth_api_key
-                        else {}
-                    )
-                ),
-            },
-        )
-        return parse_authenticate_result(response)
-
-    async def prompt(
-        self,
-        *,
-        session_id: str,
-        prompt: list[dict[str, Any]],
-        prompt_directives: dict[str, Any] | None = None,
-        on_update: Callable[[dict], None] | None = None,
-        on_permission: PermissionHandler | None = None,
-        on_fs_read: FsReadHandler | None = None,
-        on_fs_write: FsWriteHandler | None = None,
-        on_terminal_create: TerminalCreateHandler | None = None,
-        on_terminal_output: TerminalOutputHandler | None = None,
-        on_terminal_wait_for_exit: TerminalWaitHandler | None = None,
-        on_terminal_release: TerminalReleaseHandler | None = None,
-        on_terminal_kill: TerminalKillHandler | None = None,
-    ) -> PromptResult:
-        """Выполняет `session/prompt` в persistent WS и парсит stop reason.
-
-        Пример использования:
-            result = await ws_session.prompt(
-                session_id="sess_1",
-                prompt=[{"type": "text", "text": "build plan"}],
-                prompt_directives={"publishPlan": True},
-            )
-        """
-
-        params: dict[str, Any] = {
-            "sessionId": session_id,
-            "prompt": prompt,
-        }
-        if isinstance(prompt_directives, dict) and prompt_directives:
-            params["_meta"] = {
-                "promptDirectives": prompt_directives,
-            }
-
-        response = await self.request(
-            method="session/prompt",
-            params=params,
-            on_update=on_update,
-            on_permission=on_permission,
-            on_fs_read=on_fs_read,
-            on_fs_write=on_fs_write,
-            on_terminal_create=on_terminal_create,
-            on_terminal_output=on_terminal_output,
-            on_terminal_wait_for_exit=on_terminal_wait_for_exit,
-            on_terminal_release=on_terminal_release,
-            on_terminal_kill=on_terminal_kill,
-        )
-        return parse_prompt_result(response)
