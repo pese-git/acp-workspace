@@ -51,7 +51,7 @@ class ACPMessage(BaseModel):
         wire = msg.to_dict()
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
     jsonrpc: Literal["2.0"] = "2.0"
     id: JsonRpcId | None = None
@@ -555,9 +555,11 @@ class SessionUpdateParams(BaseModel):
 
     # Идентификатор сессии, к которой относится update.
     sessionId: str
+    # Расширяемое поле метаданных ACP для транспортной/клиентской интеграции.
+    _meta: dict[str, Any] | None = None
     # Полезная нагрузка update-события.
     update: SessionUpdatePayload
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
 
 class SessionUpdateNotification(BaseModel):
@@ -574,7 +576,7 @@ class SessionUpdateNotification(BaseModel):
     # Для данного помощника принимаем только `session/update`.
     method: Literal["session/update"]
     params: SessionUpdateParams
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
 
 type ToolKind = Literal[
@@ -808,7 +810,7 @@ class RequestPermissionRequest(BaseModel):
     id: JsonRpcId
     method: Literal["session/request_permission"]
     params: RequestPermissionPayload
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
 
 class CancelledPermissionOutcome(BaseModel):

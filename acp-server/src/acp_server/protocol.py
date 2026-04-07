@@ -58,6 +58,8 @@ class SessionState:
     # Идентификаторы permission-запросов, отмененных через `session/cancel`.
     # Нужны для детерминированного игнорирования поздних client-responses.
     cancelled_permission_requests: set[JsonRpcId] = field(default_factory=set)
+    # Runtime-capabilities клиента, зафиксированные для этой сессии.
+    runtime_capabilities: ClientRuntimeCapabilities | None = None
 
 
 @dataclass(slots=True)
@@ -210,7 +212,7 @@ class ACPProtocol:
         outcome = protocol.handle(ACPMessage.request("initialize", {}))
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, require_auth: bool = False) -> None:
         """Инициализирует протокол и пустое хранилище сессий.
 
         Пример использования:
@@ -222,6 +224,18 @@ class ACPProtocol:
         # Для in-memory demo-сервера это достаточно; по мере роста можно
         # расширить до connection-scoped хранилища.
         self._runtime_capabilities: ClientRuntimeCapabilities | None = None
+        # Флаг для сценариев, где агент требует authenticate до session setup.
+        self._require_auth = require_auth
+        # Состояние аутентификации текущего протокольного инстанса.
+        self._authenticated = False
+        self._auth_methods: list[dict[str, Any]] = [
+            {
+                "id": "local",
+                "name": "Local authentication",
+                "description": "Demo local authentication flow",
+                "type": "api_key",
+            }
+        ]
 
     _config_specs: dict[str, dict[str, Any]] = {
         "mode": {
@@ -283,6 +297,8 @@ class ACPProtocol:
         # Явный диспетчер методов упрощает проверку протокольных веток.
         if method == "initialize":
             return ProtocolOutcome(response=self._initialize(message.id, params))
+        if method == "authenticate":
+            return ProtocolOutcome(response=self._authenticate(message.id, params))
         if method == "session/new":
             return ProtocolOutcome(response=self._session_new(message.id, params))
         if method == "session/load":
@@ -391,12 +407,59 @@ class ACPProtocol:
                 "title": "ACP Server",
                 "version": "0.1.0",
             },
-            "authMethods": [],
+            "authMethods": self._auth_methods if self._require_auth else [],
         }
         result["agentCapabilities"]["sessionCapabilities"] = {
             "list": {},
         }
         return ACPMessage.response(request_id, result)
+
+    def _authenticate(self, request_id: JsonRpcId | None, params: dict[str, Any]) -> ACPMessage:
+        """Обрабатывает `authenticate` и отмечает протокольный инстанс как auth-ok.
+
+        Пример использования:
+            response = protocol._authenticate("req_1", {"methodId": "local"})
+        """
+
+        if not self._require_auth:
+            return ACPMessage.response(request_id, {})
+
+        method_id = params.get("methodId")
+        if not isinstance(method_id, str):
+            return ACPMessage.error_response(
+                request_id,
+                code=-32602,
+                message="Invalid params: methodId is required",
+            )
+
+        known_method_ids = {
+            method.get("id")
+            for method in self._auth_methods
+            if isinstance(method, dict) and isinstance(method.get("id"), str)
+        }
+        if method_id not in known_method_ids:
+            return ACPMessage.error_response(
+                request_id,
+                code=-32602,
+                message="Invalid params: unknown authentication method",
+            )
+
+        self._authenticated = True
+        return ACPMessage.response(request_id, {})
+
+    def _auth_required_error(self, request_id: JsonRpcId | None) -> ACPMessage:
+        """Строит унифицированную ошибку `auth_required` для session setup методов.
+
+        Пример использования:
+            return protocol._auth_required_error("req_1")
+        """
+
+        return ACPMessage.error_response(
+            request_id,
+            code=-32010,
+            message="auth_required",
+            data={"authMethods": self._auth_methods},
+        )
 
     def _session_new(self, request_id: JsonRpcId | None, params: dict[str, Any]) -> ACPMessage:
         """Создает новую in-memory сессию и возвращает ее идентификатор.
@@ -407,6 +470,9 @@ class ACPProtocol:
         Пример использования:
             response = protocol._session_new("req_1", {"cwd": "/tmp", "mcpServers": []})
         """
+
+        if self._require_auth and not self._authenticated:
+            return self._auth_required_error(request_id)
 
         # По спецификации cwd должен быть абсолютным путем.
         cwd = params.get("cwd")
@@ -435,6 +501,7 @@ class ACPProtocol:
             mcp_servers=[server for server in mcp_servers if isinstance(server, dict)],
             config_values=config_values,
             available_commands=self._build_default_commands(),
+            runtime_capabilities=self._runtime_capabilities,
         )
         return ACPMessage.response(
             request_id,
@@ -461,6 +528,9 @@ class ACPProtocol:
                 {"sessionId": "sess_1", "cwd": "/tmp", "mcpServers": []},
             )
         """
+
+        if self._require_auth and not self._authenticated:
+            return ProtocolOutcome(response=self._auth_required_error(request_id))
 
         # Загрузка поддерживает in-memory сессии и реплей накопленной истории в `session/update`.
         session_id = params.get("sessionId")
@@ -505,6 +575,7 @@ class ACPProtocol:
         # При загрузке фиксируем актуальный контекст клиента.
         session.cwd = cwd
         session.mcp_servers = [server for server in mcp_servers if isinstance(server, dict)]
+        session.runtime_capabilities = self._runtime_capabilities
 
         notifications: list[ACPMessage] = []
         for entry in session.history:
@@ -816,7 +887,7 @@ class ACPProtocol:
         text_preview = text_blocks[0] if text_blocks else "Prompt received"
         prompt_for_title = text_preview.strip()
         directives = self._extract_prompt_directives(text_preview)
-        tool_runtime_available = self._can_run_tool_runtime()
+        tool_runtime_available = self._can_run_tool_runtime(session)
         should_run_tool_flow = directives.request_tool and tool_runtime_available
         tool_title = self._resolve_demo_tool_title(directives.tool_kind)
 
@@ -886,7 +957,7 @@ class ACPProtocol:
         should_request_permission = False
         prompt_stop_reason = "end_turn"
         if terminal_request is not None:
-            if self._can_use_terminal_client_rpc():
+            if self._can_use_terminal_client_rpc(session):
                 notifications.extend(terminal_request.messages)
                 session.active_turn.pending_client_request = terminal_request.pending_request
                 session.active_turn.phase = "waiting_client_rpc"
@@ -910,7 +981,7 @@ class ACPProtocol:
                     )
                 )
         elif fs_request is not None:
-            if self._can_use_fs_client_rpc(fs_request.kind):
+            if self._can_use_fs_client_rpc(session, fs_request.kind):
                 notifications.extend(fs_request.messages)
                 session.active_turn.pending_client_request = fs_request.pending_request
                 session.active_turn.phase = "waiting_client_rpc"
@@ -1792,7 +1863,7 @@ class ACPProtocol:
             terminal=terminal_enabled,
         )
 
-    def _can_run_tool_runtime(self) -> bool:
+    def _can_run_tool_runtime(self, session: SessionState) -> bool:
         """Проверяет, можно ли запускать tool-runtime ветки в текущем соединении.
 
         Пример использования:
@@ -1800,21 +1871,21 @@ class ACPProtocol:
                 ...
         """
 
-        caps = self._runtime_capabilities
+        caps = session.runtime_capabilities
         if caps is None:
             # До успешного initialize runtime-возможности не согласованы,
             # поэтому tool-runtime ветки должны оставаться выключенными.
             return False
         return caps.terminal or caps.fs_read or caps.fs_write
 
-    def _can_use_fs_client_rpc(self, kind: str) -> bool:
+    def _can_use_fs_client_rpc(self, session: SessionState, kind: str) -> bool:
         """Проверяет доступность fs/* client RPC для указанной операции.
 
         Пример использования:
             enabled = protocol._can_use_fs_client_rpc("fs_read")
         """
 
-        caps = self._runtime_capabilities
+        caps = session.runtime_capabilities
         if caps is None:
             return False
         if kind == "fs_read":
@@ -1823,14 +1894,14 @@ class ACPProtocol:
             return caps.fs_write
         return False
 
-    def _can_use_terminal_client_rpc(self) -> bool:
+    def _can_use_terminal_client_rpc(self, session: SessionState) -> bool:
         """Проверяет доступность terminal/* client RPC в текущем runtime.
 
         Пример использования:
             enabled = protocol._can_use_terminal_client_rpc()
         """
 
-        caps = self._runtime_capabilities
+        caps = session.runtime_capabilities
         if caps is None:
             return False
         return caps.terminal

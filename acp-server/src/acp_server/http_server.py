@@ -29,7 +29,9 @@ class ACPHttpServer:
         await server.run()
     """
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 8080) -> None:
+    def __init__(
+        self, host: str = "127.0.0.1", port: int = 8080, *, require_auth: bool = False
+    ) -> None:
         """Создает транспортный сервер с адресом прослушивания.
 
         Пример использования:
@@ -38,7 +40,7 @@ class ACPHttpServer:
 
         self.host = host
         self.port = port
-        self.protocol = ACPProtocol()
+        self.require_auth = require_auth
 
     async def run(self) -> None:
         """Запускает WS endpoint и держит процесс живым.
@@ -71,6 +73,7 @@ class ACPHttpServer:
 
         ws = web.WebSocketResponse()
         await ws.prepare(request)
+        protocol = ACPProtocol(require_auth=self.require_auth)
         # Храним отложенные завершения prompt-turn по sessionId в рамках WS-соединения.
         deferred_prompt_tasks: dict[str, asyncio.Task[None]] = {}
         # По ACP любые session-методы в WS доступны только после initialize.
@@ -85,7 +88,7 @@ class ACPHttpServer:
                         acp_request = ACPMessage.from_json(message.data)
                         method_name = acp_request.method
                         if method_name is None:
-                            outcome = self.protocol.handle_client_response(acp_request)
+                            outcome = protocol.handle_client_response(acp_request)
                         else:
                             if method_name == "initialize":
                                 initialized = True
@@ -113,7 +116,7 @@ class ACPHttpServer:
                                 raw_session_id = acp_request.params.get("sessionId")
                                 if isinstance(raw_session_id, str):
                                     session_id = raw_session_id
-                            outcome = self.protocol.handle(acp_request)
+                            outcome = protocol.handle(acp_request)
                     except Exception as exc:
                         outcome = ProtocolOutcome(
                             response=ACPMessage.error_response(
@@ -133,7 +136,7 @@ class ACPHttpServer:
                         method_name == "session/prompt"
                         and session_id is not None
                         and outcome.response is None
-                        and self.protocol.should_auto_complete_active_turn(session_id)
+                        and protocol.should_auto_complete_active_turn(session_id)
                     ):
                         task = deferred_prompt_tasks.pop(session_id, None)
                         if task is not None:
@@ -141,6 +144,7 @@ class ACPHttpServer:
                         deferred_prompt_tasks[session_id] = asyncio.create_task(
                             self._complete_deferred_prompt(
                                 ws=ws,
+                                protocol=protocol,
                                 session_id=session_id,
                                 deferred_prompt_tasks=deferred_prompt_tasks,
                             )
@@ -169,6 +173,7 @@ class ACPHttpServer:
         self,
         *,
         ws: web.WebSocketResponse,
+        protocol: ACPProtocol,
         session_id: str,
         deferred_prompt_tasks: dict[str, asyncio.Task[None]],
     ) -> None:
@@ -184,7 +189,7 @@ class ACPHttpServer:
         try:
             # Небольшая задержка оставляет окно для входящего `session/cancel`.
             await asyncio.sleep(0.05)
-            response = self.protocol.complete_active_turn(session_id, stop_reason="end_turn")
+            response = protocol.complete_active_turn(session_id, stop_reason="end_turn")
             if response is not None and not ws.closed:
                 await ws.send_str(response.to_json())
         except asyncio.CancelledError:

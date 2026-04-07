@@ -39,6 +39,61 @@ def test_initialize_request() -> None:
     assert outcome.response.result["protocolVersion"] == 1
 
 
+def test_initialize_returns_auth_methods_when_auth_is_required() -> None:
+    protocol = ACPProtocol(require_auth=True)
+    request = ACPMessage.request(
+        "initialize",
+        {
+            "protocolVersion": 1,
+            "clientCapabilities": {},
+        },
+    )
+
+    outcome = protocol.handle(request)
+
+    assert outcome.response is not None
+    assert outcome.response.error is None
+    assert isinstance(outcome.response.result, dict)
+    assert isinstance(outcome.response.result.get("authMethods"), list)
+    assert len(outcome.response.result["authMethods"]) == 1
+
+
+def test_session_new_requires_authentication_when_enabled() -> None:
+    protocol = ACPProtocol(require_auth=True)
+
+    outcome = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+
+    assert outcome.response is not None
+    assert outcome.response.error is not None
+    assert outcome.response.error.message == "auth_required"
+
+
+def test_authenticate_allows_session_creation_when_auth_enabled() -> None:
+    protocol = ACPProtocol(require_auth=True)
+    init = protocol.handle(
+        ACPMessage.request(
+            "initialize",
+            {
+                "protocolVersion": 1,
+                "clientCapabilities": {},
+            },
+        )
+    )
+    assert init.response is not None
+    assert isinstance(init.response.result, dict)
+    auth_methods = init.response.result["authMethods"]
+    assert isinstance(auth_methods, list)
+    method_id = auth_methods[0]["id"]
+
+    authenticated = protocol.handle(ACPMessage.request("authenticate", {"methodId": method_id}))
+    assert authenticated.response is not None
+    assert authenticated.response.error is None
+
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert created.response.error is None
+
+
 def test_initialize_negotiates_to_supported_version() -> None:
     protocol = ACPProtocol()
     request = ACPMessage.request(
@@ -248,6 +303,88 @@ def test_prompt_tool_flow_respects_negotiated_client_capabilities() -> None:
         if notification.params is not None
     ]
     assert "tool_call" not in update_types
+
+
+def test_runtime_capabilities_are_session_scoped_after_reinitialize() -> None:
+    protocol = ACPProtocol()
+
+    first_init = protocol.handle(
+        ACPMessage.request(
+            "initialize",
+            {
+                "protocolVersion": 1,
+                "clientCapabilities": {
+                    "fs": {"readTextFile": False, "writeTextFile": False},
+                    "terminal": True,
+                },
+            },
+        )
+    )
+    assert first_init.response is not None
+    assert first_init.response.error is None
+
+    first_session = protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
+    assert first_session.response is not None
+    assert isinstance(first_session.response.result, dict)
+    first_session_id = first_session.response.result["sessionId"]
+
+    second_init = protocol.handle(
+        ACPMessage.request(
+            "initialize",
+            {
+                "protocolVersion": 1,
+                "clientCapabilities": {
+                    "fs": {"readTextFile": False, "writeTextFile": False},
+                    "terminal": False,
+                },
+            },
+        )
+    )
+    assert second_init.response is not None
+    assert second_init.response.error is None
+
+    second_session = protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
+    assert second_session.response is not None
+    assert isinstance(second_session.response.result, dict)
+    second_session_id = second_session.response.result["sessionId"]
+
+    first_prompt = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": first_session_id,
+                "prompt": [{"type": "text", "text": "/tool run"}],
+            },
+        )
+    )
+    assert first_prompt.response is not None
+    first_updates = [
+        notification.params["update"]["sessionUpdate"]
+        for notification in first_prompt.notifications
+        if notification.params is not None
+    ]
+    assert "tool_call" in first_updates
+
+    second_prompt = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": second_session_id,
+                "prompt": [{"type": "text", "text": "/tool run"}],
+            },
+        )
+    )
+    assert second_prompt.response is not None
+    second_updates = [
+        notification.params["update"]["sessionUpdate"]
+        for notification in second_prompt.notifications
+        if notification.params is not None
+    ]
+    assert "tool_call" not in second_updates
 
 
 def test_prompt_tool_flow_requires_initialize_capability_negotiation() -> None:

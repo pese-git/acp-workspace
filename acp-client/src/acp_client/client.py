@@ -32,7 +32,7 @@ type FsReadHandler = Callable[[str], str]
 type FsWriteHandler = Callable[[str, str], str | None]
 type TerminalCreateHandler = Callable[[str], str]
 type TerminalOutputHandler = Callable[[str], str]
-type TerminalWaitHandler = Callable[[str], int]
+type TerminalWaitHandler = Callable[[str], int | tuple[int | None, str | None]]
 type TerminalReleaseHandler = Callable[[str], None]
 type TerminalKillHandler = Callable[[str], bool]
 
@@ -284,15 +284,8 @@ class ACPClient:
                         message="Invalid params: path and content must be strings",
                     ),
                 )
-            old_text = on_fs_write(path, content)
-            return ACPMessage.response(
-                request_id,
-                {
-                    "ok": True,
-                    "oldText": old_text,
-                    "newText": content,
-                },
-            )
+            _ = on_fs_write(path, content)
+            return ACPMessage.response(request_id, {})
 
         return None
 
@@ -355,7 +348,14 @@ class ACPClient:
                         message="Invalid params: terminalId must be a string",
                     ),
                 )
-            return ACPMessage.response(request_id, {"output": on_terminal_output(terminal_id)})
+            return ACPMessage.response(
+                request_id,
+                {
+                    "output": on_terminal_output(terminal_id),
+                    "truncated": False,
+                    "exitStatus": None,
+                },
+            )
 
         if method == "terminal/wait_for_exit":
             if on_terminal_wait_for_exit is None:
@@ -375,9 +375,22 @@ class ACPClient:
                         message="Invalid params: terminalId must be a string",
                     ),
                 )
+            wait_result = on_terminal_wait_for_exit(terminal_id)
+            exit_code: int | None
+            signal: str | None
+            if isinstance(wait_result, tuple):
+                tuple_exit_code, tuple_signal = wait_result
+                exit_code = tuple_exit_code if isinstance(tuple_exit_code, int) else None
+                signal = tuple_signal if isinstance(tuple_signal, str) else None
+            else:
+                exit_code = wait_result if isinstance(wait_result, int) else None
+                signal = None
             return ACPMessage.response(
                 request_id,
-                {"exitCode": on_terminal_wait_for_exit(terminal_id)},
+                {
+                    "exitCode": exit_code,
+                    "signal": signal,
+                },
             )
 
         if method == "terminal/release":
@@ -399,7 +412,7 @@ class ACPClient:
                     ),
                 )
             on_terminal_release(terminal_id)
-            return ACPMessage.response(request_id, {"ok": True})
+            return ACPMessage.response(request_id, {})
 
         if method == "terminal/kill":
             if on_terminal_kill is None:
@@ -419,7 +432,8 @@ class ACPClient:
                         message="Invalid params: terminalId must be a string",
                     ),
                 )
-            return ACPMessage.response(request_id, {"killed": on_terminal_kill(terminal_id)})
+            _ = on_terminal_kill(terminal_id)
+            return ACPMessage.response(request_id, {})
 
         return None
 

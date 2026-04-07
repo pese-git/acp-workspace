@@ -847,9 +847,7 @@ async def test_ws_client_handles_fs_write_request() -> None:
 
             fs_response = await ws.receive_json()
             assert fs_response["id"] == "fs_2"
-            assert fs_response["result"]["ok"] is True
-            assert fs_response["result"]["oldText"] == "old-text"
-            assert fs_response["result"]["newText"] == "new-text"
+            assert fs_response["result"] == {}
 
             await ws.send_json(
                 {
@@ -953,7 +951,7 @@ async def test_ws_client_handles_terminal_requests() -> None:
             )
             release_response = await ws.receive_json()
             assert release_response["id"] == "term_release_1"
-            assert release_response["result"]["ok"] is True
+            assert release_response["result"] == {}
 
             await ws.send_json(
                 {
