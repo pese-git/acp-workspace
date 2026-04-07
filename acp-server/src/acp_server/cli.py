@@ -4,6 +4,8 @@
 
 Пример использования:
     acp-server --host 127.0.0.1 --port 8080
+    acp-server --log-level DEBUG
+    acp-server --log-level INFO --log-json
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ import asyncio
 import os
 
 from .http_server import ACPHttpServer
+from .logging import setup_logging
 
 
 def run_server() -> None:
@@ -38,7 +41,21 @@ def run_server() -> None:
             "можно также задать через переменную среды ACP_SERVER_API_KEY"
         ),
     )
+    parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        default="INFO",
+        help="Уровень логирования (DEBUG, INFO, WARNING, ERROR). По умолчанию INFO.",
+    )
+    parser.add_argument(
+        "--log-json",
+        action="store_true",
+        help="Использовать JSON формат для логов (для production). По умолчанию консольный формат.",
+    )
     args = parser.parse_args()
+
+    # Инициализируем логирование перед запуском сервера
+    setup_logging(level=args.log_level, json_format=args.log_json)
 
     auth_api_key = args.auth_api_key
     if not isinstance(auth_api_key, str) or not auth_api_key:
