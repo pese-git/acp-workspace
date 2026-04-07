@@ -57,6 +57,15 @@ def test_session_prompt_sends_update() -> None:
     assert "available_commands_update" in update_types
 
 
+def test_session_new_returns_modes_state() -> None:
+    protocol = ACPProtocol()
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    assert isinstance(created.response.result.get("modes"), dict)
+    assert created.response.result["modes"]["currentModeId"] == "ask"
+
+
 def test_session_list_returns_created_session() -> None:
     protocol = ACPProtocol()
     created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
@@ -93,6 +102,8 @@ def test_set_config_option_updates_value() -> None:
     assert updated.response is not None
     assert isinstance(updated.response.result, dict)
     config_options = updated.response.result["configOptions"]
+    assert isinstance(updated.response.result.get("modes"), dict)
+    assert updated.response.result["modes"]["currentModeId"] == "code"
     mode = next(option for option in config_options if option["id"] == "mode")
     assert mode["currentValue"] == "code"
     assert len(updated.notifications) == 3
@@ -199,6 +210,31 @@ def test_cancel_marks_active_tool_call_as_cancelled() -> None:
     )
 
 
+def test_cancel_without_active_turn_does_not_affect_next_prompt() -> None:
+    protocol = ACPProtocol()
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    cancel_outcome = protocol.handle(
+        ACPMessage.notification("session/cancel", {"sessionId": session_id})
+    )
+    assert cancel_outcome.response is None
+
+    prompt_outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "normal prompt"}],
+            },
+        )
+    )
+    assert prompt_outcome.response is not None
+    assert prompt_outcome.response.result == {"stopReason": "end_turn"}
+
+
 def test_session_load_replays_history_and_config() -> None:
     protocol = ACPProtocol()
     created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
@@ -229,7 +265,9 @@ def test_session_load_replays_history_and_config() -> None:
     )
 
     assert loaded.response is not None
-    assert loaded.response.result is None
+    assert isinstance(loaded.response.result, dict)
+    assert "configOptions" in loaded.response.result
+    assert isinstance(loaded.response.result.get("modes"), dict)
 
     replay_updates = [
         notification.params["update"]["sessionUpdate"]
@@ -241,6 +279,33 @@ def test_session_load_replays_history_and_config() -> None:
     assert "config_option_update" in replay_updates
     assert "session_info_update" in replay_updates
     assert "available_commands_update" in replay_updates
+
+
+def test_session_set_mode_updates_current_mode() -> None:
+    protocol = ACPProtocol()
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    outcome = protocol.handle(
+        ACPMessage.request(
+            "session/set_mode",
+            {
+                "sessionId": session_id,
+                "modeId": "code",
+            },
+        )
+    )
+
+    assert outcome.response is not None
+    assert outcome.response.result == {}
+    update_types = [
+        notification.params["update"]["sessionUpdate"]
+        for notification in outcome.notifications
+        if notification.params is not None
+    ]
+    assert "current_mode_update" in update_types
 
 
 def test_session_load_replays_tool_call_state() -> None:

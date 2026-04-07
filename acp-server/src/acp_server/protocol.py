@@ -41,8 +41,8 @@ class SessionState:
     config_values: dict[str, str] = field(default_factory=dict)
     # Упрощенная история, достаточная для текущих update-сценариев.
     history: list[dict[str, Any]] = field(default_factory=list)
-    # Кооперативная отмена текущего prompt-turn.
-    cancelled: bool = False
+    # Текущее активное выполнение prompt-turn (если есть).
+    active_turn: ActiveTurnState | None = None
     # Локальный счетчик для стабильной генерации toolCallId.
     tool_call_counter: int = 0
     # Реестр созданных tool calls и их состояний.
@@ -72,6 +72,21 @@ class ToolCallState:
     status: str
     # Контент, возвращенный при завершении (если есть).
     content: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class ActiveTurnState:
+    """Состояние текущего prompt-turn для корректной обработки cancel.
+
+    Содержит идентификатор JSON-RPC запроса prompt и признак запроса отмены.
+
+    Пример использования:
+        turn = ActiveTurnState(prompt_request_id="req_1", session_id="sess_1")
+    """
+
+    prompt_request_id: JsonRpcId | None
+    session_id: str
+    cancel_requested: bool = False
 
 
 @dataclass(slots=True)
@@ -178,6 +193,8 @@ class ACPProtocol:
             return self._session_cancel(message.id, params)
         if method == "session/set_config_option":
             return self._session_set_config_option(message.id, params)
+        if method == "session/set_mode":
+            return self._session_set_mode(message.id, params)
         if method == "ping":
             return ProtocolOutcome(response=ACPMessage.response(message.id, {"pong": True}))
         if method == "echo":
@@ -279,6 +296,7 @@ class ACPProtocol:
             {
                 "sessionId": session_id,
                 "configOptions": self._build_config_options(config_values),
+                "modes": self._build_modes_state(config_values),
             },
         )
 
@@ -444,7 +462,13 @@ class ACPProtocol:
         )
 
         return ProtocolOutcome(
-            response=ACPMessage.response(request_id, None),
+            response=ACPMessage.response(
+                request_id,
+                {
+                    "configOptions": self._build_config_options(session.config_values),
+                    "modes": self._build_modes_state(session.config_values),
+                },
+            ),
             notifications=notifications,
         )
 
@@ -479,7 +503,31 @@ class ACPProtocol:
                 }
             )
 
-        return ACPMessage.response(request_id, {"sessions": sessions})
+        return ACPMessage.response(request_id, {"sessions": sessions, "nextCursor": None})
+
+    def _build_modes_state(self, values: dict[str, str]) -> dict[str, Any]:
+        """Строит legacy-состояние modes для совместимых клиентов ACP.
+
+        Пример использования:
+            modes = protocol._build_modes_state({"mode": "ask", "model": "baseline"})
+        """
+
+        mode_option = self._config_specs.get("mode", {})
+        available_modes = []
+        for option in mode_option.get("options", []):
+            if isinstance(option, dict) and isinstance(option.get("value"), str):
+                available_modes.append(
+                    {
+                        "id": option["value"],
+                        "name": option.get("name", option["value"]),
+                        "description": option.get("description"),
+                    }
+                )
+
+        return {
+            "availableModes": available_modes,
+            "currentModeId": values.get("mode", str(mode_option.get("default", "ask"))),
+        }
 
     def _session_prompt(
         self, request_id: JsonRpcId | None, params: dict[str, Any]
@@ -528,8 +576,17 @@ class ACPProtocol:
         if content_error is not None:
             return ProtocolOutcome(response=content_error)
 
-        if session.cancelled:
-            session.cancelled = False
+        if session.active_turn is not None:
+            return ProtocolOutcome(
+                response=ACPMessage.error_response(
+                    request_id,
+                    code=-32002,
+                    message=f"Session busy: active turn in progress for {session_id}",
+                )
+            )
+
+        session.active_turn = ActiveTurnState(prompt_request_id=request_id, session_id=session_id)
+        if session.active_turn.cancel_requested:
             return ProtocolOutcome(
                 response=ACPMessage.response(request_id, {"stopReason": "cancelled"})
             )
@@ -615,10 +672,12 @@ class ACPProtocol:
             )
         )
 
-        return ProtocolOutcome(
+        outcome = ProtocolOutcome(
             response=ACPMessage.response(request_id, {"stopReason": "end_turn"}),
             notifications=notifications,
         )
+        session.active_turn = None
+        return outcome
 
     def _session_cancel(
         self, request_id: JsonRpcId | None, params: dict[str, Any]
@@ -635,7 +694,8 @@ class ACPProtocol:
         notifications: list[ACPMessage] = []
         if isinstance(session_id, str) and session_id in self._sessions:
             session = self._sessions[session_id]
-            session.cancelled = True
+            if session.active_turn is not None:
+                session.active_turn.cancel_requested = True
             # При отмене переводим все незавершенные tool calls в `cancelled`.
             notifications = self._cancel_active_tool_calls(session=session, session_id=session_id)
             session.updated_at = datetime.now(UTC).isoformat()
@@ -746,7 +806,10 @@ class ACPProtocol:
         return ProtocolOutcome(
             response=ACPMessage.response(
                 request_id,
-                {"configOptions": config_options},
+                {
+                    "configOptions": config_options,
+                    "modes": self._build_modes_state(session.config_values),
+                },
             ),
             notifications=self._build_config_update_notifications(
                 session_id=session_id,
@@ -754,6 +817,48 @@ class ACPProtocol:
                 session=session,
                 config_notification=config_notification,
             ),
+        )
+
+    def _session_set_mode(
+        self,
+        request_id: JsonRpcId | None,
+        params: dict[str, Any],
+    ) -> ProtocolOutcome:
+        """Legacy-совместимый метод смены режима через `session/set_mode`.
+
+        Пример использования:
+            outcome = protocol._session_set_mode(
+                "req_1",
+                {"sessionId": "sess_1", "modeId": "code"},
+            )
+        """
+
+        session_id = params.get("sessionId")
+        mode_id = params.get("modeId")
+        if not isinstance(session_id, str) or not isinstance(mode_id, str):
+            return ProtocolOutcome(
+                response=ACPMessage.error_response(
+                    request_id,
+                    code=-32602,
+                    message="Invalid params: sessionId and modeId must be strings",
+                )
+            )
+
+        mapped = self._session_set_config_option(
+            request_id,
+            {
+                "sessionId": session_id,
+                "configId": "mode",
+                "value": mode_id,
+            },
+        )
+        if mapped.response is None or mapped.response.error is not None:
+            return mapped
+
+        # По схеме `session/set_mode` возвращает пустой объект.
+        return ProtocolOutcome(
+            response=ACPMessage.response(request_id, {}),
+            notifications=mapped.notifications,
         )
 
     def _build_config_update_notifications(

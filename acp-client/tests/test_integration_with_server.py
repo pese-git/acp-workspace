@@ -83,7 +83,10 @@ async def test_load_session_helper_collects_replay_updates() -> None:
                 {
                     "jsonrpc": "2.0",
                     "id": payload["id"],
-                    "result": None,
+                    "result": {
+                        "configOptions": [],
+                        "modes": {"availableModes": [], "currentModeId": "ask"},
+                    },
                 }
             )
             break
@@ -106,7 +109,7 @@ async def test_load_session_helper_collects_replay_updates() -> None:
             mcp_servers=[],
             transport="ws",
         )
-        assert response.result is None
+        assert isinstance(response.result, dict)
         assert len(updates) == 2
         update_types: list[str | None] = [
             update.get("params", {}).get("update", {}).get("sessionUpdate")
@@ -144,7 +147,10 @@ async def test_load_session_parsed_returns_typed_updates() -> None:
                 {
                     "jsonrpc": "2.0",
                     "id": payload["id"],
-                    "result": None,
+                    "result": {
+                        "configOptions": [],
+                        "modes": {"availableModes": [], "currentModeId": "ask"},
+                    },
                 }
             )
             break
@@ -167,7 +173,7 @@ async def test_load_session_parsed_returns_typed_updates() -> None:
             mcp_servers=[],
             transport="ws",
         )
-        assert response.result is None
+        assert isinstance(response.result, dict)
         assert len(updates) == 1
         assert updates[0].params.sessionId == "sess_2"
         assert updates[0].params.update.sessionUpdate == "session_info_update"
@@ -230,7 +236,10 @@ async def test_load_session_tool_updates_filters_non_tool_events() -> None:
                 {
                     "jsonrpc": "2.0",
                     "id": payload["id"],
-                    "result": None,
+                    "result": {
+                        "configOptions": [],
+                        "modes": {"availableModes": [], "currentModeId": "ask"},
+                    },
                 }
             )
             break
@@ -253,7 +262,7 @@ async def test_load_session_tool_updates_filters_non_tool_events() -> None:
             mcp_servers=[],
             transport="ws",
         )
-        assert response.result is None
+        assert isinstance(response.result, dict)
         assert len(tool_updates) == 2
         assert tool_updates[0].sessionUpdate == "tool_call"
         assert tool_updates[1].sessionUpdate == "tool_call_update"
