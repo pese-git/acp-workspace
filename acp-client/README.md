@@ -20,6 +20,7 @@ uv run acp-client --host 127.0.0.1 --port 8080 --method session/load --params '{
 
 - `initialize(...)` — выполняет handshake и возвращает типизированный результат согласования.
 - `prompt(...)` — типизированный helper для `session/prompt` с optional `_meta.promptDirectives`.
+- `open_ws_session().prompt(...)` — typed helper для `session/prompt` в persistent WS-сессии.
 - `create_session_parsed(...)` — типизированный helper для ответа `session/new`.
 - `load_session_setup_parsed(...)` — типизированный helper для ответа `session/load` и replay updates.
 - `load_session_parsed(...)` — возвращает типизированные `session/update` события.

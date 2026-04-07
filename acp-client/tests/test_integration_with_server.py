@@ -879,6 +879,74 @@ async def test_prompt_helper_sends_meta_directives_and_parses_result() -> None:
 
 
 @pytest.mark.asyncio
+async def test_persistent_ws_prompt_helper_sends_meta_directives_and_parses_result() -> None:
+    async def handle_ws_request(request: web.Request) -> web.WebSocketResponse:
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        async for message in ws:
+            payload = json.loads(message.data)
+            if payload.get("method") == "initialize":
+                await ws.send_json(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": payload["id"],
+                        "result": {
+                            "protocolVersion": 1,
+                            "agentCapabilities": {
+                                "loadSession": True,
+                                "promptCapabilities": {
+                                    "image": False,
+                                    "audio": False,
+                                    "embeddedContext": False,
+                                },
+                                "mcpCapabilities": {"http": False, "sse": False},
+                                "sessionCapabilities": {"list": {}},
+                            },
+                            "agentInfo": {"name": "acp-server", "version": "0.1.0"},
+                            "authMethods": [],
+                        },
+                    }
+                )
+                continue
+
+            assert payload["method"] == "session/prompt"
+            assert payload["params"]["sessionId"] == "sess_1"
+            assert (
+                payload["params"]["_meta"]["promptDirectives"]["forcedStopReason"] == "max_tokens"
+            )
+            await ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": payload["id"],
+                    "result": {"stopReason": "max_tokens"},
+                }
+            )
+            break
+        return ws
+
+    port = _get_free_port()
+    app = web.Application()
+    app.router.add_get("/acp/ws", handle_ws_request)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="127.0.0.1", port=port)
+    await site.start()
+
+    try:
+        client = ACPClient(host="127.0.0.1", port=port)
+        async with client.open_ws_session() as ws_session:
+            result = await ws_session.prompt(
+                session_id="sess_1",
+                prompt=[{"type": "text", "text": "any prompt"}],
+                prompt_directives={"forcedStopReason": "max_tokens"},
+            )
+        assert result.stopReason == "max_tokens"
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
 async def test_ws_client_handles_fs_read_request() -> None:
     async def handle_ws_request(request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse()
