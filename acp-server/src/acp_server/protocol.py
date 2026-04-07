@@ -257,12 +257,37 @@ class ACPProtocol:
             response = protocol._initialize("req_1", {"protocolVersion": 1})
         """
 
+        # Для ACP handshake поле `protocolVersion` является обязательным.
+        if "protocolVersion" not in params:
+            return ACPMessage.error_response(
+                request_id,
+                code=-32602,
+                message="Invalid params: protocolVersion is required",
+            )
+
         requested_version = params.get("protocolVersion")
-        if requested_version is not None and not isinstance(requested_version, int):
+        if not isinstance(requested_version, int):
             return ACPMessage.error_response(
                 request_id,
                 code=-32602,
                 message="Invalid params: protocolVersion must be an integer",
+            )
+
+        # По спецификации клиент обязан передать объект capabilities.
+        client_capabilities = params.get("clientCapabilities")
+        if not isinstance(client_capabilities, dict):
+            return ACPMessage.error_response(
+                request_id,
+                code=-32602,
+                message="Invalid params: clientCapabilities must be an object",
+            )
+
+        client_info = params.get("clientInfo")
+        if client_info is not None and not isinstance(client_info, dict):
+            return ACPMessage.error_response(
+                request_id,
+                code=-32602,
+                message="Invalid params: clientInfo must be an object",
             )
 
         negotiated_version = self._supported_protocol_versions[-1]

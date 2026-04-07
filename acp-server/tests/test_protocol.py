@@ -4,7 +4,13 @@ from acp_server.protocol import ACPProtocol
 
 def test_initialize_request() -> None:
     protocol = ACPProtocol()
-    request = ACPMessage.request("initialize", {"protocolVersion": 1})
+    request = ACPMessage.request(
+        "initialize",
+        {
+            "protocolVersion": 1,
+            "clientCapabilities": {},
+        },
+    )
 
     outcome = protocol.handle(request)
 
@@ -16,7 +22,13 @@ def test_initialize_request() -> None:
 
 def test_initialize_negotiates_to_supported_version() -> None:
     protocol = ACPProtocol()
-    request = ACPMessage.request("initialize", {"protocolVersion": 999})
+    request = ACPMessage.request(
+        "initialize",
+        {
+            "protocolVersion": 999,
+            "clientCapabilities": {},
+        },
+    )
 
     outcome = protocol.handle(request)
 
@@ -28,7 +40,35 @@ def test_initialize_negotiates_to_supported_version() -> None:
 
 def test_initialize_rejects_non_integer_protocol_version() -> None:
     protocol = ACPProtocol()
-    request = ACPMessage.request("initialize", {"protocolVersion": "1"})
+    request = ACPMessage.request(
+        "initialize",
+        {
+            "protocolVersion": "1",
+            "clientCapabilities": {},
+        },
+    )
+
+    outcome = protocol.handle(request)
+
+    assert outcome.response is not None
+    assert outcome.response.error is not None
+    assert outcome.response.error.code == -32602
+
+
+def test_initialize_requires_client_capabilities_object() -> None:
+    protocol = ACPProtocol()
+    request = ACPMessage.request("initialize", {"protocolVersion": 1})
+
+    outcome = protocol.handle(request)
+
+    assert outcome.response is not None
+    assert outcome.response.error is not None
+    assert outcome.response.error.code == -32602
+
+
+def test_initialize_requires_protocol_version_field() -> None:
+    protocol = ACPProtocol()
+    request = ACPMessage.request("initialize", {"clientCapabilities": {}})
 
     outcome = protocol.handle(request)
 

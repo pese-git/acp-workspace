@@ -28,6 +28,11 @@ uv run acp-server --transport ws --host 127.0.0.1 --port 8080
 - `session/cancel`
 - `session/set_config_option`
 
+### Поведение `initialize`
+
+- Сервер ожидает обязательные поля `protocolVersion` (integer) и `clientCapabilities` (object).
+- Поле `clientInfo` опционально, но если передано — должно быть объектом.
+
 ### Поведение `session/prompt` и `session/cancel`
 
 - Через WebSocket сервер поддерживает отложенное завершение prompt-turn.
