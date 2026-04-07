@@ -6,7 +6,7 @@
 
 | Область | Статус | Примечание |
 | --- | --- | --- |
-| `initialize` | Partial | Версия и базовые capability объявляются; требуется более строгая привязка runtime-поведения к negotiated client capabilities. |
+| `initialize` | Done | Версия и capability negotiation реализованы; runtime-ветки запускаются только при согласованных client capabilities. |
 | `session/new` | Done | Поддерживается создание сессии, `configOptions` и legacy `modes`. |
 | `session/load` | Done | Поддерживается replay истории и ключевых `session/update` событий. |
 | `session/list` | Done | Реализованы фильтр по `cwd`, cursor pagination и `nextCursor`. |
@@ -22,6 +22,5 @@
 
 ## Приоритетный backlog
 
-1. Привязать runtime-ветки к negotiated client capabilities после `initialize`.
-2. Завершить переход от demo-семантики `session/request_permission` к production policy-model.
-3. Расширить conformance-набор до edge-кейсов terminal/fs client-rpc и error-сценариев.
+1. Завершить переход от demo-семантики `session/request_permission` к production policy-model.
+2. Расширить conformance-набор до edge-кейсов terminal/fs client-rpc и error-сценариев.

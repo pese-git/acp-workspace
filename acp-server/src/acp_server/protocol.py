@@ -1730,10 +1730,10 @@ class ACPProtocol:
         """
 
         caps = self._runtime_capabilities
-        # Для прямых unit-тестов ACPProtocol без initialize сохраняем
-        # обратную совместимость (permissive behavior).
         if caps is None:
-            return True
+            # До успешного initialize runtime-возможности не согласованы,
+            # поэтому tool-runtime ветки должны оставаться выключенными.
+            return False
         return caps.terminal or caps.fs_read or caps.fs_write
 
     def _can_use_fs_client_rpc(self, kind: str) -> bool:

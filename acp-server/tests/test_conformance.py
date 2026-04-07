@@ -2,6 +2,25 @@ from acp_server.messages import ACPMessage
 from acp_server.protocol import ACPProtocol
 
 
+def _initialize_with_tool_runtime(protocol: ACPProtocol) -> None:
+    """Инициализирует capability profile, разрешающий tool-runtime сценарии."""
+
+    initialized = protocol.handle(
+        ACPMessage.request(
+            "initialize",
+            {
+                "protocolVersion": 1,
+                "clientCapabilities": {
+                    "fs": {"readTextFile": False, "writeTextFile": False},
+                    "terminal": True,
+                },
+            },
+        )
+    )
+    assert initialized.response is not None
+    assert initialized.response.error is None
+
+
 def test_conformance_prompt_returns_end_turn_with_agent_update() -> None:
     """Проверяет базовый ACP prompt-cycle: update-поток + финальный end_turn."""
 
@@ -35,6 +54,7 @@ def test_conformance_cancel_while_waiting_permission_returns_cancelled() -> None
     """Проверяет обязательный ACP-инвариант: cancel завершает turn как cancelled."""
 
     protocol = ACPProtocol()
+    _initialize_with_tool_runtime(protocol)
     created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
     assert created.response is not None
     assert isinstance(created.response.result, dict)
@@ -62,6 +82,7 @@ def test_conformance_permission_selected_completes_turn() -> None:
     """Проверяет ACP permission-flow: selected/allow завершает turn как end_turn."""
 
     protocol = ACPProtocol()
+    _initialize_with_tool_runtime(protocol)
     created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
     assert created.response is not None
     assert isinstance(created.response.result, dict)
@@ -104,6 +125,7 @@ def test_conformance_load_replays_history_and_stateful_updates() -> None:
     """Проверяет load replay для истории, plan и tool call состояния."""
 
     protocol = ACPProtocol()
+    _initialize_with_tool_runtime(protocol)
     created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
     assert created.response is not None
     assert isinstance(created.response.result, dict)

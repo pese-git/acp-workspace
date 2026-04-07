@@ -2,6 +2,25 @@ from acp_server.messages import ACPMessage
 from acp_server.protocol import ACPProtocol
 
 
+def _initialize_with_tool_runtime(protocol: ACPProtocol) -> None:
+    """Инициализирует протокол с включенным tool-runtime capability profile."""
+
+    init = protocol.handle(
+        ACPMessage.request(
+            "initialize",
+            {
+                "protocolVersion": 1,
+                "clientCapabilities": {
+                    "fs": {"readTextFile": False, "writeTextFile": False},
+                    "terminal": True,
+                },
+            },
+        )
+    )
+    assert init.response is not None
+    assert init.response.error is None
+
+
 def test_initialize_request() -> None:
     protocol = ACPProtocol()
     request = ACPMessage.request(
@@ -231,6 +250,42 @@ def test_prompt_tool_flow_respects_negotiated_client_capabilities() -> None:
     assert "tool_call" not in update_types
 
 
+def test_prompt_tool_flow_requires_initialize_capability_negotiation() -> None:
+    protocol = ACPProtocol()
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "/tool run"}],
+            },
+        )
+    )
+
+    assert outcome.response is not None
+    assert outcome.response.result == {"stopReason": "end_turn"}
+    update_types = [
+        notification.params["update"]["sessionUpdate"]
+        for notification in outcome.notifications
+        if notification.params is not None
+    ]
+    assert "tool_call" not in update_types
+    unavailable_messages = [
+        notification.params["update"]["content"]["text"]
+        for notification in outcome.notifications
+        if notification.params is not None
+        and notification.params["update"].get("sessionUpdate") == "agent_message_chunk"
+        and isinstance(notification.params["update"].get("content"), dict)
+        and isinstance(notification.params["update"]["content"].get("text"), str)
+    ]
+    assert any("Tool runtime unavailable" in text for text in unavailable_messages)
+
+
 def test_session_list_returns_created_session() -> None:
     protocol = ACPProtocol()
     created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
@@ -339,6 +394,7 @@ def test_prompt_rejects_unsupported_content_type() -> None:
 
 def test_prompt_can_emit_tool_call_updates() -> None:
     protocol = ACPProtocol()
+    _initialize_with_tool_runtime(protocol)
     created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
     assert created.response is not None
     assert isinstance(created.response.result, dict)
@@ -773,6 +829,7 @@ def test_cancel_during_terminal_flow_emits_kill_and_release_requests() -> None:
 
 def test_cancel_marks_active_tool_call_as_cancelled() -> None:
     protocol = ACPProtocol()
+    _initialize_with_tool_runtime(protocol)
     created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
     assert created.response is not None
     assert isinstance(created.response.result, dict)
@@ -821,6 +878,7 @@ def test_cancel_marks_active_tool_call_as_cancelled() -> None:
 
 def test_deferred_prompt_can_be_completed_without_cancel() -> None:
     protocol = ACPProtocol()
+    _initialize_with_tool_runtime(protocol)
     created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
     assert created.response is not None
     assert isinstance(created.response.result, dict)
@@ -844,6 +902,7 @@ def test_deferred_prompt_can_be_completed_without_cancel() -> None:
 
 def test_prompt_with_tool_pending_slash_command_defers_turn() -> None:
     protocol = ACPProtocol()
+    _initialize_with_tool_runtime(protocol)
     created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
     assert created.response is not None
     assert isinstance(created.response.result, dict)
@@ -882,6 +941,7 @@ def test_prompt_with_tool_pending_slash_command_defers_turn() -> None:
 
 def test_permission_selected_completes_prompt_turn() -> None:
     protocol = ACPProtocol()
+    _initialize_with_tool_runtime(protocol)
     created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
     assert created.response is not None
     assert isinstance(created.response.result, dict)
@@ -928,6 +988,7 @@ def test_permission_selected_completes_prompt_turn() -> None:
 
 def test_permission_cancelled_finishes_turn_with_cancelled() -> None:
     protocol = ACPProtocol()
+    _initialize_with_tool_runtime(protocol)
     created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
     assert created.response is not None
     assert isinstance(created.response.result, dict)
@@ -963,6 +1024,7 @@ def test_permission_cancelled_finishes_turn_with_cancelled() -> None:
 
 def test_permission_reject_option_finishes_turn_with_cancelled() -> None:
     protocol = ACPProtocol()
+    _initialize_with_tool_runtime(protocol)
     created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
     assert created.response is not None
     assert isinstance(created.response.result, dict)
@@ -998,6 +1060,7 @@ def test_permission_reject_option_finishes_turn_with_cancelled() -> None:
 
 def test_late_permission_response_after_cancel_is_ignored() -> None:
     protocol = ACPProtocol()
+    _initialize_with_tool_runtime(protocol)
     created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
     assert created.response is not None
     assert isinstance(created.response.result, dict)
@@ -1192,6 +1255,7 @@ def test_session_set_mode_updates_current_mode() -> None:
 
 def test_session_load_replays_tool_call_state() -> None:
     protocol = ACPProtocol()
+    _initialize_with_tool_runtime(protocol)
     created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
     assert created.response is not None
     assert isinstance(created.response.result, dict)
