@@ -7,6 +7,7 @@ from typing import Any
 import structlog
 from aiohttp import ClientSession, WSMsgType
 
+from .handlers import build_permission_result
 from .helpers import (
     extract_plan_updates,
     extract_structured_updates,
@@ -353,7 +354,7 @@ class ACPClient:
             if isinstance(payload, dict):
                 permission_request = parse_request_permission_request(payload)
             if permission_request is not None:
-                permission_result = self._build_permission_result(
+                permission_result = build_permission_result(
                     payload=payload,
                     on_permission=on_permission,
                 )
@@ -678,34 +679,6 @@ class ACPClient:
                 )
                 raise RuntimeError(msg)
             return parse_authenticate_result(response)
-
-    def _build_permission_result(
-        self,
-        *,
-        payload: dict[str, Any],
-        on_permission: PermissionHandler | None,
-    ) -> dict[str, Any]:
-        """Формирует результат `session/request_permission` для ответа агенту.
-
-        Если callback не передан или вернул `None`, возвращается `cancelled`.
-
-        Пример использования:
-            result = client._build_permission_result(payload=data, on_permission=None)
-        """
-
-        selected_option_id = on_permission(payload) if on_permission is not None else None
-        if selected_option_id is None:
-            return {
-                "outcome": {
-                    "outcome": "cancelled",
-                }
-            }
-        return {
-            "outcome": {
-                "outcome": "selected",
-                "optionId": selected_option_id,
-            }
-        }
 
     async def load_session(
         self,
