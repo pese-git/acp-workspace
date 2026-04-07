@@ -72,7 +72,7 @@ class ACPServer:
                 try:
                     request = ACPMessage.from_json(raw.decode().strip())
                     method_name = request.method
-                    outcome = self.protocol.handle(request)
+                    outcome = await self.protocol.handle(request)
                 except (json.JSONDecodeError, KeyError, TypeError, ValidationError) as exc:
                     outcome = ProtocolOutcome(
                         response=ACPMessage.error_response(

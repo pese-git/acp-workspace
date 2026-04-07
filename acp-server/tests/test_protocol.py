@@ -1,11 +1,13 @@
+import pytest
+
 from acp_server.messages import ACPMessage
 from acp_server.protocol import ACPProtocol
 
 
-def _initialize_with_tool_runtime(protocol: ACPProtocol) -> None:
+async def _initialize_with_tool_runtime(protocol: ACPProtocol) -> None:
     """Инициализирует протокол с включенным tool-runtime capability profile."""
 
-    init = protocol.handle(
+    init = await protocol.handle(
         ACPMessage.request(
             "initialize",
             {
@@ -21,7 +23,8 @@ def _initialize_with_tool_runtime(protocol: ACPProtocol) -> None:
     assert init.response.error is None
 
 
-def test_initialize_request() -> None:
+@pytest.mark.asyncio
+async def test_initialize_request() -> None:
     protocol = ACPProtocol()
     request = ACPMessage.request(
         "initialize",
@@ -31,7 +34,7 @@ def test_initialize_request() -> None:
         },
     )
 
-    outcome = protocol.handle(request)
+    outcome = await protocol.handle(request)
 
     assert outcome.response is not None
     assert outcome.response.error is None
@@ -39,7 +42,8 @@ def test_initialize_request() -> None:
     assert outcome.response.result["protocolVersion"] == 1
 
 
-def test_initialize_returns_auth_methods_when_auth_is_required() -> None:
+@pytest.mark.asyncio
+async def test_initialize_returns_auth_methods_when_auth_is_required() -> None:
     protocol = ACPProtocol(require_auth=True)
     request = ACPMessage.request(
         "initialize",
@@ -49,7 +53,7 @@ def test_initialize_returns_auth_methods_when_auth_is_required() -> None:
         },
     )
 
-    outcome = protocol.handle(request)
+    outcome = await protocol.handle(request)
 
     assert outcome.response is not None
     assert outcome.response.error is None
@@ -58,19 +62,23 @@ def test_initialize_returns_auth_methods_when_auth_is_required() -> None:
     assert len(outcome.response.result["authMethods"]) == 1
 
 
-def test_session_new_requires_authentication_when_enabled() -> None:
+@pytest.mark.asyncio
+async def test_session_new_requires_authentication_when_enabled() -> None:
     protocol = ACPProtocol(require_auth=True)
 
-    outcome = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    outcome = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
 
     assert outcome.response is not None
     assert outcome.response.error is not None
     assert outcome.response.error.message == "auth_required"
 
 
-def test_authenticate_allows_session_creation_when_auth_enabled() -> None:
+@pytest.mark.asyncio
+async def test_authenticate_allows_session_creation_when_auth_enabled() -> None:
     protocol = ACPProtocol(require_auth=True)
-    init = protocol.handle(
+    init = await protocol.handle(
         ACPMessage.request(
             "initialize",
             {
@@ -85,18 +93,23 @@ def test_authenticate_allows_session_creation_when_auth_enabled() -> None:
     assert isinstance(auth_methods, list)
     method_id = auth_methods[0]["id"]
 
-    authenticated = protocol.handle(ACPMessage.request("authenticate", {"methodId": method_id}))
+    authenticated = await protocol.handle(
+        ACPMessage.request("authenticate", {"methodId": method_id})
+    )
     assert authenticated.response is not None
     assert authenticated.response.error is None
 
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert created.response.error is None
 
 
-def test_authenticate_requires_api_key_when_server_has_auth_backend() -> None:
+@pytest.mark.asyncio
+async def test_authenticate_requires_api_key_when_server_has_auth_backend() -> None:
     protocol = ACPProtocol(require_auth=True, auth_api_key="top-secret")
-    init = protocol.handle(
+    init = await protocol.handle(
         ACPMessage.request(
             "initialize",
             {
@@ -109,12 +122,14 @@ def test_authenticate_requires_api_key_when_server_has_auth_backend() -> None:
     assert isinstance(init.response.result, dict)
     method_id = init.response.result["authMethods"][0]["id"]
 
-    missing_key = protocol.handle(ACPMessage.request("authenticate", {"methodId": method_id}))
+    missing_key = await protocol.handle(
+        ACPMessage.request("authenticate", {"methodId": method_id})
+    )
     assert missing_key.response is not None
     assert missing_key.response.error is not None
     assert missing_key.response.error.message == "Invalid params: apiKey is required"
 
-    wrong_key = protocol.handle(
+    wrong_key = await protocol.handle(
         ACPMessage.request(
             "authenticate",
             {
@@ -127,7 +142,7 @@ def test_authenticate_requires_api_key_when_server_has_auth_backend() -> None:
     assert wrong_key.response.error is not None
     assert wrong_key.response.error.message == "auth_failed"
 
-    authenticated = protocol.handle(
+    authenticated = await protocol.handle(
         ACPMessage.request(
             "authenticate",
             {
@@ -140,7 +155,8 @@ def test_authenticate_requires_api_key_when_server_has_auth_backend() -> None:
     assert authenticated.response.error is None
 
 
-def test_initialize_negotiates_to_supported_version() -> None:
+@pytest.mark.asyncio
+async def test_initialize_negotiates_to_supported_version() -> None:
     protocol = ACPProtocol()
     request = ACPMessage.request(
         "initialize",
@@ -150,7 +166,7 @@ def test_initialize_negotiates_to_supported_version() -> None:
         },
     )
 
-    outcome = protocol.handle(request)
+    outcome = await protocol.handle(request)
 
     assert outcome.response is not None
     assert outcome.response.error is None
@@ -158,7 +174,8 @@ def test_initialize_negotiates_to_supported_version() -> None:
     assert outcome.response.result["protocolVersion"] == 1
 
 
-def test_initialize_rejects_non_integer_protocol_version() -> None:
+@pytest.mark.asyncio
+async def test_initialize_rejects_non_integer_protocol_version() -> None:
     protocol = ACPProtocol()
     request = ACPMessage.request(
         "initialize",
@@ -168,57 +185,61 @@ def test_initialize_rejects_non_integer_protocol_version() -> None:
         },
     )
 
-    outcome = protocol.handle(request)
+    outcome = await protocol.handle(request)
 
     assert outcome.response is not None
     assert outcome.response.error is not None
     assert outcome.response.error.code == -32602
 
 
-def test_initialize_requires_client_capabilities_object() -> None:
+@pytest.mark.asyncio
+async def test_initialize_requires_client_capabilities_object() -> None:
     protocol = ACPProtocol()
     request = ACPMessage.request("initialize", {"protocolVersion": 1})
 
-    outcome = protocol.handle(request)
+    outcome = await protocol.handle(request)
 
     assert outcome.response is not None
     assert outcome.response.error is not None
     assert outcome.response.error.code == -32602
 
 
-def test_initialize_requires_protocol_version_field() -> None:
+@pytest.mark.asyncio
+async def test_initialize_requires_protocol_version_field() -> None:
     protocol = ACPProtocol()
     request = ACPMessage.request("initialize", {"clientCapabilities": {}})
 
-    outcome = protocol.handle(request)
+    outcome = await protocol.handle(request)
 
     assert outcome.response is not None
     assert outcome.response.error is not None
     assert outcome.response.error.code == -32602
 
 
-def test_unknown_method() -> None:
+@pytest.mark.asyncio
+async def test_unknown_method() -> None:
     protocol = ACPProtocol()
     request = ACPMessage.request("missing", {})
 
-    outcome = protocol.handle(request)
+    outcome = await protocol.handle(request)
 
     assert outcome.response is not None
     assert outcome.response.error is not None
     assert outcome.response.error.code == -32601
 
 
-def test_session_prompt_sends_update() -> None:
+@pytest.mark.asyncio
+async def test_session_prompt_sends_update() -> None:
     protocol = ACPProtocol()
 
-    new_session = protocol.handle(
+    new_session = await protocol.handle(
         ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
     )
     assert new_session.response is not None
     assert isinstance(new_session.response.result, dict)
     session_id = new_session.response.result["sessionId"]
 
-    outcome = protocol.handle(
+    outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -240,17 +261,18 @@ def test_session_prompt_sends_update() -> None:
     assert "available_commands_update" in update_types
 
 
-def test_prompt_with_plan_slash_command_emits_plan_update() -> None:
+@pytest.mark.asyncio
+async def test_prompt_with_plan_slash_command_emits_plan_update() -> None:
     protocol = ACPProtocol()
 
-    new_session = protocol.handle(
+    new_session = await protocol.handle(
         ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
     )
     assert new_session.response is not None
     assert isinstance(new_session.response.result, dict)
     session_id = new_session.response.result["sessionId"]
 
-    outcome = protocol.handle(
+    outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -272,17 +294,18 @@ def test_prompt_with_plan_slash_command_emits_plan_update() -> None:
     assert isinstance(plan_updates[0].params["update"].get("entries"), list)
 
 
-def test_prompt_with_meta_directive_emits_plan_update_without_slash() -> None:
+@pytest.mark.asyncio
+async def test_prompt_with_meta_directive_emits_plan_update_without_slash() -> None:
     protocol = ACPProtocol()
 
-    new_session = protocol.handle(
+    new_session = await protocol.handle(
         ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
     )
     assert new_session.response is not None
     assert isinstance(new_session.response.result, dict)
     session_id = new_session.response.result["sessionId"]
 
-    outcome = protocol.handle(
+    outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -309,14 +332,17 @@ def test_prompt_with_meta_directive_emits_plan_update_without_slash() -> None:
     assert len(plan_updates) == 1
 
 
-def test_prompt_with_plan_entries_override_emits_custom_plan() -> None:
+@pytest.mark.asyncio
+async def test_prompt_with_plan_entries_override_emits_custom_plan() -> None:
     protocol = ACPProtocol()
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    outcome = protocol.handle(
+    outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -358,17 +384,18 @@ def test_prompt_with_plan_entries_override_emits_custom_plan() -> None:
     assert entries[1]["status"] == "in_progress"
 
 
-def test_prompt_with_legacy_marker_does_not_emit_plan_update() -> None:
+@pytest.mark.asyncio
+async def test_prompt_with_legacy_marker_does_not_emit_plan_update() -> None:
     protocol = ACPProtocol()
 
-    new_session = protocol.handle(
+    new_session = await protocol.handle(
         ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
     )
     assert new_session.response is not None
     assert isinstance(new_session.response.result, dict)
     session_id = new_session.response.result["sessionId"]
 
-    outcome = protocol.handle(
+    outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -386,15 +413,18 @@ def test_prompt_with_legacy_marker_does_not_emit_plan_update() -> None:
     )
 
 
-def test_prompt_with_meta_directive_requests_tool_without_slash() -> None:
+@pytest.mark.asyncio
+async def test_prompt_with_meta_directive_requests_tool_without_slash() -> None:
     protocol = ACPProtocol()
-    _initialize_with_tool_runtime(protocol)
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    await _initialize_with_tool_runtime(protocol)
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    outcome = protocol.handle(
+    outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -420,15 +450,18 @@ def test_prompt_with_meta_directive_requests_tool_without_slash() -> None:
     )
 
 
-def test_prompt_with_meta_pending_tool_keeps_turn_open() -> None:
+@pytest.mark.asyncio
+async def test_prompt_with_meta_pending_tool_keeps_turn_open() -> None:
     protocol = ACPProtocol()
-    _initialize_with_tool_runtime(protocol)
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    await _initialize_with_tool_runtime(protocol)
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    outcome = protocol.handle(
+    outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -462,18 +495,22 @@ def test_prompt_with_meta_pending_tool_keeps_turn_open() -> None:
     assert completed_response.result == {"stopReason": "end_turn"}
 
 
-def test_session_new_returns_modes_state() -> None:
+@pytest.mark.asyncio
+async def test_session_new_returns_modes_state() -> None:
     protocol = ACPProtocol()
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     assert isinstance(created.response.result.get("modes"), dict)
     assert created.response.result["modes"]["currentModeId"] == "ask"
 
 
-def test_prompt_tool_flow_respects_negotiated_client_capabilities() -> None:
+@pytest.mark.asyncio
+async def test_prompt_tool_flow_respects_negotiated_client_capabilities() -> None:
     protocol = ACPProtocol()
-    init = protocol.handle(
+    init = await protocol.handle(
         ACPMessage.request(
             "initialize",
             {
@@ -488,12 +525,14 @@ def test_prompt_tool_flow_respects_negotiated_client_capabilities() -> None:
     assert init.response is not None
     assert init.response.error is None
 
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    outcome = protocol.handle(
+    outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -513,10 +552,11 @@ def test_prompt_tool_flow_respects_negotiated_client_capabilities() -> None:
     assert "tool_call" not in update_types
 
 
-def test_runtime_capabilities_are_session_scoped_after_reinitialize() -> None:
+@pytest.mark.asyncio
+async def test_runtime_capabilities_are_session_scoped_after_reinitialize() -> None:
     protocol = ACPProtocol()
 
-    first_init = protocol.handle(
+    first_init = await protocol.handle(
         ACPMessage.request(
             "initialize",
             {
@@ -531,14 +571,14 @@ def test_runtime_capabilities_are_session_scoped_after_reinitialize() -> None:
     assert first_init.response is not None
     assert first_init.response.error is None
 
-    first_session = protocol.handle(
+    first_session = await protocol.handle(
         ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
     )
     assert first_session.response is not None
     assert isinstance(first_session.response.result, dict)
     first_session_id = first_session.response.result["sessionId"]
 
-    second_init = protocol.handle(
+    second_init = await protocol.handle(
         ACPMessage.request(
             "initialize",
             {
@@ -553,14 +593,14 @@ def test_runtime_capabilities_are_session_scoped_after_reinitialize() -> None:
     assert second_init.response is not None
     assert second_init.response.error is None
 
-    second_session = protocol.handle(
+    second_session = await protocol.handle(
         ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
     )
     assert second_session.response is not None
     assert isinstance(second_session.response.result, dict)
     second_session_id = second_session.response.result["sessionId"]
 
-    first_prompt = protocol.handle(
+    first_prompt = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -600,7 +640,7 @@ def test_runtime_capabilities_are_session_scoped_after_reinitialize() -> None:
     else:
         assert first_prompt.response.result == {"stopReason": "end_turn"}
 
-    second_prompt = protocol.handle(
+    second_prompt = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -620,14 +660,17 @@ def test_runtime_capabilities_are_session_scoped_after_reinitialize() -> None:
     assert "tool_call" not in second_updates
 
 
-def test_prompt_tool_flow_requires_initialize_capability_negotiation() -> None:
+@pytest.mark.asyncio
+async def test_prompt_tool_flow_requires_initialize_capability_negotiation() -> None:
     protocol = ACPProtocol()
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    outcome = protocol.handle(
+    outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -656,14 +699,17 @@ def test_prompt_tool_flow_requires_initialize_capability_negotiation() -> None:
     assert any("Tool runtime unavailable" in text for text in unavailable_messages)
 
 
-def test_prompt_can_finish_with_max_tokens_stop_reason() -> None:
+@pytest.mark.asyncio
+async def test_prompt_can_finish_with_max_tokens_stop_reason() -> None:
     protocol = ACPProtocol()
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    outcome = protocol.handle(
+    outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -677,14 +723,17 @@ def test_prompt_can_finish_with_max_tokens_stop_reason() -> None:
     assert outcome.response.result == {"stopReason": "max_tokens"}
 
 
-def test_prompt_can_finish_with_max_turn_requests_stop_reason() -> None:
+@pytest.mark.asyncio
+async def test_prompt_can_finish_with_max_turn_requests_stop_reason() -> None:
     protocol = ACPProtocol()
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    outcome = protocol.handle(
+    outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -698,14 +747,17 @@ def test_prompt_can_finish_with_max_turn_requests_stop_reason() -> None:
     assert outcome.response.result == {"stopReason": "max_turn_requests"}
 
 
-def test_prompt_can_finish_with_refusal_stop_reason() -> None:
+@pytest.mark.asyncio
+async def test_prompt_can_finish_with_refusal_stop_reason() -> None:
     protocol = ACPProtocol()
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    outcome = protocol.handle(
+    outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -719,14 +771,17 @@ def test_prompt_can_finish_with_refusal_stop_reason() -> None:
     assert outcome.response.result == {"stopReason": "refusal"}
 
 
-def test_prompt_can_finish_with_meta_forced_stop_reason() -> None:
+@pytest.mark.asyncio
+async def test_prompt_can_finish_with_meta_forced_stop_reason() -> None:
     protocol = ACPProtocol()
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    outcome = protocol.handle(
+    outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -745,14 +800,17 @@ def test_prompt_can_finish_with_meta_forced_stop_reason() -> None:
     assert outcome.response.result == {"stopReason": "max_tokens"}
 
 
-def test_session_list_returns_created_session() -> None:
+@pytest.mark.asyncio
+async def test_session_list_returns_created_session() -> None:
     protocol = ACPProtocol()
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     created_id = created.response.result["sessionId"]
 
-    listed = protocol.handle(ACPMessage.request("session/list", {}))
+    listed = await protocol.handle(ACPMessage.request("session/list", {}))
     assert listed.response is not None
     assert isinstance(listed.response.result, dict)
     sessions = listed.response.result["sessions"]
@@ -760,15 +818,16 @@ def test_session_list_returns_created_session() -> None:
     assert any(session["sessionId"] == created_id for session in sessions)
 
 
-def test_session_list_supports_cursor_pagination() -> None:
+@pytest.mark.asyncio
+async def test_session_list_supports_cursor_pagination() -> None:
     protocol = ACPProtocol()
     for _ in range(51):
-        created = protocol.handle(
+        created = await protocol.handle(
             ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
         )
         assert created.response is not None
 
-    first_page = protocol.handle(ACPMessage.request("session/list", {}))
+    first_page = await protocol.handle(ACPMessage.request("session/list", {}))
     assert first_page.response is not None
     assert isinstance(first_page.response.result, dict)
     first_sessions = first_page.response.result["sessions"]
@@ -776,7 +835,9 @@ def test_session_list_supports_cursor_pagination() -> None:
     assert len(first_sessions) == 50
     assert isinstance(next_cursor, str)
 
-    second_page = protocol.handle(ACPMessage.request("session/list", {"cursor": next_cursor}))
+    second_page = await protocol.handle(
+        ACPMessage.request("session/list", {"cursor": next_cursor})
+    )
     assert second_page.response is not None
     assert isinstance(second_page.response.result, dict)
     second_sessions = second_page.response.result["sessions"]
@@ -784,25 +845,33 @@ def test_session_list_supports_cursor_pagination() -> None:
     assert second_page.response.result["nextCursor"] is None
 
 
-def test_session_list_rejects_invalid_cursor() -> None:
+@pytest.mark.asyncio
+async def test_session_list_rejects_invalid_cursor() -> None:
     protocol = ACPProtocol()
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
 
-    listed = protocol.handle(ACPMessage.request("session/list", {"cursor": "not-a-valid-cursor"}))
+    listed = await protocol.handle(
+        ACPMessage.request("session/list", {"cursor": "not-a-valid-cursor"})
+    )
     assert listed.response is not None
     assert listed.response.error is not None
     assert listed.response.error.code == -32602
 
 
-def test_set_config_option_updates_value() -> None:
+@pytest.mark.asyncio
+async def test_set_config_option_updates_value() -> None:
     protocol = ACPProtocol()
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     created_id = created.response.result["sessionId"]
 
-    updated = protocol.handle(
+    updated = await protocol.handle(
         ACPMessage.request(
             "session/set_config_option",
             {
@@ -829,14 +898,17 @@ def test_set_config_option_updates_value() -> None:
     assert updated.notifications[2].params["update"]["sessionUpdate"] == "session_info_update"
 
 
-def test_prompt_rejects_unsupported_content_type() -> None:
+@pytest.mark.asyncio
+async def test_prompt_rejects_unsupported_content_type() -> None:
     protocol = ACPProtocol()
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     created_id = created.response.result["sessionId"]
 
-    outcome = protocol.handle(
+    outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -851,15 +923,18 @@ def test_prompt_rejects_unsupported_content_type() -> None:
     assert outcome.response.error.code == -32602
 
 
-def test_prompt_can_emit_tool_call_updates() -> None:
+@pytest.mark.asyncio
+async def test_prompt_can_emit_tool_call_updates() -> None:
     protocol = ACPProtocol()
-    _initialize_with_tool_runtime(protocol)
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    await _initialize_with_tool_runtime(protocol)
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     created_id = created.response.result["sessionId"]
 
-    updated = protocol.handle(
+    updated = await protocol.handle(
         ACPMessage.request(
             "session/set_config_option",
             {
@@ -871,7 +946,7 @@ def test_prompt_can_emit_tool_call_updates() -> None:
     )
     assert updated.response is not None
 
-    outcome = protocol.handle(
+    outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -893,9 +968,10 @@ def test_prompt_can_emit_tool_call_updates() -> None:
     assert "tool_call_update" in update_types
 
 
-def test_prompt_fs_read_emits_client_rpc_request_when_capability_enabled() -> None:
+@pytest.mark.asyncio
+async def test_prompt_fs_read_emits_client_rpc_request_when_capability_enabled() -> None:
     protocol = ACPProtocol()
-    initialized = protocol.handle(
+    initialized = await protocol.handle(
         ACPMessage.request(
             "initialize",
             {
@@ -909,12 +985,14 @@ def test_prompt_fs_read_emits_client_rpc_request_when_capability_enabled() -> No
     )
     assert initialized.response is not None
 
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    outcome = protocol.handle(
+    outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -929,9 +1007,10 @@ def test_prompt_fs_read_emits_client_rpc_request_when_capability_enabled() -> No
     assert any(notification.method == "fs/read_text_file" for notification in outcome.notifications)
 
 
-def test_fs_read_response_completes_turn_with_completed_tool_update() -> None:
+@pytest.mark.asyncio
+async def test_fs_read_response_completes_turn_with_completed_tool_update() -> None:
     protocol = ACPProtocol()
-    protocol.handle(
+    await protocol.handle(
         ACPMessage.request(
             "initialize",
             {
@@ -943,12 +1022,14 @@ def test_fs_read_response_completes_turn_with_completed_tool_update() -> None:
             },
         )
     )
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    prompt_outcome = protocol.handle(
+    prompt_outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -980,9 +1061,10 @@ def test_fs_read_response_completes_turn_with_completed_tool_update() -> None:
     )
 
 
-def test_fs_write_response_contains_diff_tool_content() -> None:
+@pytest.mark.asyncio
+async def test_fs_write_response_contains_diff_tool_content() -> None:
     protocol = ACPProtocol()
-    protocol.handle(
+    await protocol.handle(
         ACPMessage.request(
             "initialize",
             {
@@ -994,12 +1076,14 @@ def test_fs_write_response_contains_diff_tool_content() -> None:
             },
         )
     )
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    prompt_outcome = protocol.handle(
+    prompt_outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -1046,9 +1130,10 @@ def test_fs_write_response_contains_diff_tool_content() -> None:
     assert content[0].get("type") == "diff"
 
 
-def test_prompt_fs_read_without_capability_does_not_emit_fs_rpc() -> None:
+@pytest.mark.asyncio
+async def test_prompt_fs_read_without_capability_does_not_emit_fs_rpc() -> None:
     protocol = ACPProtocol()
-    protocol.handle(
+    await protocol.handle(
         ACPMessage.request(
             "initialize",
             {
@@ -1060,12 +1145,14 @@ def test_prompt_fs_read_without_capability_does_not_emit_fs_rpc() -> None:
             },
         )
     )
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    outcome = protocol.handle(
+    outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -1081,9 +1168,10 @@ def test_prompt_fs_read_without_capability_does_not_emit_fs_rpc() -> None:
     assert all(notification.method != "fs/read_text_file" for notification in outcome.notifications)
 
 
-def test_fs_read_client_error_marks_tool_as_failed() -> None:
+@pytest.mark.asyncio
+async def test_fs_read_client_error_marks_tool_as_failed() -> None:
     protocol = ACPProtocol()
-    protocol.handle(
+    await protocol.handle(
         ACPMessage.request(
             "initialize",
             {
@@ -1095,12 +1183,14 @@ def test_fs_read_client_error_marks_tool_as_failed() -> None:
             },
         )
     )
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    prompt_outcome = protocol.handle(
+    prompt_outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -1134,9 +1224,10 @@ def test_fs_read_client_error_marks_tool_as_failed() -> None:
     )
 
 
-def test_fs_read_invalid_success_payload_marks_tool_as_failed() -> None:
+@pytest.mark.asyncio
+async def test_fs_read_invalid_success_payload_marks_tool_as_failed() -> None:
     protocol = ACPProtocol()
-    protocol.handle(
+    await protocol.handle(
         ACPMessage.request(
             "initialize",
             {
@@ -1148,12 +1239,14 @@ def test_fs_read_invalid_success_payload_marks_tool_as_failed() -> None:
             },
         )
     )
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    prompt_outcome = protocol.handle(
+    prompt_outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -1183,9 +1276,10 @@ def test_fs_read_invalid_success_payload_marks_tool_as_failed() -> None:
     )
 
 
-def test_fs_write_non_object_payload_marks_tool_as_failed() -> None:
+@pytest.mark.asyncio
+async def test_fs_write_non_object_payload_marks_tool_as_failed() -> None:
     protocol = ACPProtocol()
-    protocol.handle(
+    await protocol.handle(
         ACPMessage.request(
             "initialize",
             {
@@ -1197,12 +1291,14 @@ def test_fs_write_non_object_payload_marks_tool_as_failed() -> None:
             },
         )
     )
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    prompt_outcome = protocol.handle(
+    prompt_outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -1237,9 +1333,10 @@ def test_fs_write_non_object_payload_marks_tool_as_failed() -> None:
     )
 
 
-def test_prompt_terminal_run_emits_terminal_create_request() -> None:
+@pytest.mark.asyncio
+async def test_prompt_terminal_run_emits_terminal_create_request() -> None:
     protocol = ACPProtocol()
-    protocol.handle(
+    await protocol.handle(
         ACPMessage.request(
             "initialize",
             {
@@ -1251,12 +1348,14 @@ def test_prompt_terminal_run_emits_terminal_create_request() -> None:
             },
         )
     )
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    outcome = protocol.handle(
+    outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -1270,9 +1369,10 @@ def test_prompt_terminal_run_emits_terminal_create_request() -> None:
     assert any(notification.method == "terminal/create" for notification in outcome.notifications)
 
 
-def test_terminal_rpc_chain_completes_prompt_turn() -> None:
+@pytest.mark.asyncio
+async def test_terminal_rpc_chain_completes_prompt_turn() -> None:
     protocol = ACPProtocol()
-    protocol.handle(
+    await protocol.handle(
         ACPMessage.request(
             "initialize",
             {
@@ -1284,12 +1384,14 @@ def test_terminal_rpc_chain_completes_prompt_turn() -> None:
             },
         )
     )
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    prompt_outcome = protocol.handle(
+    prompt_outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -1349,9 +1451,10 @@ def test_terminal_rpc_chain_completes_prompt_turn() -> None:
     )
 
 
-def test_terminal_output_exit_status_skips_wait_for_exit() -> None:
+@pytest.mark.asyncio
+async def test_terminal_output_exit_status_skips_wait_for_exit() -> None:
     protocol = ACPProtocol()
-    protocol.handle(
+    await protocol.handle(
         ACPMessage.request(
             "initialize",
             {
@@ -1363,12 +1466,14 @@ def test_terminal_output_exit_status_skips_wait_for_exit() -> None:
             },
         )
     )
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    prompt_outcome = protocol.handle(
+    prompt_outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -1432,9 +1537,10 @@ def test_terminal_output_exit_status_skips_wait_for_exit() -> None:
     )
 
 
-def test_terminal_output_invalid_payload_marks_tool_as_failed() -> None:
+@pytest.mark.asyncio
+async def test_terminal_output_invalid_payload_marks_tool_as_failed() -> None:
     protocol = ACPProtocol()
-    protocol.handle(
+    await protocol.handle(
         ACPMessage.request(
             "initialize",
             {
@@ -1446,12 +1552,14 @@ def test_terminal_output_invalid_payload_marks_tool_as_failed() -> None:
             },
         )
     )
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    prompt_outcome = protocol.handle(
+    prompt_outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -1491,9 +1599,10 @@ def test_terminal_output_invalid_payload_marks_tool_as_failed() -> None:
     )
 
 
-def test_terminal_output_with_non_object_exit_status_marks_tool_as_failed() -> None:
+@pytest.mark.asyncio
+async def test_terminal_output_with_non_object_exit_status_marks_tool_as_failed() -> None:
     protocol = ACPProtocol()
-    protocol.handle(
+    await protocol.handle(
         ACPMessage.request(
             "initialize",
             {
@@ -1505,12 +1614,14 @@ def test_terminal_output_with_non_object_exit_status_marks_tool_as_failed() -> N
             },
         )
     )
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    prompt_outcome = protocol.handle(
+    prompt_outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -1558,9 +1669,10 @@ def test_terminal_output_with_non_object_exit_status_marks_tool_as_failed() -> N
     )
 
 
-def test_cancel_during_terminal_flow_emits_kill_and_release_requests() -> None:
+@pytest.mark.asyncio
+async def test_cancel_during_terminal_flow_emits_kill_and_release_requests() -> None:
     protocol = ACPProtocol()
-    protocol.handle(
+    await protocol.handle(
         ACPMessage.request(
             "initialize",
             {
@@ -1572,12 +1684,14 @@ def test_cancel_during_terminal_flow_emits_kill_and_release_requests() -> None:
             },
         )
     )
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    prompt_outcome = protocol.handle(
+    prompt_outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -1599,7 +1713,7 @@ def test_cancel_during_terminal_flow_emits_kill_and_release_requests() -> None:
         ACPMessage.response(create_request.id, {"terminalId": "term_1"})
     )
 
-    cancel_outcome = protocol.handle(
+    cancel_outcome = await protocol.handle(
         ACPMessage.request(
             "session/cancel",
             {
@@ -1612,15 +1726,18 @@ def test_cancel_during_terminal_flow_emits_kill_and_release_requests() -> None:
     assert "terminal/release" in methods
 
 
-def test_cancel_marks_active_tool_call_as_cancelled() -> None:
+@pytest.mark.asyncio
+async def test_cancel_marks_active_tool_call_as_cancelled() -> None:
     protocol = ACPProtocol()
-    _initialize_with_tool_runtime(protocol)
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    await _initialize_with_tool_runtime(protocol)
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     created_id = created.response.result["sessionId"]
 
-    prompt_outcome = protocol.handle(
+    prompt_outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -1641,7 +1758,7 @@ def test_cancel_marks_active_tool_call_as_cancelled() -> None:
     assert tool_call_created.params is not None
     tool_call_id = tool_call_created.params["update"]["toolCallId"]
 
-    cancel_outcome = protocol.handle(
+    cancel_outcome = await protocol.handle(
         ACPMessage.notification("session/cancel", {"sessionId": created_id})
     )
 
@@ -1662,15 +1779,18 @@ def test_cancel_marks_active_tool_call_as_cancelled() -> None:
     )
 
 
-def test_deferred_prompt_can_be_completed_without_cancel() -> None:
+@pytest.mark.asyncio
+async def test_deferred_prompt_can_be_completed_without_cancel() -> None:
     protocol = ACPProtocol()
-    _initialize_with_tool_runtime(protocol)
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    await _initialize_with_tool_runtime(protocol)
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    prompt_outcome = protocol.handle(
+    prompt_outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -1687,16 +1807,19 @@ def test_deferred_prompt_can_be_completed_without_cancel() -> None:
     assert completed_response.result == {"stopReason": "end_turn"}
 
 
-def test_prompt_with_tool_pending_slash_command_defers_turn() -> None:
+@pytest.mark.asyncio
+async def test_prompt_with_tool_pending_slash_command_defers_turn() -> None:
     protocol = ACPProtocol()
-    _initialize_with_tool_runtime(protocol)
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    await _initialize_with_tool_runtime(protocol)
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
     # Переключаемся в mode=code, чтобы не уходить в permission-flow и проверить defer tool-call.
-    updated = protocol.handle(
+    updated = await protocol.handle(
         ACPMessage.request(
             "session/set_config_option",
             {
@@ -1708,7 +1831,7 @@ def test_prompt_with_tool_pending_slash_command_defers_turn() -> None:
     )
     assert updated.response is not None
 
-    outcome = protocol.handle(
+    outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -1726,15 +1849,18 @@ def test_prompt_with_tool_pending_slash_command_defers_turn() -> None:
     )
 
 
-def test_permission_selected_completes_prompt_turn() -> None:
+@pytest.mark.asyncio
+async def test_permission_selected_completes_prompt_turn() -> None:
     protocol = ACPProtocol()
-    _initialize_with_tool_runtime(protocol)
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    await _initialize_with_tool_runtime(protocol)
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    prompt_outcome = protocol.handle(
+    prompt_outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -1777,15 +1903,18 @@ def test_permission_selected_completes_prompt_turn() -> None:
     assert resolved.followup_responses[0].result == {"stopReason": "end_turn"}
 
 
-def test_permission_cancelled_finishes_turn_with_cancelled() -> None:
+@pytest.mark.asyncio
+async def test_permission_cancelled_finishes_turn_with_cancelled() -> None:
     protocol = ACPProtocol()
-    _initialize_with_tool_runtime(protocol)
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    await _initialize_with_tool_runtime(protocol)
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    prompt_outcome = protocol.handle(
+    prompt_outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -1814,15 +1943,18 @@ def test_permission_cancelled_finishes_turn_with_cancelled() -> None:
     assert resolved.followup_responses[0].result == {"stopReason": "cancelled"}
 
 
-def test_permission_reject_option_finishes_turn_with_cancelled() -> None:
+@pytest.mark.asyncio
+async def test_permission_reject_option_finishes_turn_with_cancelled() -> None:
     protocol = ACPProtocol()
-    _initialize_with_tool_runtime(protocol)
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    await _initialize_with_tool_runtime(protocol)
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    prompt_outcome = protocol.handle(
+    prompt_outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -1851,15 +1983,18 @@ def test_permission_reject_option_finishes_turn_with_cancelled() -> None:
     assert resolved.followup_responses[0].result == {"stopReason": "cancelled"}
 
 
-def test_permission_selected_with_unknown_option_is_rejected() -> None:
+@pytest.mark.asyncio
+async def test_permission_selected_with_unknown_option_is_rejected() -> None:
     protocol = ACPProtocol()
-    _initialize_with_tool_runtime(protocol)
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    await _initialize_with_tool_runtime(protocol)
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    prompt_outcome = protocol.handle(
+    prompt_outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -1892,7 +2027,7 @@ def test_permission_selected_with_unknown_option_is_rejected() -> None:
     assert len(resolved.followup_responses) == 1
     assert resolved.followup_responses[0].result == {"stopReason": "cancelled"}
 
-    next_prompt = protocol.handle(
+    next_prompt = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -1909,15 +2044,18 @@ def test_permission_selected_with_unknown_option_is_rejected() -> None:
     )
 
 
-def test_permission_selected_without_option_id_is_rejected() -> None:
+@pytest.mark.asyncio
+async def test_permission_selected_without_option_id_is_rejected() -> None:
     protocol = ACPProtocol()
-    _initialize_with_tool_runtime(protocol)
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    await _initialize_with_tool_runtime(protocol)
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    prompt_outcome = protocol.handle(
+    prompt_outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -1950,15 +2088,18 @@ def test_permission_selected_without_option_id_is_rejected() -> None:
     assert resolved.followup_responses[0].result == {"stopReason": "cancelled"}
 
 
-def test_late_permission_response_after_cancel_is_ignored() -> None:
+@pytest.mark.asyncio
+async def test_late_permission_response_after_cancel_is_ignored() -> None:
     protocol = ACPProtocol()
-    _initialize_with_tool_runtime(protocol)
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    await _initialize_with_tool_runtime(protocol)
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    prompt_outcome = protocol.handle(
+    prompt_outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -1977,7 +2118,7 @@ def test_late_permission_response_after_cancel_is_ignored() -> None:
     )
     assert permission_request.id is not None
 
-    cancel_outcome = protocol.handle(
+    cancel_outcome = await protocol.handle(
         ACPMessage.notification("session/cancel", {"sessionId": session_id})
     )
     assert len(cancel_outcome.followup_responses) == 1
@@ -1997,7 +2138,7 @@ def test_late_permission_response_after_cancel_is_ignored() -> None:
     assert late_permission.notifications == []
     assert late_permission.followup_responses == []
 
-    next_prompt = protocol.handle(
+    next_prompt = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -2010,9 +2151,10 @@ def test_late_permission_response_after_cancel_is_ignored() -> None:
     assert next_prompt.response.result == {"stopReason": "end_turn"}
 
 
-def test_late_fs_response_after_cancel_is_ignored() -> None:
+@pytest.mark.asyncio
+async def test_late_fs_response_after_cancel_is_ignored() -> None:
     protocol = ACPProtocol()
-    protocol.handle(
+    await protocol.handle(
         ACPMessage.request(
             "initialize",
             {
@@ -2024,12 +2166,14 @@ def test_late_fs_response_after_cancel_is_ignored() -> None:
             },
         )
     )
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    prompt_outcome = protocol.handle(
+    prompt_outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -2048,7 +2192,7 @@ def test_late_fs_response_after_cancel_is_ignored() -> None:
     )
     assert fs_request.id is not None
 
-    cancel_outcome = protocol.handle(
+    cancel_outcome = await protocol.handle(
         ACPMessage.notification("session/cancel", {"sessionId": session_id})
     )
     assert len(cancel_outcome.followup_responses) == 1
@@ -2060,7 +2204,7 @@ def test_late_fs_response_after_cancel_is_ignored() -> None:
     assert late_fs_response.notifications == []
     assert late_fs_response.followup_responses == []
 
-    next_prompt = protocol.handle(
+    next_prompt = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -2073,9 +2217,10 @@ def test_late_fs_response_after_cancel_is_ignored() -> None:
     assert next_prompt.response.result == {"stopReason": "end_turn"}
 
 
-def test_late_terminal_create_response_after_cancel_is_ignored() -> None:
+@pytest.mark.asyncio
+async def test_late_terminal_create_response_after_cancel_is_ignored() -> None:
     protocol = ACPProtocol()
-    protocol.handle(
+    await protocol.handle(
         ACPMessage.request(
             "initialize",
             {
@@ -2087,12 +2232,14 @@ def test_late_terminal_create_response_after_cancel_is_ignored() -> None:
             },
         )
     )
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    prompt_outcome = protocol.handle(
+    prompt_outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -2111,7 +2258,7 @@ def test_late_terminal_create_response_after_cancel_is_ignored() -> None:
     )
     assert create_request.id is not None
 
-    cancel_outcome = protocol.handle(
+    cancel_outcome = await protocol.handle(
         ACPMessage.notification("session/cancel", {"sessionId": session_id})
     )
     assert len(cancel_outcome.followup_responses) == 1
@@ -2123,7 +2270,7 @@ def test_late_terminal_create_response_after_cancel_is_ignored() -> None:
     assert late_create_response.notifications == []
     assert late_create_response.followup_responses == []
 
-    next_prompt = protocol.handle(
+    next_prompt = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -2136,15 +2283,18 @@ def test_late_terminal_create_response_after_cancel_is_ignored() -> None:
     assert next_prompt.response.result == {"stopReason": "end_turn"}
 
 
-def test_permission_allow_always_applies_to_next_tool_call() -> None:
+@pytest.mark.asyncio
+async def test_permission_allow_always_applies_to_next_tool_call() -> None:
     protocol = ACPProtocol()
-    _initialize_with_tool_runtime(protocol)
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    await _initialize_with_tool_runtime(protocol)
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    first_prompt = protocol.handle(
+    first_prompt = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -2176,7 +2326,7 @@ def test_permission_allow_always_applies_to_next_tool_call() -> None:
     assert len(first_resolution.followup_responses) == 1
     assert first_resolution.followup_responses[0].result == {"stopReason": "end_turn"}
 
-    second_prompt = protocol.handle(
+    second_prompt = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -2194,15 +2344,18 @@ def test_permission_allow_always_applies_to_next_tool_call() -> None:
     )
 
 
-def test_permission_reject_always_applies_to_next_tool_call() -> None:
+@pytest.mark.asyncio
+async def test_permission_reject_always_applies_to_next_tool_call() -> None:
     protocol = ACPProtocol()
-    _initialize_with_tool_runtime(protocol)
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    await _initialize_with_tool_runtime(protocol)
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    first_prompt = protocol.handle(
+    first_prompt = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -2234,7 +2387,7 @@ def test_permission_reject_always_applies_to_next_tool_call() -> None:
     assert len(first_resolution.followup_responses) == 1
     assert first_resolution.followup_responses[0].result == {"stopReason": "cancelled"}
 
-    second_prompt = protocol.handle(
+    second_prompt = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -2252,15 +2405,18 @@ def test_permission_reject_always_applies_to_next_tool_call() -> None:
     )
 
 
-def test_permission_policy_is_scoped_by_tool_kind() -> None:
+@pytest.mark.asyncio
+async def test_permission_policy_is_scoped_by_tool_kind() -> None:
     protocol = ACPProtocol()
-    _initialize_with_tool_runtime(protocol)
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    await _initialize_with_tool_runtime(protocol)
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    first_prompt = protocol.handle(
+    first_prompt = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -2294,7 +2450,7 @@ def test_permission_policy_is_scoped_by_tool_kind() -> None:
     assert len(resolved.followup_responses) == 1
     assert resolved.followup_responses[0].result == {"stopReason": "end_turn"}
 
-    same_kind_prompt = protocol.handle(
+    same_kind_prompt = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -2310,7 +2466,7 @@ def test_permission_policy_is_scoped_by_tool_kind() -> None:
         for notification in same_kind_prompt.notifications
     )
 
-    different_kind_prompt = protocol.handle(
+    different_kind_prompt = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -2327,15 +2483,18 @@ def test_permission_policy_is_scoped_by_tool_kind() -> None:
     )
 
 
-def test_prompt_tool_flow_supports_fetch_kind() -> None:
+@pytest.mark.asyncio
+async def test_prompt_tool_flow_supports_fetch_kind() -> None:
     protocol = ACPProtocol()
-    _initialize_with_tool_runtime(protocol)
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    await _initialize_with_tool_runtime(protocol)
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    outcome = protocol.handle(
+    outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -2360,19 +2519,22 @@ def test_prompt_tool_flow_supports_fetch_kind() -> None:
     assert tool_call_updates[0].params["update"].get("kind") == "fetch"
 
 
-def test_cancel_without_active_turn_does_not_affect_next_prompt() -> None:
+@pytest.mark.asyncio
+async def test_cancel_without_active_turn_does_not_affect_next_prompt() -> None:
     protocol = ACPProtocol()
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    cancel_outcome = protocol.handle(
+    cancel_outcome = await protocol.handle(
         ACPMessage.notification("session/cancel", {"sessionId": session_id})
     )
     assert cancel_outcome.response is None
 
-    prompt_outcome = protocol.handle(
+    prompt_outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -2385,14 +2547,17 @@ def test_cancel_without_active_turn_does_not_affect_next_prompt() -> None:
     assert prompt_outcome.response.result == {"stopReason": "end_turn"}
 
 
-def test_session_load_replays_history_and_config() -> None:
+@pytest.mark.asyncio
+async def test_session_load_replays_history_and_config() -> None:
     protocol = ACPProtocol()
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    prompted = protocol.handle(
+    prompted = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -2403,7 +2568,7 @@ def test_session_load_replays_history_and_config() -> None:
     )
     assert prompted.response is not None
 
-    loaded = protocol.handle(
+    loaded = await protocol.handle(
         ACPMessage.request(
             "session/load",
             {
@@ -2431,14 +2596,17 @@ def test_session_load_replays_history_and_config() -> None:
     assert "available_commands_update" in replay_updates
 
 
-def test_session_load_replays_last_plan_update() -> None:
+@pytest.mark.asyncio
+async def test_session_load_replays_last_plan_update() -> None:
     protocol = ACPProtocol()
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    prompted = protocol.handle(
+    prompted = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -2450,7 +2618,7 @@ def test_session_load_replays_last_plan_update() -> None:
     )
     assert prompted.response is not None
 
-    loaded = protocol.handle(
+    loaded = await protocol.handle(
         ACPMessage.request(
             "session/load",
             {
@@ -2470,14 +2638,17 @@ def test_session_load_replays_last_plan_update() -> None:
     assert "plan" in replay_updates
 
 
-def test_session_set_mode_updates_current_mode() -> None:
+@pytest.mark.asyncio
+async def test_session_set_mode_updates_current_mode() -> None:
     protocol = ACPProtocol()
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    outcome = protocol.handle(
+    outcome = await protocol.handle(
         ACPMessage.request(
             "session/set_mode",
             {
@@ -2497,15 +2668,18 @@ def test_session_set_mode_updates_current_mode() -> None:
     assert "current_mode_update" in update_types
 
 
-def test_session_load_replays_tool_call_state() -> None:
+@pytest.mark.asyncio
+async def test_session_load_replays_tool_call_state() -> None:
     protocol = ACPProtocol()
-    _initialize_with_tool_runtime(protocol)
-    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    await _initialize_with_tool_runtime(protocol)
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
     assert created.response is not None
     assert isinstance(created.response.result, dict)
     session_id = created.response.result["sessionId"]
 
-    prompt_outcome = protocol.handle(
+    prompt_outcome = await protocol.handle(
         ACPMessage.request(
             "session/prompt",
             {
@@ -2517,7 +2691,7 @@ def test_session_load_replays_tool_call_state() -> None:
     )
     assert prompt_outcome.response is None
 
-    loaded = protocol.handle(
+    loaded = await protocol.handle(
         ACPMessage.request(
             "session/load",
             {

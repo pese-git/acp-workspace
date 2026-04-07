@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..messages import ACPMessage, JsonRpcId
+from ..storage import SessionStorage
 from .handlers import (
     auth,
     config,
@@ -35,14 +36,36 @@ class ACPProtocol:
         outcome = protocol.handle(ACPMessage.request("initialize", {}))
     """
 
-    def __init__(self, *, require_auth: bool = False, auth_api_key: str | None = None) -> None:
-        """Инициализирует протокол и пустое хранилище сессий.
+    def __init__(
+        self,
+        *,
+        require_auth: bool = False,
+        auth_api_key: str | None = None,
+        storage: SessionStorage | None = None,
+    ) -> None:
+        """Инициализирует протокол и хранилище сессий.
+
+        Args:
+            require_auth: Требовать аутентификацию перед session setup.
+            auth_api_key: API ключ для аутентификации.
+            storage: Хранилище сессий (по умолчанию InMemoryStorage).
 
         Пример использования:
             protocol = ACPProtocol()
+            # или с кастомным хранилищем:
+            from acp_server.storage import InMemoryStorage
+            storage = InMemoryStorage()
+            protocol = ACPProtocol(storage=storage)
         """
 
+        # Инициализировать хранилище (по умолчанию InMemoryStorage)
+        if storage is None:
+            from ..storage import InMemoryStorage
+            storage = InMemoryStorage()
+        self._storage = storage
+        # Внутренний кэш сессий для совместимости с handlers
         self._sessions: dict[str, SessionState] = {}
+        
         # Последние capabilities, согласованные через initialize.
         # Для in-memory demo-сервера это достаточно; по мере роста можно
         # расширить до connection-scoped хранилища.
@@ -116,7 +139,7 @@ class ACPProtocol:
     # Размер страницы для `session/list`; cursor указывает смещение в этом срезе.
     _session_list_page_size = 50
 
-    def handle(self, message: ACPMessage) -> ProtocolOutcome:
+    async def handle(self, message: ACPMessage) -> ProtocolOutcome:
         """Обрабатывает входящее сообщение и маршрутизирует его по ACP-методу.
 
         Метод является основной точкой входа для HTTP/WS транспорта.
@@ -205,7 +228,7 @@ class ACPProtocol:
                 for config_id, spec in self._config_specs.items()
             }
 
-            self._sessions[session_id] = SessionState(
+            session_state = SessionState(
                 session_id=session_id,
                 cwd=cwd,
                 mcp_servers=[srv for srv in mcp_servers if isinstance(srv, dict)],
@@ -213,6 +236,9 @@ class ACPProtocol:
                 available_commands=session.build_default_commands(),
                 runtime_capabilities=self._runtime_capabilities,
             )
+            await self._storage.save_session(session_state)
+            # Обновляем внутренний кэш для синхронной работы handlers
+            self._sessions[session_id] = session_state
 
             return ProtocolOutcome(
                 response=ACPMessage.response(

@@ -4,5 +4,6 @@
 """
 
 from .base import SessionStorage, StorageError
+from .memory import InMemoryStorage
 
-__all__ = ["SessionStorage", "StorageError"]
+__all__ = ["SessionStorage", "StorageError", "InMemoryStorage"]

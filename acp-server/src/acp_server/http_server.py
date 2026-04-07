@@ -155,7 +155,7 @@ class ACPHttpServer:
                                 raw_session_id = acp_request.params.get("sessionId")
                                 if isinstance(raw_session_id, str):
                                     session_id = raw_session_id
-                            outcome = protocol.handle(acp_request)
+                            outcome = await protocol.handle(acp_request)
                         
                         # Логируем входящий запрос с методом и сессией
                         conn_logger.info(
