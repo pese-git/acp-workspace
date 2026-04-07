@@ -74,16 +74,54 @@ acp-server/src/acp_server/
 ```
 acp-client/src/acp_client/
 ├── cli.py                   # CLI команды и entry point
-├── client.py                # ACPClient для запросов к серверу
-└── messages.py              # Pydantic модели сообщений
+├── client.py                # ACPClient для запросов к серверу (654 строк)
+├── logging.py               # Структурированное логирование
+├── messages.py              # Pydantic модели сообщений
+├── __init__.py              # Экспорт публичного API
+├── helpers/                 # 🔧 Вспомогательные функции
+│   ├── __init__.py          # Экспорт helper функций
+│   ├── auth.py              # pick_auth_method_id() — выбор метода аутентификации
+│   └── session.py           # Функции парсинга session/update событий
+├── handlers/                # 🎯 Обработчики RPC запросов от сервера
+│   ├── __init__.py          # Экспорт обработчиков
+│   ├── permissions.py       # build_permission_result() — результат разрешений
+│   ├── filesystem.py        # handle_server_fs_request() — файловая система
+│   └── terminal.py          # handle_server_terminal_request() — терминал
+└── transport/               # 🌐 Транспортный слой
+    ├── __init__.py          # Экспорт транспортных компонентов
+    └── websocket.py         # WebSocket сессия (ACPClientWSSession) и функции
 ```
+
+#### Слои архитектуры
+
+1. **Transport Layer** (`transport/websocket.py`)
+   - `ACPClientWSSession` — класс для управления persistent WebSocket-сессиями
+   - `await_ws_response()` — ожидание финального ответа с обработкой промежуточных событий
+   - `perform_ws_initialize()` — handshake инициализация
+   - `perform_ws_authenticate()` — аутентификация в WS-сессии
+
+2. **Handlers Layer** (`handlers/`)
+   - `build_permission_result()` — обработка запросов разрешений
+   - `handle_server_fs_request()` — обработка FS операций от сервера
+   - `handle_server_terminal_request()` — обработка терминала от сервера
+
+3. **Helpers Layer** (`helpers/`)
+   - `pick_auth_method_id()` — выбор метода аутентификации из доступных
+   - `extract_tool_call_updates()`, `extract_plan_updates()` и другие — парсинг session updates
+
+4. **Client Layer** (`client.py`)
+   - `ACPClient` — основной асинхронный клиент для запросов к серверу
+   - Поддержка методов: `authenticate`, `initialize`, `session/new`, `session/load`, `session/list`, `session/prompt`
+   - Обработка `session/request_permission` и других RPC запросов от сервера
 
 #### Функциональность
 
-- **ACPClient** — асинхронный клиент для TCP и WebSocket соединений
+- **ACPClient** — асинхронный клиент для WebSocket соединений с серверами ACP
 - Поддержка методов: `authenticate`, `initialize`, `session/new`, `session/load`, `session/list`, `session/prompt`
 - Обработка `session/request_permission` и других RPC запросов от сервера
 - CLI для быстрого взаимодействия с серверами
+- Структурированное логирование с поддержкой JSON формата
+- Модульная архитектура для легкого добавления новых обработчиков
 
 ## Поток данных
 

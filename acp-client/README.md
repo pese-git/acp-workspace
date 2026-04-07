@@ -2,6 +2,43 @@
 
 Клиентская часть Agent Client Protocol (ACP) с WebSocket транспортом.
 
+## Архитектура
+
+### Структура модулей
+
+Клиент организован в логичные компоненты для лучшей модульности и тестируемости:
+
+```
+acp-client/src/acp_client/
+├── client.py                 # Основной клиент ACPClient (654 строк)
+├── cli.py                    # CLI интерфейс
+├── logging.py                # Структурированное логирование
+├── messages.py               # Pydantic модели сообщений
+│
+├── transport/                # 🌐 Транспортный слой
+│   └── websocket.py          # WebSocket сессия (ACPClientWSSession)
+│
+├── handlers/                 # 🎯 Обработчики RPC запросов
+│   ├── permissions.py        # Обработка разрешений
+│   ├── filesystem.py         # Обработка файловой системы
+│   └── terminal.py           # Обработка терминала
+│
+└── helpers/                  # 🔧 Вспомогательные функции
+    ├── auth.py              # Выбор метода аутентификации
+    └── session.py           # Парсинг session/update событий
+```
+
+### Компоненты
+
+- **`client.py`** — основной класс `ACPClient` для взаимодействия с ACP серверами
+- **`transport/websocket.py`** — транспортный слой для WebSocket соединений
+  - `ACPClientWSSession` — управление persistent WebSocket-сессиями
+  - `await_ws_response()` — ожидание финального ответа
+  - `perform_ws_initialize()`, `perform_ws_authenticate()` — handshake функции
+- **`handlers/`** — модули для обработки RPC запросов от сервера
+  - Разделение по типам: permissions, filesystem, terminal
+- **`helpers/`** — вспомогательные функции для аутентификации и парсинга
+
 ## Установка
 
 ```bash
