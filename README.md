@@ -51,6 +51,7 @@ make ping-ws
 
 - `initialize`
 - `session/new`
+- `session/load`
 - `session/list`
 - `session/prompt`
 - `session/cancel`

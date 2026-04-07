@@ -75,10 +75,25 @@ class ACPMessage(BaseModel):
         return cls.model_validate(normalized)
 
     def to_json(self) -> str:
-        return self.model_dump_json(exclude_none=True)
+        return json.dumps(self.to_dict(), separators=(",", ":"))
 
     def to_dict(self) -> dict[str, Any]:
-        return self.model_dump(exclude_none=True)
+        payload: dict[str, Any] = {"jsonrpc": self.jsonrpc}
+
+        if self.method is not None:
+            if self.id is not None:
+                payload["id"] = self.id
+            payload["method"] = self.method
+            if "params" in self.model_fields_set:
+                payload["params"] = self.params
+            return payload
+
+        payload["id"] = self.id
+        if "result" in self.model_fields_set:
+            payload["result"] = self.result
+        if self.error is not None:
+            payload["error"] = self.error.model_dump(exclude_none=True)
+        return payload
 
 
 def parse_json_params(value: str | None) -> dict[str, Any]:

@@ -105,6 +105,8 @@ class ACPProtocol:
             return ProtocolOutcome(response=self._initialize(message.id))
         if method == "session/new":
             return ProtocolOutcome(response=self._session_new(message.id, params))
+        if method == "session/load":
+            return self._session_load(message.id, params)
         if method == "session/list":
             return ProtocolOutcome(response=self._session_list(message.id, params))
         if method == "session/prompt":
@@ -144,7 +146,7 @@ class ACPProtocol:
         result = {
             "protocolVersion": 1,
             "agentCapabilities": {
-                "loadSession": False,
+                "loadSession": True,
                 "mcpCapabilities": {"http": False, "sse": False},
                 "promptCapabilities": {
                     "image": False,
@@ -199,6 +201,113 @@ class ACPProtocol:
                 "sessionId": session_id,
                 "configOptions": self._build_config_options(config_values),
             },
+        )
+
+    def _session_load(
+        self,
+        request_id: JsonRpcId | None,
+        params: dict[str, Any],
+    ) -> ProtocolOutcome:
+        # Загрузка поддерживает in-memory сессии и реплей накопленной истории в `session/update`.
+        session_id = params.get("sessionId")
+        cwd = params.get("cwd")
+        mcp_servers = params.get("mcpServers")
+
+        if not isinstance(session_id, str):
+            return ProtocolOutcome(
+                response=ACPMessage.error_response(
+                    request_id,
+                    code=-32602,
+                    message="Invalid params: sessionId is required",
+                )
+            )
+        if not isinstance(cwd, str) or not Path(cwd).is_absolute():
+            return ProtocolOutcome(
+                response=ACPMessage.error_response(
+                    request_id,
+                    code=-32602,
+                    message="Invalid params: cwd must be an absolute path",
+                )
+            )
+        if not isinstance(mcp_servers, list):
+            return ProtocolOutcome(
+                response=ACPMessage.error_response(
+                    request_id,
+                    code=-32602,
+                    message="Invalid params: mcpServers must be an array",
+                )
+            )
+
+        session = self._sessions.get(session_id)
+        if session is None:
+            return ProtocolOutcome(
+                response=ACPMessage.error_response(
+                    request_id,
+                    code=-32001,
+                    message=f"Session not found: {session_id}",
+                )
+            )
+
+        # При загрузке фиксируем актуальный контекст клиента.
+        session.cwd = cwd
+        session.mcp_servers = [server for server in mcp_servers if isinstance(server, dict)]
+
+        notifications: list[ACPMessage] = []
+        for entry in session.history:
+            role = entry.get("role") if isinstance(entry, dict) else None
+            content = entry.get("content") if isinstance(entry, dict) else None
+            if role == "user" and isinstance(content, list):
+                for block in content:
+                    notifications.append(
+                        ACPMessage.notification(
+                            "session/update",
+                            {
+                                "sessionId": session_id,
+                                "update": {
+                                    "sessionUpdate": "user_message_chunk",
+                                    "content": block,
+                                },
+                            },
+                        )
+                    )
+            if role == "agent" and isinstance(content, list):
+                for block in content:
+                    notifications.append(
+                        ACPMessage.notification(
+                            "session/update",
+                            {
+                                "sessionId": session_id,
+                                "update": {
+                                    "sessionUpdate": "agent_message_chunk",
+                                    "content": block,
+                                },
+                            },
+                        )
+                    )
+
+        notifications.append(
+            ACPMessage.notification(
+                "session/update",
+                {
+                    "sessionId": session_id,
+                    "update": {
+                        "sessionUpdate": "config_option_update",
+                        "configOptions": self._build_config_options(session.config_values),
+                    },
+                },
+            )
+        )
+        notifications.append(
+            self._session_info_notification(
+                session_id=session_id,
+                title=session.title,
+                updated_at=session.updated_at,
+            )
+        )
+
+        return ProtocolOutcome(
+            response=ACPMessage.response(request_id, None),
+            notifications=notifications,
         )
 
     def _session_list(self, request_id: JsonRpcId | None, params: dict[str, Any]) -> ACPMessage:

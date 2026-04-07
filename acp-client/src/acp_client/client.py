@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from typing import Literal
+from typing import Any, Literal
 
 from aiohttp import ClientSession, WSMsgType
 
@@ -65,3 +65,26 @@ class ACPClient:
                     continue
 
                 return ACPMessage.from_dict(payload)
+
+    async def load_session(
+        self,
+        *,
+        session_id: str,
+        cwd: str,
+        mcp_servers: list[dict[str, Any]] | None = None,
+        transport: Literal["http", "ws"] = "ws",
+    ) -> tuple[ACPMessage, list[dict[str, Any]]]:
+        # Для `session/load` удобно вернуть и финальный ответ, и replay-обновления.
+        updates: list[dict[str, Any]] = []
+        params = {
+            "sessionId": session_id,
+            "cwd": cwd,
+            "mcpServers": mcp_servers or [],
+        }
+        response = await self.request(
+            method="session/load",
+            params=params,
+            transport=transport,
+            on_update=updates.append,
+        )
+        return response, updates

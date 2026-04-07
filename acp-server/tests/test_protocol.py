@@ -193,3 +193,46 @@ def test_cancel_marks_active_tool_call_as_cancelled() -> None:
         and notification.params["update"]["toolCallId"] == tool_call_id
         for notification in cancelled_updates
     )
+
+
+def test_session_load_replays_history_and_config() -> None:
+    protocol = ACPProtocol()
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    prompted = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "hello replay"}],
+            },
+        )
+    )
+    assert prompted.response is not None
+
+    loaded = protocol.handle(
+        ACPMessage.request(
+            "session/load",
+            {
+                "sessionId": session_id,
+                "cwd": "/tmp",
+                "mcpServers": [],
+            },
+        )
+    )
+
+    assert loaded.response is not None
+    assert loaded.response.result is None
+
+    replay_updates = [
+        notification.params["update"]["sessionUpdate"]
+        for notification in loaded.notifications
+        if notification.params is not None
+    ]
+    assert "user_message_chunk" in replay_updates
+    assert "agent_message_chunk" in replay_updates
+    assert "config_option_update" in replay_updates
+    assert "session_info_update" in replay_updates

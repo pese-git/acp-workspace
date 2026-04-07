@@ -22,6 +22,7 @@ uv run acp-server --transport ws --host 127.0.0.1 --port 8080
 
 - `initialize`
 - `session/new`
+- `session/load`
 - `session/list`
 - `session/prompt`
 - `session/cancel`
