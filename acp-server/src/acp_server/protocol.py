@@ -53,6 +53,8 @@ class SessionState:
     available_commands: list[dict[str, Any]] = field(default_factory=list)
     # Последний опубликованный план выполнения для `session/update: plan`.
     latest_plan: list[dict[str, str]] = field(default_factory=list)
+    # Персистентные permission-решения по kind (например, allow_always).
+    permission_policy: dict[str, str] = field(default_factory=dict)
     # Идентификаторы permission-запросов, отмененных через `session/cancel`.
     # Нужны для детерминированного игнорирования поздних client-responses.
     cancelled_permission_requests: set[JsonRpcId] = field(default_factory=set)
@@ -880,6 +882,7 @@ class ACPProtocol:
         )
 
         should_request_permission = False
+        prompt_stop_reason = "end_turn"
         if terminal_request is not None:
             if self._can_use_terminal_client_rpc():
                 notifications.extend(terminal_request.messages)
@@ -931,7 +934,7 @@ class ACPProtocol:
         elif should_run_tool_flow and session.config_values.get("mode", "ask") == "ask":
             tool_call_id = self._create_tool_call(
                 session=session,
-                title="Demo tool execution",
+                title="Tool execution",
                 kind="other",
             )
             notifications.append(
@@ -942,30 +945,51 @@ class ACPProtocol:
                         "update": {
                             "sessionUpdate": "tool_call",
                             "toolCallId": tool_call_id,
-                            "title": "Demo tool execution",
+                            "title": "Tool execution",
                             "kind": "other",
                             "status": "pending",
                         },
                     },
                 )
             )
-            permission_request = ACPMessage.request(
-                "session/request_permission",
-                {
-                    "sessionId": session_id,
-                    "toolCall": {
-                        "toolCallId": tool_call_id,
-                        "title": "Demo tool execution",
-                        "kind": "other",
+            remembered_permission = session.permission_policy.get("other")
+            if remembered_permission == "allow_always":
+                notifications.extend(
+                    self._build_demo_tool_execution_updates(
+                        session=session,
+                        session_id=session_id,
+                        tool_call_id=tool_call_id,
+                        allowed=True,
+                    )
+                )
+            elif remembered_permission == "reject_always":
+                notifications.extend(
+                    self._build_demo_tool_execution_updates(
+                        session=session,
+                        session_id=session_id,
+                        tool_call_id=tool_call_id,
+                        allowed=False,
+                    )
+                )
+                prompt_stop_reason = "cancelled"
+            else:
+                permission_request = ACPMessage.request(
+                    "session/request_permission",
+                    {
+                        "sessionId": session_id,
+                        "toolCall": {
+                            "toolCallId": tool_call_id,
+                            "title": "Tool execution",
+                            "kind": "other",
+                        },
+                        "options": self._build_permission_options(),
                     },
-                    "options": self._build_permission_options(),
-                },
-            )
-            session.active_turn.permission_request_id = permission_request.id
-            session.active_turn.permission_tool_call_id = tool_call_id
-            session.active_turn.phase = "waiting_permission"
-            notifications.append(permission_request)
-            should_request_permission = True
+                )
+                session.active_turn.permission_request_id = permission_request.id
+                session.active_turn.permission_tool_call_id = tool_call_id
+                session.active_turn.phase = "waiting_permission"
+                notifications.append(permission_request)
+                should_request_permission = True
         else:
             # Демонстрационный tool-call lifecycle для совместимости с ACP-клиентами.
             tool_notifications = self._build_tool_call_updates(
@@ -1052,7 +1076,7 @@ class ACPProtocol:
             return ProtocolOutcome(response=None, notifications=notifications)
 
         outcome = ProtocolOutcome(
-            response=ACPMessage.response(request_id, {"stopReason": "end_turn"}),
+            response=ACPMessage.response(request_id, {"stopReason": prompt_stop_reason}),
             notifications=notifications,
         )
         session.active_turn = None
@@ -1604,22 +1628,21 @@ class ACPProtocol:
         outcome_value = self._extract_permission_outcome(result)
         selected_option = self._extract_permission_option_id(result)
         selected_option_id = selected_option if isinstance(selected_option, str) else None
+        tool_call_state = session.tool_calls.get(tool_call_id)
+        tool_kind = tool_call_state.kind if tool_call_state is not None else None
+        if tool_kind is not None and selected_option_id in {"allow_always", "reject_always"}:
+            # Сохраняем policy-решение для следующих tool-call этого же kind.
+            session.permission_policy[tool_kind] = selected_option_id
         should_allow = outcome_value == "selected" and selected_option_id is not None
         if selected_option_id is not None:
             should_allow = should_allow and selected_option_id.startswith("allow")
         if not should_allow:
-            self._update_tool_call_status(session, tool_call_id, "cancelled")
-            notifications.append(
-                ACPMessage.notification(
-                    "session/update",
-                    {
-                        "sessionId": session_id,
-                        "update": {
-                            "sessionUpdate": "tool_call_update",
-                            "toolCallId": tool_call_id,
-                            "status": "cancelled",
-                        },
-                    },
+            notifications.extend(
+                self._build_demo_tool_execution_updates(
+                    session=session,
+                    session_id=session_id,
+                    tool_call_id=tool_call_id,
+                    allowed=False,
                 )
             )
             session.updated_at = datetime.now(UTC).isoformat()
@@ -1636,6 +1659,65 @@ class ACPProtocol:
                 followup_responses=[cancelled] if cancelled is not None else [],
             )
 
+        notifications.extend(
+            self._build_demo_tool_execution_updates(
+                session=session,
+                session_id=session_id,
+                tool_call_id=tool_call_id,
+                allowed=True,
+            )
+        )
+
+        session.updated_at = datetime.now(UTC).isoformat()
+        notifications.append(
+            self._session_info_notification(
+                session_id=session_id,
+                title=None,
+                updated_at=session.updated_at,
+            )
+        )
+        completed = self._finalize_active_turn(session=session, stop_reason="end_turn")
+        return ProtocolOutcome(
+            notifications=notifications,
+            followup_responses=[completed] if completed is not None else [],
+        )
+
+    def _build_demo_tool_execution_updates(
+        self,
+        *,
+        session: SessionState,
+        session_id: str,
+        tool_call_id: str,
+        allowed: bool,
+    ) -> list[ACPMessage]:
+        """Строит lifecycle updates для локального tool execution после policy-решения.
+
+        Пример использования:
+            updates = protocol._build_demo_tool_execution_updates(
+                session=state,
+                session_id="sess_1",
+                tool_call_id="call_1",
+                allowed=True,
+            )
+        """
+
+        if not allowed:
+            self._update_tool_call_status(session, tool_call_id, "cancelled")
+            return [
+                ACPMessage.notification(
+                    "session/update",
+                    {
+                        "sessionId": session_id,
+                        "update": {
+                            "sessionUpdate": "tool_call_update",
+                            "toolCallId": tool_call_id,
+                            "status": "cancelled",
+                        },
+                    },
+                )
+            ]
+
+        notifications: list[ACPMessage] = []
         self._update_tool_call_status(session, tool_call_id, "in_progress")
         notifications.append(
             ACPMessage.notification(
@@ -1650,13 +1732,12 @@ class ACPProtocol:
                 },
             )
         )
-
         completed_content = [
             {
                 "type": "content",
                 "content": {
                     "type": "text",
-                    "text": "Demo tool completed successfully.",
+                    "text": "Tool completed successfully.",
                 },
             }
         ]
@@ -1680,20 +1761,7 @@ class ACPProtocol:
                 },
             )
         )
-
-        session.updated_at = datetime.now(UTC).isoformat()
-        notifications.append(
-            self._session_info_notification(
-                session_id=session_id,
-                title=None,
-                updated_at=session.updated_at,
-            )
-        )
-        completed = self._finalize_active_turn(session=session, stop_reason="end_turn")
-        return ProtocolOutcome(
-            notifications=notifications,
-            followup_responses=[completed] if completed is not None else [],
-        )
+        return notifications
 
     def _parse_client_runtime_capabilities(
         self,
@@ -2024,7 +2092,7 @@ class ACPProtocol:
         return None
 
     def _build_permission_options(self) -> list[dict[str, Any]]:
-        """Возвращает demo-набор вариантов для `session/request_permission`.
+        """Возвращает варианты решения для `session/request_permission`.
 
         Пример использования:
             options = protocol._build_permission_options()
@@ -2037,9 +2105,19 @@ class ACPProtocol:
                 "kind": "allow_once",
             },
             {
+                "optionId": "allow_always",
+                "name": "Always allow this tool",
+                "kind": "allow_always",
+            },
+            {
                 "optionId": "reject_once",
-                "name": "Reject",
+                "name": "Reject once",
                 "kind": "reject_once",
+            },
+            {
+                "optionId": "reject_always",
+                "name": "Always reject this tool",
+                "kind": "reject_always",
             },
         ]
 

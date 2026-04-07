@@ -970,6 +970,9 @@ def test_permission_selected_completes_prompt_turn() -> None:
     assert any(
         isinstance(option, dict) and option.get("kind") == "reject_once" for option in options
     )
+    assert any(
+        isinstance(option, dict) and option.get("kind") == "allow_always" for option in options
+    )
 
     resolved = protocol.handle_client_response(
         ACPMessage.response(
@@ -1115,6 +1118,118 @@ def test_late_permission_response_after_cancel_is_ignored() -> None:
     )
     assert next_prompt.response is not None
     assert next_prompt.response.result == {"stopReason": "end_turn"}
+
+
+def test_permission_allow_always_applies_to_next_tool_call() -> None:
+    protocol = ACPProtocol()
+    _initialize_with_tool_runtime(protocol)
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    first_prompt = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "/tool run"}],
+            },
+        )
+    )
+    assert first_prompt.response is None
+    permission_request = next(
+        notification
+        for notification in first_prompt.notifications
+        if notification.method == "session/request_permission"
+    )
+    assert permission_request.id is not None
+
+    first_resolution = protocol.handle_client_response(
+        ACPMessage.response(
+            permission_request.id,
+            {
+                "outcome": {
+                    "outcome": "selected",
+                    "optionId": "allow_always",
+                },
+            },
+        )
+    )
+    assert len(first_resolution.followup_responses) == 1
+    assert first_resolution.followup_responses[0].result == {"stopReason": "end_turn"}
+
+    second_prompt = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "/tool run again"}],
+            },
+        )
+    )
+    assert second_prompt.response is not None
+    assert second_prompt.response.result == {"stopReason": "end_turn"}
+    assert not any(
+        notification.method == "session/request_permission"
+        for notification in second_prompt.notifications
+    )
+
+
+def test_permission_reject_always_applies_to_next_tool_call() -> None:
+    protocol = ACPProtocol()
+    _initialize_with_tool_runtime(protocol)
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    first_prompt = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "/tool run"}],
+            },
+        )
+    )
+    assert first_prompt.response is None
+    permission_request = next(
+        notification
+        for notification in first_prompt.notifications
+        if notification.method == "session/request_permission"
+    )
+    assert permission_request.id is not None
+
+    first_resolution = protocol.handle_client_response(
+        ACPMessage.response(
+            permission_request.id,
+            {
+                "outcome": {
+                    "outcome": "selected",
+                    "optionId": "reject_always",
+                },
+            },
+        )
+    )
+    assert len(first_resolution.followup_responses) == 1
+    assert first_resolution.followup_responses[0].result == {"stopReason": "cancelled"}
+
+    second_prompt = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "/tool run again"}],
+            },
+        )
+    )
+    assert second_prompt.response is not None
+    assert second_prompt.response.result == {"stopReason": "cancelled"}
+    assert not any(
+        notification.method == "session/request_permission"
+        for notification in second_prompt.notifications
+    )
 
 
 def test_cancel_without_active_turn_does_not_affect_next_prompt() -> None:
