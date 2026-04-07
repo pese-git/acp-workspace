@@ -350,6 +350,21 @@ class MessageChunkUpdate(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class ThoughtChunkUpdate(BaseModel):
+    """Событие `agent_thought_chunk` с reasoning-фрагментом агента.
+
+    Пример использования:
+        ThoughtChunkUpdate.model_validate({
+            "sessionUpdate": "agent_thought_chunk",
+            "content": {"type": "text", "text": "thinking..."},
+        })
+    """
+
+    sessionUpdate: Literal["agent_thought_chunk"]
+    content: dict[str, Any]
+    model_config = ConfigDict(extra="allow")
+
+
 class SessionInfoUpdate(BaseModel):
     """Событие `session_info_update` с метаданными активной сессии.
 
@@ -557,6 +572,7 @@ type StructuredSessionUpdate = (
     ToolCallUpdate
     | PlanUpdate
     | MessageChunkUpdate
+    | ThoughtChunkUpdate
     | SessionInfoUpdate
     | CurrentModeUpdate
     | AvailableCommandsUpdate
@@ -705,6 +721,8 @@ def parse_structured_session_update(
         return PlanUpdate.model_validate(payload)
     if session_update_type in {"agent_message_chunk", "user_message_chunk"}:
         return MessageChunkUpdate.model_validate(payload)
+    if session_update_type == "agent_thought_chunk":
+        return ThoughtChunkUpdate.model_validate(payload)
     if session_update_type == "session_info_update":
         return SessionInfoUpdate.model_validate(payload)
     if session_update_type == "current_mode_update":

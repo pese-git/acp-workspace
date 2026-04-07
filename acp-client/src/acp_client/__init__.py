@@ -18,6 +18,7 @@ from .messages import (
     SessionSetupResult,
     SessionUpdateNotification,
     StructuredSessionUpdate,
+    ThoughtChunkUpdate,
     ToolCallUpdate,
 )
 
@@ -36,6 +37,7 @@ __all__ = [
     "SessionSetupResult",
     "StructuredSessionUpdate",
     "MessageChunkUpdate",
+    "ThoughtChunkUpdate",
     "SessionInfoUpdate",
     "CurrentModeUpdate",
     "AvailableCommandsUpdate",

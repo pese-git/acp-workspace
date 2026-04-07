@@ -13,6 +13,7 @@ from acp_client.messages import (
     SessionInfoUpdate,
     SessionListResult,
     SessionSetupResult,
+    ThoughtChunkUpdate,
     ToolCallCreatedUpdate,
     ToolCallStateUpdate,
     parse_initialize_result,
@@ -296,6 +297,26 @@ def test_parse_structured_session_update_for_message_chunk() -> None:
 
     parsed = parse_structured_session_update(notification)
     assert isinstance(parsed, MessageChunkUpdate)
+
+
+def test_parse_structured_session_update_for_thought_chunk() -> None:
+    notification = parse_session_update_notification(
+        {
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": "sess_1",
+                "update": {
+                    "sessionUpdate": "agent_thought_chunk",
+                    "content": {"type": "text", "text": "thinking"},
+                },
+            },
+        }
+    )
+    assert notification is not None
+
+    parsed = parse_structured_session_update(notification)
+    assert isinstance(parsed, ThoughtChunkUpdate)
 
 
 def test_parse_structured_session_update_for_session_state_updates() -> None:
