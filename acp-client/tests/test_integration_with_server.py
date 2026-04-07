@@ -15,6 +15,38 @@ def _get_free_port() -> int:
         return int(sock.getsockname()[1])
 
 
+async def _maybe_reply_initialize(ws: web.WebSocketResponse, payload: dict) -> bool:
+    """Отвечает на `initialize` в mock WS-сервере, если запрос пришел.
+
+    Возвращает `True`, если payload обработан как initialize.
+    """
+
+    if payload.get("method") != "initialize":
+        return False
+    await ws.send_json(
+        {
+            "jsonrpc": "2.0",
+            "id": payload["id"],
+            "result": {
+                "protocolVersion": 1,
+                "agentCapabilities": {
+                    "loadSession": True,
+                    "promptCapabilities": {
+                        "image": False,
+                        "audio": False,
+                        "embeddedContext": False,
+                    },
+                    "mcpCapabilities": {"http": False, "sse": False},
+                    "sessionCapabilities": {"list": {}},
+                },
+                "agentInfo": {"name": "acp-server", "version": "0.1.0"},
+                "authMethods": [],
+            },
+        }
+    )
+    return True
+
+
 @pytest.mark.asyncio
 async def test_http_client_server_ping() -> None:
     async def handle_http_request(request: web.Request) -> web.Response:
@@ -50,6 +82,10 @@ async def test_initialize_helper_parses_response() -> None:
     async def handle_http_request(request: web.Request) -> web.Response:
         payload = await request.json()
         assert payload["method"] == "initialize"
+        assert payload["params"]["clientCapabilities"] == {
+            "fs": {"readTextFile": False, "writeTextFile": False},
+            "terminal": False,
+        }
         return web.json_response(
             {
                 "jsonrpc": "2.0",
@@ -262,6 +298,8 @@ async def test_load_session_helper_collects_replay_updates() -> None:
         await ws.prepare(request)
         async for message in ws:
             payload = json.loads(message.data)
+            if await _maybe_reply_initialize(ws, payload):
+                continue
             assert payload["method"] == "session/load"
             await ws.send_json(
                 {
@@ -339,6 +377,8 @@ async def test_load_session_parsed_returns_typed_updates() -> None:
         await ws.prepare(request)
         async for message in ws:
             payload = json.loads(message.data)
+            if await _maybe_reply_initialize(ws, payload):
+                continue
             assert payload["method"] == "session/load"
             await ws.send_json(
                 {
@@ -398,6 +438,8 @@ async def test_load_session_tool_updates_filters_non_tool_events() -> None:
         await ws.prepare(request)
         async for message in ws:
             payload = json.loads(message.data)
+            if await _maybe_reply_initialize(ws, payload):
+                continue
             assert payload["method"] == "session/load"
             await ws.send_json(
                 {
@@ -487,6 +529,8 @@ async def test_load_session_plan_updates_filters_non_plan_events() -> None:
         await ws.prepare(request)
         async for message in ws:
             payload = json.loads(message.data)
+            if await _maybe_reply_initialize(ws, payload):
+                continue
             assert payload["method"] == "session/load"
             await ws.send_json(
                 {
@@ -564,6 +608,8 @@ async def test_load_session_structured_updates_filters_known_payloads() -> None:
         await ws.prepare(request)
         async for message in ws:
             payload = json.loads(message.data)
+            if await _maybe_reply_initialize(ws, payload):
+                continue
             assert payload["method"] == "session/load"
             await ws.send_json(
                 {
@@ -650,6 +696,8 @@ async def test_ws_client_receives_updates() -> None:
         await ws.prepare(request)
         async for message in ws:
             payload = json.loads(message.data)
+            if await _maybe_reply_initialize(ws, payload):
+                continue
             await ws.send_json(
                 {
                     "jsonrpc": "2.0",
@@ -699,7 +747,7 @@ async def test_ws_client_receives_updates() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ws_client_auto_initializes_when_server_requires_it() -> None:
+async def test_ws_client_initializes_before_session_methods() -> None:
     async def handle_ws_request(request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse()
         await ws.prepare(request)
@@ -707,22 +755,11 @@ async def test_ws_client_auto_initializes_when_server_requires_it() -> None:
         async for message in ws:
             payload = json.loads(message.data)
             if step == 0:
-                assert payload["method"] == "session/list"
-                await ws.send_json(
-                    {
-                        "jsonrpc": "2.0",
-                        "id": payload["id"],
-                        "error": {
-                            "code": -32000,
-                            "message": "Initialize required before session methods",
-                        },
-                    }
-                )
-                step = 1
-                continue
-
-            if step == 1:
                 assert payload["method"] == "initialize"
+                assert payload["params"]["clientCapabilities"] == {
+                    "fs": {"readTextFile": False, "writeTextFile": False},
+                    "terminal": False,
+                }
                 await ws.send_json(
                     {
                         "jsonrpc": "2.0",
@@ -744,7 +781,7 @@ async def test_ws_client_auto_initializes_when_server_requires_it() -> None:
                         },
                     }
                 )
-                step = 2
+                step = 1
                 continue
 
             assert payload["method"] == "session/list"
@@ -781,12 +818,51 @@ async def test_ws_client_auto_initializes_when_server_requires_it() -> None:
 
 
 @pytest.mark.asyncio
+async def test_ws_client_does_not_initialize_before_non_session_method() -> None:
+    async def handle_ws_request(request: web.Request) -> web.WebSocketResponse:
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+
+        async for message in ws:
+            payload = json.loads(message.data)
+            assert payload["method"] == "ping"
+            await ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": payload["id"],
+                    "result": {"pong": True},
+                }
+            )
+            break
+
+        return ws
+
+    port = _get_free_port()
+    app = web.Application()
+    app.router.add_get("/acp/ws", handle_ws_request)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="127.0.0.1", port=port)
+    await site.start()
+
+    try:
+        client = ACPClient(host="127.0.0.1", port=port)
+        response = await client.request(method="ping", transport="ws")
+        assert response.result == {"pong": True}
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
 async def test_set_config_option_with_updates_returns_structured_updates() -> None:
     async def handle_ws_request(request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse()
         await ws.prepare(request)
         async for message in ws:
             payload = json.loads(message.data)
+            if await _maybe_reply_initialize(ws, payload):
+                continue
             assert payload["method"] == "session/set_config_option"
             assert payload["params"]["configId"] == "mode"
 
@@ -867,6 +943,8 @@ async def test_ws_client_handles_permission_request() -> None:
         await ws.prepare(request)
         async for message in ws:
             prompt_payload = json.loads(message.data)
+            if await _maybe_reply_initialize(ws, prompt_payload):
+                continue
             assert prompt_payload["method"] == "session/prompt"
 
             await ws.send_json(

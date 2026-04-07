@@ -35,7 +35,8 @@ uv run acp-client --transport ws --host 127.0.0.1 --port 8080 --method session/l
 
 ## Поведение WebSocket
 
-- Если сервер требует `initialize` перед `session/*`, клиент автоматически выполняет `initialize` и повторяет исходный запрос.
+- Перед вызовами `session/*` клиент автоматически выполняет `initialize` в рамках WS-соединения.
+- В auto-initialize отправляются baseline `clientCapabilities` (`fs.readTextFile=false`, `fs.writeTextFile=false`, `terminal=false`).
 
 ## Проверки
 

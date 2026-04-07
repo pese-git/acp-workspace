@@ -52,6 +52,25 @@ class ACPClient:
         self.host = host
         self.port = port
 
+    @staticmethod
+    def _default_client_capabilities() -> dict[str, Any]:
+        """Возвращает baseline-capabilities клиента для `initialize`.
+
+        Базовые значения соответствуют схеме ACP и явно сигнализируют агенту,
+        что клиент пока не поддерживает FS/terminal RPC-методы.
+
+        Пример использования:
+            caps = ACPClient._default_client_capabilities()
+        """
+
+        return {
+            "fs": {
+                "readTextFile": False,
+                "writeTextFile": False,
+            },
+            "terminal": False,
+        }
+
     async def request(
         self,
         method: str,
@@ -95,7 +114,7 @@ class ACPClient:
 
         params: dict[str, Any] = {
             "protocolVersion": protocol_version,
-            "clientCapabilities": client_capabilities or {},
+            "clientCapabilities": client_capabilities or self._default_client_capabilities(),
         }
         if client_info is not None:
             params["clientInfo"] = client_info
@@ -142,10 +161,11 @@ class ACPClient:
 
         request = ACPMessage.request(method=method, params=params)
         url = f"ws://{self.host}:{self.port}/acp/ws"
-        retry_with_initialize = method != "initialize"
-        init_request_id: str | None = None
+        should_initialize = method.startswith("session/") and method != "initialize"
 
         async with ClientSession() as session, session.ws_connect(url) as ws:
+            if should_initialize:
+                await self._perform_ws_initialize(ws)
             await ws.send_str(request.to_json())
 
             while True:
@@ -178,51 +198,45 @@ class ACPClient:
                     continue
 
                 response = ACPMessage.from_dict(payload)
-                if init_request_id is not None and response.id == init_request_id:
-                    if response.error is not None:
-                        msg = (
-                            "WebSocket initialize failed before retry: "
-                            f"{response.error.code} {response.error.message}"
-                        )
-                        raise RuntimeError(msg)
-                    await ws.send_str(request.to_json())
-                    init_request_id = None
-                    continue
-
-                if (
-                    retry_with_initialize
-                    and self._is_initialize_required_error(response)
-                    and init_request_id is None
-                ):
-                    init_request = ACPMessage.request(
-                        method="initialize",
-                        params={
-                            "protocolVersion": 1,
-                            "clientCapabilities": {},
-                        },
-                    )
-                    if isinstance(init_request.id, str):
-                        init_request_id = init_request.id
-                    await ws.send_str(init_request.to_json())
-                    retry_with_initialize = False
-                    continue
-
                 return response
 
-    def _is_initialize_required_error(self, response: ACPMessage) -> bool:
-        """Проверяет, что response сигнализирует о необходимости initialize.
+    async def _perform_ws_initialize(self, ws: Any) -> None:
+        """Выполняет ACP initialize в открытом WS-соединении.
 
-        Метод нужен для совместимости с серверами, где `initialize` обязателен
-        перед `session/*` запросами в пределах WS-соединения.
+        Метод нужен для соблюдения handshake-фазы протокола перед вызовом
+        `session/*` методов в рамках того же WS-канала.
 
         Пример использования:
-            if client._is_initialize_required_error(response):
-                ...
+            await client._perform_ws_initialize(ws)
         """
 
-        if response.error is None:
-            return False
-        return response.error.code == -32000 and "Initialize required" in response.error.message
+        init_request = ACPMessage.request(
+            method="initialize",
+            params={
+                "protocolVersion": 1,
+                "clientCapabilities": self._default_client_capabilities(),
+            },
+        )
+        await ws.send_str(init_request.to_json())
+
+        while True:
+            message = await ws.receive()
+            if message.type != WSMsgType.TEXT:
+                msg = f"Unexpected WebSocket response type during initialize: {message.type}"
+                raise RuntimeError(msg)
+
+            payload = json.loads(message.data)
+            raw_method = payload.get("method") if isinstance(payload, dict) else None
+            if raw_method == "session/update":
+                # Инициализация не должна блокироваться на update-событиях.
+                continue
+            response = ACPMessage.from_dict(payload)
+            if response.id != init_request.id:
+                continue
+            if response.error is not None:
+                msg = f"WebSocket initialize failed: {response.error.code} {response.error.message}"
+                raise RuntimeError(msg)
+            return
 
     def _build_permission_result(
         self,
