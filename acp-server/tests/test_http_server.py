@@ -73,7 +73,7 @@ async def test_http_prompt_with_pending_tool_returns_end_turn() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ws_deferred_prompt_finishes_with_end_turn() -> None:
+async def test_ws_prompt_with_permission_selection_finishes_with_end_turn() -> None:
     runner, port = await _start_test_server()
 
     try:
@@ -104,8 +104,20 @@ async def test_ws_deferred_prompt_finishes_with_end_turn() -> None:
                 )
 
                 received_prompt_response: dict | None = None
-                for _ in range(10):
+                for _ in range(12):
                     payload = await asyncio.wait_for(ws.receive_json(), timeout=1.0)
+                    if payload.get("method") == "session/request_permission":
+                        await ws.send_json(
+                            {
+                                "jsonrpc": "2.0",
+                                "id": payload["id"],
+                                "result": {
+                                    "outcome": "selected",
+                                    "optionId": "allow_once",
+                                },
+                            }
+                        )
+                        continue
                     if payload.get("id") == "prompt_1":
                         received_prompt_response = payload
                         break
@@ -148,6 +160,14 @@ async def test_ws_cancel_finishes_deferred_prompt_with_cancelled() -> None:
                         },
                     }
                 )
+                permission_request_seen = False
+                for _ in range(8):
+                    payload = await asyncio.wait_for(ws.receive_json(), timeout=1.0)
+                    if payload.get("method") == "session/request_permission":
+                        permission_request_seen = True
+                        break
+                assert permission_request_seen
+
                 await ws.send_json(
                     {
                         "jsonrpc": "2.0",

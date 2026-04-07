@@ -129,11 +129,14 @@ class ACPHttpServer:
                     try:
                         acp_request = ACPMessage.from_json(message.data)
                         method_name = acp_request.method
-                        if isinstance(acp_request.params, dict):
-                            raw_session_id = acp_request.params.get("sessionId")
-                            if isinstance(raw_session_id, str):
-                                session_id = raw_session_id
-                        outcome = self.protocol.handle(acp_request)
+                        if method_name is None:
+                            outcome = self.protocol.handle_client_response(acp_request)
+                        else:
+                            if isinstance(acp_request.params, dict):
+                                raw_session_id = acp_request.params.get("sessionId")
+                                if isinstance(raw_session_id, str):
+                                    session_id = raw_session_id
+                            outcome = self.protocol.handle(acp_request)
                     except Exception as exc:
                         outcome = ProtocolOutcome(
                             response=ACPMessage.error_response(
@@ -153,6 +156,7 @@ class ACPHttpServer:
                         method_name == "session/prompt"
                         and session_id is not None
                         and outcome.response is None
+                        and self.protocol.should_auto_complete_active_turn(session_id)
                     ):
                         task = deferred_prompt_tasks.pop(session_id, None)
                         if task is not None:

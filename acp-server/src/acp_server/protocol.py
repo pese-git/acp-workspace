@@ -87,6 +87,10 @@ class ActiveTurnState:
     prompt_request_id: JsonRpcId | None
     session_id: str
     cancel_requested: bool = False
+    # Идентификатор исходящего permission-request при режиме `ask`.
+    permission_request_id: JsonRpcId | None = None
+    # Связанный tool call, ожидающий решения пользователя.
+    permission_tool_call_id: str | None = None
 
 
 @dataclass(slots=True)
@@ -620,13 +624,54 @@ class ACPProtocol:
         )
         notifications.append(update)
 
-        # Демонстрационный tool-call lifecycle для совместимости с ACP-клиентами.
-        tool_notifications = self._build_tool_call_updates(
-            session=session,
-            session_id=session_id,
-            prompt_text=text_preview,
+        # В режиме `ask` эмулируем обязательный permission-request перед tool call.
+        should_request_permission = (
+            "[tool]" in text_preview and session.config_values.get("mode", "ask") == "ask"
         )
-        notifications.extend(tool_notifications)
+        if should_request_permission:
+            tool_call_id = self._create_tool_call(
+                session=session,
+                title="Demo tool execution",
+                kind="other",
+            )
+            notifications.append(
+                ACPMessage.notification(
+                    "session/update",
+                    {
+                        "sessionId": session_id,
+                        "update": {
+                            "sessionUpdate": "tool_call",
+                            "toolCallId": tool_call_id,
+                            "title": "Demo tool execution",
+                            "kind": "other",
+                            "status": "pending",
+                        },
+                    },
+                )
+            )
+            permission_request = ACPMessage.request(
+                "session/request_permission",
+                {
+                    "sessionId": session_id,
+                    "toolCall": {
+                        "toolCallId": tool_call_id,
+                        "title": "Demo tool execution",
+                        "kind": "other",
+                    },
+                    "options": self._build_permission_options(),
+                },
+            )
+            session.active_turn.permission_request_id = permission_request.id
+            session.active_turn.permission_tool_call_id = tool_call_id
+            notifications.append(permission_request)
+        else:
+            # Демонстрационный tool-call lifecycle для совместимости с ACP-клиентами.
+            tool_notifications = self._build_tool_call_updates(
+                session=session,
+                session_id=session_id,
+                prompt_text=text_preview,
+            )
+            notifications.extend(tool_notifications)
 
         session.history.append({"role": "user", "content": prompt})
         session.history.append(
@@ -670,7 +715,7 @@ class ACPProtocol:
             )
         )
 
-        should_defer_completion = "[tool-pending]" in text_preview
+        should_defer_completion = "[tool-pending]" in text_preview or should_request_permission
         if should_defer_completion:
             # Для незавершенных tool-call оставляем prompt-request «в полете».
             # Финальный response будет отправлен позже (автозавершение или cancel).
@@ -747,6 +792,39 @@ class ACPProtocol:
             return None
         return self._finalize_active_turn(session=session, stop_reason=stop_reason)
 
+    def should_auto_complete_active_turn(self, session_id: str) -> bool:
+        """Возвращает `True`, если active turn можно безопасно автозавершить.
+
+        Если turn ожидает permission-response, автозавершение запрещено.
+
+        Пример использования:
+            if protocol.should_auto_complete_active_turn("sess_1"):
+                ...
+        """
+
+        session = self._sessions.get(session_id)
+        if session is None or session.active_turn is None:
+            return False
+        return session.active_turn.permission_request_id is None
+
+    def handle_client_response(self, message: ACPMessage) -> ProtocolOutcome:
+        """Обрабатывает входящий response от клиента для server-originated requests.
+
+        Сейчас используется для `session/request_permission`, отправленного ранее
+        в рамках active prompt-turn.
+
+        Пример использования:
+            outcome = protocol.handle_client_response(client_response)
+        """
+
+        if message.id is None:
+            return ProtocolOutcome()
+
+        resolved = self._resolve_permission_response(message.id, message.result)
+        if resolved is None:
+            return ProtocolOutcome()
+        return resolved
+
     def _finalize_active_turn(
         self, session: SessionState, *, stop_reason: str
     ) -> ACPMessage | None:
@@ -762,6 +840,153 @@ class ACPProtocol:
 
         session.active_turn = None
         return ACPMessage.response(active_turn.prompt_request_id, {"stopReason": stop_reason})
+
+    def _resolve_permission_response(
+        self,
+        permission_request_id: JsonRpcId,
+        result: Any,
+    ) -> ProtocolOutcome | None:
+        """Применяет решение по permission-request к активному prompt-turn.
+
+        Пример использования:
+            outcome = protocol._resolve_permission_response("perm_1", {"outcome": "selected"})
+        """
+
+        session = self._find_session_by_permission_request_id(permission_request_id)
+        if session is None or session.active_turn is None:
+            return None
+        tool_call_id = session.active_turn.permission_tool_call_id
+        if tool_call_id is None:
+            return None
+
+        session_id = session.session_id
+        notifications: list[ACPMessage] = []
+        outcome_value = result.get("outcome") if isinstance(result, dict) else None
+        if outcome_value != "selected":
+            self._update_tool_call_status(session, tool_call_id, "cancelled")
+            notifications.append(
+                ACPMessage.notification(
+                    "session/update",
+                    {
+                        "sessionId": session_id,
+                        "update": {
+                            "sessionUpdate": "tool_call_update",
+                            "toolCallId": tool_call_id,
+                            "status": "cancelled",
+                        },
+                    },
+                )
+            )
+            session.updated_at = datetime.now(UTC).isoformat()
+            notifications.append(
+                self._session_info_notification(
+                    session_id=session_id,
+                    title=None,
+                    updated_at=session.updated_at,
+                )
+            )
+            cancelled = self._finalize_active_turn(session=session, stop_reason="cancelled")
+            return ProtocolOutcome(
+                notifications=notifications,
+                followup_responses=[cancelled] if cancelled is not None else [],
+            )
+
+        self._update_tool_call_status(session, tool_call_id, "in_progress")
+        notifications.append(
+            ACPMessage.notification(
+                "session/update",
+                {
+                    "sessionId": session_id,
+                    "update": {
+                        "sessionUpdate": "tool_call_update",
+                        "toolCallId": tool_call_id,
+                        "status": "in_progress",
+                    },
+                },
+            )
+        )
+
+        completed_content = [
+            {
+                "type": "content",
+                "content": {
+                    "type": "text",
+                    "text": "Demo tool completed successfully.",
+                },
+            }
+        ]
+        self._update_tool_call_status(
+            session,
+            tool_call_id,
+            "completed",
+            content=completed_content,
+        )
+        notifications.append(
+            ACPMessage.notification(
+                "session/update",
+                {
+                    "sessionId": session_id,
+                    "update": {
+                        "sessionUpdate": "tool_call_update",
+                        "toolCallId": tool_call_id,
+                        "status": "completed",
+                        "content": completed_content,
+                    },
+                },
+            )
+        )
+
+        session.updated_at = datetime.now(UTC).isoformat()
+        notifications.append(
+            self._session_info_notification(
+                session_id=session_id,
+                title=None,
+                updated_at=session.updated_at,
+            )
+        )
+        completed = self._finalize_active_turn(session=session, stop_reason="end_turn")
+        return ProtocolOutcome(
+            notifications=notifications,
+            followup_responses=[completed] if completed is not None else [],
+        )
+
+    def _find_session_by_permission_request_id(
+        self,
+        permission_request_id: JsonRpcId,
+    ) -> SessionState | None:
+        """Ищет сессию с активным turn, ожидающим ответ по permission-request.
+
+        Пример использования:
+            session = protocol._find_session_by_permission_request_id("perm_1")
+        """
+
+        for session in self._sessions.values():
+            active_turn = session.active_turn
+            if active_turn is None:
+                continue
+            if active_turn.permission_request_id == permission_request_id:
+                return session
+        return None
+
+    def _build_permission_options(self) -> list[dict[str, Any]]:
+        """Возвращает demo-набор вариантов для `session/request_permission`.
+
+        Пример использования:
+            options = protocol._build_permission_options()
+        """
+
+        return [
+            {
+                "optionId": "allow_once",
+                "name": "Allow once",
+                "kind": "allow_once",
+            },
+            {
+                "optionId": "reject",
+                "name": "Reject",
+                "kind": "reject",
+            },
+        ]
 
     def _session_set_config_option(
         self,

@@ -144,6 +144,18 @@ def test_prompt_can_emit_tool_call_updates() -> None:
     assert isinstance(created.response.result, dict)
     created_id = created.response.result["sessionId"]
 
+    updated = protocol.handle(
+        ACPMessage.request(
+            "session/set_config_option",
+            {
+                "sessionId": created_id,
+                "configId": "mode",
+                "value": "code",
+            },
+        )
+    )
+    assert updated.response is not None
+
     outcome = protocol.handle(
         ACPMessage.request(
             "session/prompt",
@@ -183,14 +195,14 @@ def test_cancel_marks_active_tool_call_as_cancelled() -> None:
     )
     assert prompt_outcome.response is None
 
-    tool_call_update = next(
+    tool_call_created = next(
         notification
         for notification in prompt_outcome.notifications
         if notification.params is not None
-        and notification.params["update"]["sessionUpdate"] == "tool_call_update"
+        and notification.params["update"]["sessionUpdate"] == "tool_call"
     )
-    assert tool_call_update.params is not None
-    tool_call_id = tool_call_update.params["update"]["toolCallId"]
+    assert tool_call_created.params is not None
+    tool_call_id = tool_call_created.params["update"]["toolCallId"]
 
     cancel_outcome = protocol.handle(
         ACPMessage.notification("session/cancel", {"sessionId": created_id})
@@ -234,6 +246,76 @@ def test_deferred_prompt_can_be_completed_without_cancel() -> None:
     completed_response = protocol.complete_active_turn(session_id, stop_reason="end_turn")
     assert completed_response is not None
     assert completed_response.result == {"stopReason": "end_turn"}
+
+
+def test_permission_selected_completes_prompt_turn() -> None:
+    protocol = ACPProtocol()
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    prompt_outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "run [tool]"}],
+            },
+        )
+    )
+    assert prompt_outcome.response is None
+
+    permission_request = next(
+        notification
+        for notification in prompt_outcome.notifications
+        if notification.method == "session/request_permission"
+    )
+    assert permission_request.id is not None
+
+    resolved = protocol.handle_client_response(
+        ACPMessage.response(
+            permission_request.id,
+            {
+                "outcome": "selected",
+                "optionId": "allow_once",
+            },
+        )
+    )
+    assert len(resolved.followup_responses) == 1
+    assert resolved.followup_responses[0].result == {"stopReason": "end_turn"}
+
+
+def test_permission_cancelled_finishes_turn_with_cancelled() -> None:
+    protocol = ACPProtocol()
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    prompt_outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "run [tool]"}],
+            },
+        )
+    )
+    assert prompt_outcome.response is None
+
+    permission_request = next(
+        notification
+        for notification in prompt_outcome.notifications
+        if notification.method == "session/request_permission"
+    )
+    assert permission_request.id is not None
+
+    resolved = protocol.handle_client_response(
+        ACPMessage.response(permission_request.id, {"outcome": "cancelled"})
+    )
+    assert len(resolved.followup_responses) == 1
+    assert resolved.followup_responses[0].result == {"stopReason": "cancelled"}
 
 
 def test_cancel_without_active_turn_does_not_affect_next_prompt() -> None:
@@ -370,4 +452,3 @@ def test_session_load_replays_tool_call_state() -> None:
         if notification.params is not None
     ]
     assert "tool_call" in replay_updates
-    assert "tool_call_update" in replay_updates
