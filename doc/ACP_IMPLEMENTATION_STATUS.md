@@ -23,4 +23,4 @@
 ## Приоритетный backlog
 
 1. Завершить переход от demo-семантики `session/request_permission` к production policy-model (включая policy scope beyond tool kind `other`).
-2. Расширить conformance-набор до edge-кейсов terminal/fs client-rpc и error-сценариев.
+2. Расширить conformance-набор до дополнительных edge-кейсов terminal/fs client-rpc и расширенных error-сценариев.
