@@ -7,6 +7,7 @@ from acp_client.messages import (
     PlanUpdate,
     RequestPermissionRequest,
     SessionListResult,
+    SessionSetupResult,
     ToolCallCreatedUpdate,
     ToolCallStateUpdate,
     parse_initialize_result,
@@ -14,6 +15,7 @@ from acp_client.messages import (
     parse_plan_update,
     parse_request_permission_request,
     parse_session_list_result,
+    parse_session_setup_result,
     parse_session_update_notification,
     parse_tool_call_update,
 )
@@ -228,3 +230,43 @@ def test_parse_session_list_result_error_response_raises() -> None:
 
     with pytest.raises(ValueError):
         parse_session_list_result(response)
+
+
+def test_parse_session_setup_result_success() -> None:
+    response = ACPMessage.response(
+        "new_1",
+        {
+            "sessionId": "sess_1",
+            "configOptions": [
+                {
+                    "id": "mode",
+                    "name": "Mode",
+                    "category": "mode",
+                    "type": "select",
+                    "currentValue": "ask",
+                    "options": [{"value": "ask", "name": "Ask"}],
+                }
+            ],
+            "modes": {
+                "availableModes": [{"id": "ask", "name": "Ask"}],
+                "currentModeId": "ask",
+            },
+        },
+    )
+
+    parsed = parse_session_setup_result(response, method_name="session/new")
+    assert isinstance(parsed, SessionSetupResult)
+    assert parsed.sessionId == "sess_1"
+    assert parsed.configOptions[0].id == "mode"
+    assert parsed.modes is not None
+    assert parsed.modes.currentModeId == "ask"
+
+
+def test_parse_session_setup_result_error_response_raises() -> None:
+    response = ACPMessage(
+        id="load_1",
+        error=JsonRpcError(code=-32001, message="Session not found"),
+    )
+
+    with pytest.raises(ValueError):
+        parse_session_setup_result(response, method_name="session/load")

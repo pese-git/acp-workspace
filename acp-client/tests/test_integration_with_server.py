@@ -91,6 +91,53 @@ async def test_initialize_helper_parses_response() -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_session_parsed_helper() -> None:
+    async def handle_http_request(request: web.Request) -> web.Response:
+        payload = await request.json()
+        assert payload["method"] == "session/new"
+        return web.json_response(
+            {
+                "jsonrpc": "2.0",
+                "id": payload["id"],
+                "result": {
+                    "sessionId": "sess_42",
+                    "configOptions": [
+                        {
+                            "id": "mode",
+                            "name": "Mode",
+                            "category": "mode",
+                            "type": "select",
+                            "currentValue": "ask",
+                            "options": [{"value": "ask", "name": "Ask"}],
+                        }
+                    ],
+                    "modes": {
+                        "availableModes": [{"id": "ask", "name": "Ask"}],
+                        "currentModeId": "ask",
+                    },
+                },
+            }
+        )
+
+    port = _get_free_port()
+    app = web.Application()
+    app.router.add_post("/acp", handle_http_request)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="127.0.0.1", port=port)
+    await site.start()
+
+    try:
+        client = ACPClient(host="127.0.0.1", port=port)
+        created = await client.create_session_parsed(cwd="/tmp", mcp_servers=[], transport="http")
+        assert created.sessionId == "sess_42"
+        assert created.configOptions[0].id == "mode"
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
 async def test_list_all_sessions_walks_http_pagination() -> None:
     pages = [
         {

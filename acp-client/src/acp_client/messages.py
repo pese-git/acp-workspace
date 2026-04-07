@@ -261,6 +261,80 @@ class SessionListResult(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class SessionMode(BaseModel):
+    """Описывает один доступный режим работы из `modes.availableModes`.
+
+    Пример использования:
+        SessionMode.model_validate({"id": "ask", "name": "Ask mode"})
+    """
+
+    id: str
+    name: str
+    description: str | None = None
+    model_config = ConfigDict(extra="allow")
+
+
+class SessionModeState(BaseModel):
+    """Состояние legacy-режимов в ответах `session/new` и `session/load`.
+
+    Пример использования:
+        SessionModeState.model_validate({"availableModes": [], "currentModeId": "ask"})
+    """
+
+    availableModes: list[SessionMode]
+    currentModeId: str
+    model_config = ConfigDict(extra="allow")
+
+
+class SessionConfigValueOption(BaseModel):
+    """Один selectable-вариант значения конфигурации сессии.
+
+    Пример использования:
+        SessionConfigValueOption.model_validate({"value": "ask", "name": "Ask"})
+    """
+
+    value: str
+    name: str
+    description: str | None = None
+    model_config = ConfigDict(extra="allow")
+
+
+class SessionConfigOption(BaseModel):
+    """Типизированная запись `configOptions[]` из ответов настройки сессии.
+
+    Пример использования:
+        SessionConfigOption.model_validate({
+            "id": "mode",
+            "name": "Mode",
+            "category": "mode",
+            "type": "select",
+            "currentValue": "ask",
+            "options": [{"value": "ask", "name": "Ask"}],
+        })
+    """
+
+    id: str
+    name: str
+    category: str
+    type: Literal["select"]
+    currentValue: str
+    options: list[SessionConfigValueOption]
+    model_config = ConfigDict(extra="allow")
+
+
+class SessionSetupResult(BaseModel):
+    """Типизированный `result` для `session/new` и `session/load`.
+
+    Пример использования:
+        SessionSetupResult.model_validate({"configOptions": [], "modes": {...}})
+    """
+
+    sessionId: str | None = None
+    configOptions: list[SessionConfigOption]
+    modes: SessionModeState | None = None
+    model_config = ConfigDict(extra="allow")
+
+
 class SessionUpdatePayload(BaseModel):
     """Полезная нагрузка события `session/update`.
 
@@ -558,6 +632,24 @@ def parse_session_list_result(message: ACPMessage) -> SessionListResult:
     if not isinstance(message.result, dict):
         raise ValueError("session/list response must contain object result")
     return SessionListResult.model_validate(message.result)
+
+
+def parse_session_setup_result(message: ACPMessage, *, method_name: str) -> SessionSetupResult:
+    """Преобразует response `session/new`/`session/load` в `SessionSetupResult`.
+
+    Бросает `ValueError`, если response содержит `error` или невалидный `result`.
+
+    Пример использования:
+        parsed = parse_session_setup_result(response, method_name="session/new")
+    """
+
+    if message.error is not None:
+        msg = f"{method_name} failed: {message.error.code} {message.error.message}"
+        raise ValueError(msg)
+    if not isinstance(message.result, dict):
+        msg = f"{method_name} response must contain object result"
+        raise ValueError(msg)
+    return SessionSetupResult.model_validate(message.result)
 
 
 def parse_json_params(value: str | None) -> dict[str, Any]:

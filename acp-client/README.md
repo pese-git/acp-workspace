@@ -23,6 +23,8 @@ uv run acp-client --transport ws --host 127.0.0.1 --port 8080 --method session/l
 ## Полезные helper-методы ACPClient
 
 - `initialize(...)` — выполняет handshake и возвращает типизированный результат согласования.
+- `create_session_parsed(...)` — типизированный helper для ответа `session/new`.
+- `load_session_setup_parsed(...)` — типизированный helper для ответа `session/load` и replay updates.
 - `load_session_parsed(...)` — возвращает типизированные `session/update` события.
 - `load_session_tool_updates(...)` — возвращает только события tool call.
 - `load_session_plan_updates(...)` — возвращает только события `plan`.

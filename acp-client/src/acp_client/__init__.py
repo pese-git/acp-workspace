@@ -4,8 +4,13 @@ from .client import ACPClient
 from .messages import (
     InitializeResult,
     PlanUpdate,
+    SessionConfigOption,
+    SessionConfigValueOption,
     SessionListItem,
     SessionListResult,
+    SessionMode,
+    SessionModeState,
+    SessionSetupResult,
     SessionUpdateNotification,
     ToolCallUpdate,
 )
@@ -18,4 +23,9 @@ __all__ = [
     "InitializeResult",
     "SessionListItem",
     "SessionListResult",
+    "SessionMode",
+    "SessionModeState",
+    "SessionConfigOption",
+    "SessionConfigValueOption",
+    "SessionSetupResult",
 ]

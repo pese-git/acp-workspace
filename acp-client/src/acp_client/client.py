@@ -12,12 +12,14 @@ from .messages import (
     PlanUpdate,
     SessionListItem,
     SessionListResult,
+    SessionSetupResult,
     SessionUpdateNotification,
     ToolCallUpdate,
     parse_initialize_result,
     parse_plan_update,
     parse_request_permission_request,
     parse_session_list_result,
+    parse_session_setup_result,
     parse_session_update_notification,
     parse_tool_call_update,
 )
@@ -444,3 +446,52 @@ class ACPClient:
             cursor = page.nextCursor
 
         return collected
+
+    async def create_session_parsed(
+        self,
+        *,
+        cwd: str,
+        mcp_servers: list[dict[str, Any]] | None = None,
+        transport: Literal["http", "ws"] = "http",
+    ) -> SessionSetupResult:
+        """Создает сессию через `session/new` и валидирует ответ.
+
+        Пример использования:
+            created = await client.create_session_parsed(cwd="/tmp", transport="http")
+        """
+
+        response = await self.request(
+            method="session/new",
+            params={
+                "cwd": cwd,
+                "mcpServers": mcp_servers or [],
+            },
+            transport=transport,
+        )
+        return parse_session_setup_result(response, method_name="session/new")
+
+    async def load_session_setup_parsed(
+        self,
+        *,
+        session_id: str,
+        cwd: str,
+        mcp_servers: list[dict[str, Any]] | None = None,
+        transport: Literal["http", "ws"] = "ws",
+    ) -> tuple[SessionSetupResult, list[SessionUpdateNotification]]:
+        """Загружает сессию и возвращает typed state + typed replay updates.
+
+        Пример использования:
+            state, updates = await client.load_session_setup_parsed(
+                session_id="sess_1",
+                cwd="/tmp",
+            )
+        """
+
+        response, updates = await self.load_session_parsed(
+            session_id=session_id,
+            cwd=cwd,
+            mcp_servers=mcp_servers,
+            transport=transport,
+        )
+        parsed = parse_session_setup_result(response, method_name="session/load")
+        return parsed, updates
