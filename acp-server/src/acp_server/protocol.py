@@ -120,6 +120,7 @@ class PromptDirectives:
     request_tool: bool = False
     keep_tool_pending: bool = False
     publish_plan: bool = False
+    tool_kind: str = "other"
     fs_read_path: str | None = None
     fs_write_path: str | None = None
     fs_write_content: str | None = None
@@ -817,6 +818,7 @@ class ACPProtocol:
         directives = self._extract_prompt_directives(text_preview)
         tool_runtime_available = self._can_run_tool_runtime()
         should_run_tool_flow = directives.request_tool and tool_runtime_available
+        tool_title = self._resolve_demo_tool_title(directives.tool_kind)
 
         # Все промежуточные события отправляются через `session/update`.
         notifications: list[ACPMessage] = []
@@ -934,8 +936,8 @@ class ACPProtocol:
         elif should_run_tool_flow and session.config_values.get("mode", "ask") == "ask":
             tool_call_id = self._create_tool_call(
                 session=session,
-                title="Tool execution",
-                kind="other",
+                title=tool_title,
+                kind=directives.tool_kind,
             )
             notifications.append(
                 ACPMessage.notification(
@@ -945,14 +947,14 @@ class ACPProtocol:
                         "update": {
                             "sessionUpdate": "tool_call",
                             "toolCallId": tool_call_id,
-                            "title": "Tool execution",
-                            "kind": "other",
+                            "title": tool_title,
+                            "kind": directives.tool_kind,
                             "status": "pending",
                         },
                     },
                 )
             )
-            remembered_permission = session.permission_policy.get("other")
+            remembered_permission = session.permission_policy.get(directives.tool_kind)
             if remembered_permission == "allow_always":
                 notifications.extend(
                     self._build_demo_tool_execution_updates(
@@ -979,8 +981,8 @@ class ACPProtocol:
                         "sessionId": session_id,
                         "toolCall": {
                             "toolCallId": tool_call_id,
-                            "title": "Tool execution",
-                            "kind": "other",
+                            "title": tool_title,
+                            "kind": directives.tool_kind,
                         },
                         "options": self._build_permission_options(),
                     },
@@ -997,6 +999,7 @@ class ACPProtocol:
                 session_id=session_id,
                 prompt_requests_tool=should_run_tool_flow,
                 leave_running=directives.keep_tool_pending,
+                tool_kind=directives.tool_kind,
             )
             notifications.extend(tool_notifications)
 
@@ -2396,6 +2399,7 @@ class ACPProtocol:
         has_plan_directive = "/plan" in normalized_tokens
         has_tool_directive = "/tool" in normalized_tokens
         has_pending_directive = "/tool-pending" in normalized_tokens
+        tool_kind = "other"
         fs_read_path: str | None = None
         fs_write_path: str | None = None
         fs_write_content: str | None = None
@@ -2420,15 +2424,43 @@ class ACPProtocol:
             if raw_command:
                 terminal_command = raw_command
 
+        # Поддерживаем опциональный kind в `/tool <kind> ...` и
+        # `/tool-pending <kind> ...` для policy-scope beyond `other`.
+        if stripped_preview.startswith("/tool "):
+            candidate = stripped_preview[len("/tool ") :].split(" ", 1)[0].strip().lower()
+            if candidate in {"other", "read", "write", "execute", "search"}:
+                tool_kind = candidate
+        if stripped_preview.startswith("/tool-pending "):
+            candidate = stripped_preview[len("/tool-pending ") :].split(" ", 1)[0].strip().lower()
+            if candidate in {"other", "read", "write", "execute", "search"}:
+                tool_kind = candidate
+
         return PromptDirectives(
             request_tool=has_tool_directive or has_pending_directive,
             keep_tool_pending=has_pending_directive,
             publish_plan=has_plan_directive,
+            tool_kind=tool_kind,
             fs_read_path=fs_read_path,
             fs_write_path=fs_write_path,
             fs_write_content=fs_write_content,
             terminal_command=terminal_command,
         )
+
+    def _resolve_demo_tool_title(self, kind: str) -> str:
+        """Возвращает человекочитаемый title для demo tool-call по kind.
+
+        Пример использования:
+            title = protocol._resolve_demo_tool_title("execute")
+        """
+
+        titles = {
+            "read": "Tool read operation",
+            "write": "Tool write operation",
+            "execute": "Tool execution",
+            "search": "Tool search operation",
+            "other": "Tool operation",
+        }
+        return titles.get(kind, "Tool operation")
 
     def _build_tool_call_updates(
         self,
@@ -2437,6 +2469,7 @@ class ACPProtocol:
         session_id: str,
         prompt_requests_tool: bool,
         leave_running: bool,
+        tool_kind: str,
     ) -> list[ACPMessage]:
         """Генерирует demo-последовательность `tool_call`/`tool_call_update`.
 
@@ -2458,8 +2491,8 @@ class ACPProtocol:
 
         tool_call_id = self._create_tool_call(
             session=session,
-            title="Demo tool execution",
-            kind="other",
+            title=self._resolve_demo_tool_title(tool_kind),
+            kind=tool_kind,
         )
 
         created = ACPMessage.notification(
@@ -2469,8 +2502,8 @@ class ACPProtocol:
                 "update": {
                     "sessionUpdate": "tool_call",
                     "toolCallId": tool_call_id,
-                    "title": "Demo tool execution",
-                    "kind": "other",
+                    "title": self._resolve_demo_tool_title(tool_kind),
+                    "kind": tool_kind,
                     "status": "pending",
                 },
             },

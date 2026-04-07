@@ -1232,6 +1232,78 @@ def test_permission_reject_always_applies_to_next_tool_call() -> None:
     )
 
 
+def test_permission_policy_is_scoped_by_tool_kind() -> None:
+    protocol = ACPProtocol()
+    _initialize_with_tool_runtime(protocol)
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    first_prompt = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "/tool execute run"}],
+            },
+        )
+    )
+    assert first_prompt.response is None
+    permission_request = next(
+        notification
+        for notification in first_prompt.notifications
+        if notification.method == "session/request_permission"
+    )
+    assert permission_request.id is not None
+    assert permission_request.params is not None
+    assert permission_request.params["toolCall"]["kind"] == "execute"
+
+    resolved = protocol.handle_client_response(
+        ACPMessage.response(
+            permission_request.id,
+            {
+                "outcome": {
+                    "outcome": "selected",
+                    "optionId": "allow_always",
+                },
+            },
+        )
+    )
+    assert len(resolved.followup_responses) == 1
+    assert resolved.followup_responses[0].result == {"stopReason": "end_turn"}
+
+    same_kind_prompt = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "/tool execute run again"}],
+            },
+        )
+    )
+    assert same_kind_prompt.response is not None
+    assert not any(
+        notification.method == "session/request_permission"
+        for notification in same_kind_prompt.notifications
+    )
+
+    different_kind_prompt = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "/tool write file"}],
+            },
+        )
+    )
+    assert different_kind_prompt.response is None
+    assert any(
+        notification.method == "session/request_permission"
+        for notification in different_kind_prompt.notifications
+    )
+
+
 def test_cancel_without_active_turn_does_not_affect_next_prompt() -> None:
     protocol = ACPProtocol()
     created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
