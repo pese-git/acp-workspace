@@ -121,6 +121,16 @@ class ACPMessage(BaseModel):
         return cls(id=None, method=method, params=params or {})
 
     @classmethod
+    def response(cls, request_id: JsonRpcId | None, result: Any) -> ACPMessage:
+        """Создает успешный response для входящего JSON-RPC запроса.
+
+        Пример использования:
+            ACPMessage.response("perm_1", {"outcome": "cancelled"})
+        """
+
+        return cls(id=request_id, result=result)
+
+    @classmethod
     def from_json(cls, raw: str) -> ACPMessage:
         """Десериализует JSON-строку в типизированный `ACPMessage`.
 
@@ -280,6 +290,78 @@ class ToolCallStateUpdate(BaseModel):
 type ToolCallUpdate = ToolCallCreatedUpdate | ToolCallStateUpdate
 
 
+class PermissionOption(BaseModel):
+    """Описывает один вариант выбора в `session/request_permission`.
+
+    Пример использования:
+        PermissionOption.model_validate({
+            "optionId": "allow_once",
+            "name": "Allow once",
+            "kind": "allow_once",
+        })
+    """
+
+    optionId: str
+    name: str
+    kind: str
+    model_config = ConfigDict(extra="allow")
+
+
+class RequestPermissionPayload(BaseModel):
+    """Параметры запроса `session/request_permission` от агента к клиенту.
+
+    Пример использования:
+        RequestPermissionPayload.model_validate({
+            "sessionId": "sess_1",
+            "toolCall": {},
+            "options": [],
+        })
+    """
+
+    sessionId: str
+    toolCall: dict[str, Any]
+    options: list[PermissionOption]
+    model_config = ConfigDict(extra="allow")
+
+
+class RequestPermissionRequest(BaseModel):
+    """Типизированное представление запроса `session/request_permission`.
+
+    Пример использования:
+        RequestPermissionRequest.model_validate(payload)
+    """
+
+    jsonrpc: Literal["2.0"] = "2.0"
+    id: JsonRpcId
+    method: Literal["session/request_permission"]
+    params: RequestPermissionPayload
+    model_config = ConfigDict(extra="forbid")
+
+
+class CancelledPermissionOutcome(BaseModel):
+    """Ответ клиента, если permission-request отменен.
+
+    Пример использования:
+        CancelledPermissionOutcome(outcome="cancelled")
+    """
+
+    outcome: Literal["cancelled"]
+
+
+class SelectedPermissionOutcome(BaseModel):
+    """Ответ клиента с выбранной permission-опцией.
+
+    Пример использования:
+        SelectedPermissionOutcome(outcome="selected", optionId="allow_once")
+    """
+
+    outcome: Literal["selected"]
+    optionId: str
+
+
+type PermissionOutcome = CancelledPermissionOutcome | SelectedPermissionOutcome
+
+
 def parse_session_update_notification(payload: dict[str, Any]) -> SessionUpdateNotification | None:
     """Пытается распарсить словарь как `session/update` notification.
 
@@ -312,6 +394,20 @@ def parse_tool_call_update(update: SessionUpdateNotification) -> ToolCallUpdate 
     if session_update_type == "tool_call_update":
         return ToolCallStateUpdate.model_validate(payload)
     return None
+
+
+def parse_request_permission_request(payload: dict[str, Any]) -> RequestPermissionRequest | None:
+    """Пытается распарсить payload как `session/request_permission` request.
+
+    Возвращает `None`, если payload относится к другому методу.
+
+    Пример использования:
+        request = parse_request_permission_request(raw_payload)
+    """
+
+    if payload.get("method") != "session/request_permission":
+        return None
+    return RequestPermissionRequest.model_validate(payload)
 
 
 def parse_json_params(value: str | None) -> dict[str, Any]:

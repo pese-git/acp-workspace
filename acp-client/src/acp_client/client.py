@@ -10,9 +10,12 @@ from .messages import (
     ACPMessage,
     SessionUpdateNotification,
     ToolCallUpdate,
+    parse_request_permission_request,
     parse_session_update_notification,
     parse_tool_call_update,
 )
+
+type PermissionHandler = Callable[[dict[str, Any]], str | None]
 
 
 class ACPClient:
@@ -44,11 +47,13 @@ class ACPClient:
         params: dict | None = None,
         transport: Literal["http", "ws"] = "http",
         on_update: Callable[[dict], None] | None = None,
+        on_permission: PermissionHandler | None = None,
     ) -> ACPMessage:
         """Выполняет ACP-запрос через выбранный транспорт.
 
         Для WS может принимать `on_update`, который вызывается на каждый
-        `session/update` до финального response.
+        `session/update` до финального response. Также может принимать
+        `on_permission` для обработки `session/request_permission`.
 
         Пример использования:
             await client.request("session/list", transport="http")
@@ -56,7 +61,12 @@ class ACPClient:
 
         if transport == "http":
             return await self._request_http(method=method, params=params)
-        return await self._request_ws(method=method, params=params, on_update=on_update)
+        return await self._request_ws(
+            method=method,
+            params=params,
+            on_update=on_update,
+            on_permission=on_permission,
+        )
 
     async def _request_http(self, method: str, params: dict | None = None) -> ACPMessage:
         """Отправляет одиночный JSON-RPC request через HTTP endpoint `/acp`.
@@ -80,6 +90,7 @@ class ACPClient:
         method: str,
         params: dict | None = None,
         on_update: Callable[[dict], None] | None = None,
+        on_permission: PermissionHandler | None = None,
     ) -> ACPMessage:
         """Отправляет request через WebSocket и слушает updates до финала.
 
@@ -112,7 +123,42 @@ class ACPClient:
                         on_update(payload)
                     continue
 
+                permission_request = None
+                if isinstance(payload, dict):
+                    permission_request = parse_request_permission_request(payload)
+                if permission_request is not None:
+                    permission_result = self._build_permission_result(
+                        payload=payload,
+                        on_permission=on_permission,
+                    )
+                    await ws.send_str(
+                        ACPMessage.response(permission_request.id, permission_result).to_json()
+                    )
+                    continue
+
                 return ACPMessage.from_dict(payload)
+
+    def _build_permission_result(
+        self,
+        *,
+        payload: dict[str, Any],
+        on_permission: PermissionHandler | None,
+    ) -> dict[str, Any]:
+        """Формирует результат `session/request_permission` для ответа агенту.
+
+        Если callback не передан или вернул `None`, возвращается `cancelled`.
+
+        Пример использования:
+            result = client._build_permission_result(payload=data, on_permission=None)
+        """
+
+        selected_option_id = on_permission(payload) if on_permission is not None else None
+        if selected_option_id is None:
+            return {"outcome": "cancelled"}
+        return {
+            "outcome": "selected",
+            "optionId": selected_option_id,
+        }
 
     async def load_session(
         self,

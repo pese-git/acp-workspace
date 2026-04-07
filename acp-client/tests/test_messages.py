@@ -2,9 +2,11 @@ import pytest
 
 from acp_client.messages import (
     ACPMessage,
+    RequestPermissionRequest,
     ToolCallCreatedUpdate,
     ToolCallStateUpdate,
     parse_json_params,
+    parse_request_permission_request,
     parse_session_update_notification,
     parse_tool_call_update,
 )
@@ -104,3 +106,26 @@ def test_parse_tool_call_state_update() -> None:
     parsed = parse_tool_call_update(notification)
     assert isinstance(parsed, ToolCallStateUpdate)
     assert parsed.status == "completed"
+
+
+def test_parse_request_permission_request() -> None:
+    payload = {
+        "jsonrpc": "2.0",
+        "id": "perm_1",
+        "method": "session/request_permission",
+        "params": {
+            "sessionId": "sess_1",
+            "toolCall": {"toolCallId": "call_001"},
+            "options": [
+                {
+                    "optionId": "allow_once",
+                    "name": "Allow once",
+                    "kind": "allow_once",
+                }
+            ],
+        },
+    }
+    parsed = parse_request_permission_request(payload)
+    assert isinstance(parsed, RequestPermissionRequest)
+    assert parsed.id == "perm_1"
+    assert parsed.params.options[0].optionId == "allow_once"

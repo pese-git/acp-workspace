@@ -323,3 +323,78 @@ async def test_ws_client_receives_updates() -> None:
         assert updates[0]["method"] == "session/update"
     finally:
         await runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_ws_client_handles_permission_request() -> None:
+    async def handle_ws_request(request: web.Request) -> web.WebSocketResponse:
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        async for message in ws:
+            prompt_payload = json.loads(message.data)
+            assert prompt_payload["method"] == "session/prompt"
+
+            await ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": "perm_1",
+                    "method": "session/request_permission",
+                    "params": {
+                        "sessionId": "sess_1",
+                        "toolCall": {"toolCallId": "call_001"},
+                        "options": [
+                            {
+                                "optionId": "allow_once",
+                                "name": "Allow once",
+                                "kind": "allow_once",
+                            }
+                        ],
+                    },
+                }
+            )
+
+            permission_response = await ws.receive_json()
+            assert permission_response["id"] == "perm_1"
+            assert permission_response["result"]["outcome"] == "selected"
+            assert permission_response["result"]["optionId"] == "allow_once"
+
+            await ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": prompt_payload["id"],
+                    "result": {"stopReason": "end_turn"},
+                }
+            )
+            break
+        return ws
+
+    port = _get_free_port()
+    app = web.Application()
+    app.router.add_get("/acp/ws", handle_ws_request)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="127.0.0.1", port=port)
+    await site.start()
+
+    try:
+        client = ACPClient(host="127.0.0.1", port=port)
+
+        def choose_permission(payload: dict) -> str | None:
+            options = payload.get("params", {}).get("options", [])
+            if options and isinstance(options[0], dict):
+                option_id = options[0].get("optionId")
+                if isinstance(option_id, str):
+                    return option_id
+            return None
+
+        response = await client.request(
+            method="session/prompt",
+            params={"sessionId": "sess_1", "prompt": [{"type": "text", "text": "run"}]},
+            transport="ws",
+            on_permission=choose_permission,
+        )
+
+        assert response.result == {"stopReason": "end_turn"}
+    finally:
+        await runner.cleanup()
