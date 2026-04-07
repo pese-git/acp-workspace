@@ -1,60 +1,88 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from json import JSONDecodeError
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
+from pydantic import BaseModel, ConfigDict, model_validator
 
-@dataclass(slots=True)
-class ACPMessage:
-    id: str
-    type: str
-    jsonrpc: str = "2.0"
+type JsonRpcId = str | int
+
+
+class JsonRpcError(BaseModel):
+    # Код и текст ошибки соответствуют JSON-RPC 2.0.
+    code: int
+    message: str
+    # Произвольные детали ошибки от сервера.
+    data: Any | None = None
+
+
+class ACPMessage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    jsonrpc: Literal["2.0"] = "2.0"
+    id: JsonRpcId | None = None
     method: str | None = None
     params: dict[str, Any] | None = None
-    result: dict[str, Any] | None = None
-    error: dict[str, Any] | None = None
+    result: Any | None = None
+    error: JsonRpcError | None = None
+
+    @model_validator(mode="after")
+    def validate_shape(self) -> ACPMessage:
+        # Отличаем явно переданные поля от отсутствующих для корректной проверки контракта.
+        has_result = "result" in self.model_fields_set
+        has_error = "error" in self.model_fields_set and self.error is not None
+
+        if self.method is not None:
+            if has_result or has_error:
+                msg = "Request/notification must not contain result or error"
+                raise ValueError(msg)
+            return self
+
+        if not has_result and not has_error:
+            msg = "Response must contain result or error"
+            raise ValueError(msg)
+        if has_result and has_error:
+            msg = "Response must not contain both result and error"
+            raise ValueError(msg)
+        return self
 
     @classmethod
-    def request(cls, method: str, params: dict[str, Any] | None = None) -> ACPMessage:
-        return cls(id=uuid4().hex[:8], type="request", method=method, params=params or {})
+    def request(
+        cls,
+        method: str,
+        params: dict[str, Any] | None = None,
+        *,
+        request_id: JsonRpcId | None = None,
+    ) -> ACPMessage:
+        generated_id = request_id if request_id is not None else uuid4().hex[:8]
+        return cls(id=generated_id, method=method, params=params or {})
+
+    @classmethod
+    def notification(cls, method: str, params: dict[str, Any] | None = None) -> ACPMessage:
+        return cls(id=None, method=method, params=params or {})
 
     @classmethod
     def from_json(cls, raw: str) -> ACPMessage:
-        data = json.loads(raw)
-        return cls.from_dict(data)
+        return cls.model_validate_json(raw)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ACPMessage:
-        return cls(
-            jsonrpc=data.get("jsonrpc", "2.0"),
-            id=data["id"],
-            type=data["type"],
-            method=data.get("method"),
-            params=data.get("params"),
-            result=data.get("result"),
-            error=data.get("error"),
-        )
+        # В клиенте игнорируем legacy `type`, чтобы принимать старые ответы без падения.
+        normalized = dict(data)
+        normalized.pop("type", None)
+        return cls.model_validate(normalized)
 
     def to_json(self) -> str:
-        return json.dumps(self.to_dict(), separators=(",", ":"))
+        return self.model_dump_json(exclude_none=True)
 
     def to_dict(self) -> dict[str, Any]:
-        payload: dict[str, Any] = {"jsonrpc": self.jsonrpc, "id": self.id, "type": self.type}
-        if self.method is not None:
-            payload["method"] = self.method
-        if self.params is not None:
-            payload["params"] = self.params
-        if self.result is not None:
-            payload["result"] = self.result
-        if self.error is not None:
-            payload["error"] = self.error
-        return payload
+        return self.model_dump(exclude_none=True)
 
 
 def parse_json_params(value: str | None) -> dict[str, Any]:
+    # CLI принимает params строкой; здесь приводим к JSON-объекту для ACP запроса.
     if value is None:
         return {}
 

@@ -3,14 +3,17 @@ from __future__ import annotations
 import asyncio
 import json
 
+from pydantic import ValidationError
+
 from .messages import ACPMessage
-from .protocol import process_request
+from .protocol import ACPProtocol, ProtocolOutcome
 
 
 class ACPServer:
     def __init__(self, host: str = "127.0.0.1", port: int = 8765) -> None:
         self.host = host
         self.port = port
+        self.protocol = ACPProtocol()
 
     async def run(self) -> None:
         server = await asyncio.start_server(self.handle_client, self.host, self.port)
@@ -34,16 +37,24 @@ class ACPServer:
                 try:
                     request = ACPMessage.from_json(raw.decode().strip())
                     method_name = request.method
-                    response = process_request(request)
-                except (json.JSONDecodeError, KeyError, TypeError) as exc:
-                    response = ACPMessage(
-                        id="unknown",
-                        type="response",
-                        error={"code": -32700, "message": f"Parse error: {exc}"},
+                    outcome = self.protocol.handle(request)
+                except (json.JSONDecodeError, KeyError, TypeError, ValidationError) as exc:
+                    outcome = ProtocolOutcome(
+                        response=ACPMessage.error_response(
+                            None,
+                            code=-32700,
+                            message="Parse error",
+                            data=str(exc),
+                        )
                     )
 
-                writer.write((response.to_json() + "\n").encode())
-                await writer.drain()
+                for notification in outcome.notifications:
+                    writer.write((notification.to_json() + "\n").encode())
+                    await writer.drain()
+
+                if outcome.response is not None:
+                    writer.write((outcome.response.to_json() + "\n").encode())
+                    await writer.drain()
 
                 if method_name == "shutdown":
                     break

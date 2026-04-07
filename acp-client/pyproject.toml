@@ -1,11 +1,12 @@
 [project]
 name = "acp-client"
 version = "0.1.0"
-description = "ACP client implementation for TCP, HTTP and WebSocket transports"
+description = "ACP client implementation for HTTP and WebSocket transports"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
   "aiohttp>=3.12.15",
+  "pydantic>=2.11.0",
 ]
 
 [project.scripts]

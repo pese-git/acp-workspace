@@ -2,7 +2,6 @@
 
 Серверная часть Agent Client Protocol (ACP) с транспортами:
 
-- TCP (NDJSON over socket)
 - HTTP (`POST /acp`)
 - WebSocket (`GET /acp/ws`)
 
@@ -15,13 +14,21 @@ uv sync
 ## Запуск
 
 ```bash
-uv run acp-server --transport tcp --host 127.0.0.1 --port 8765
 uv run acp-server --transport http --host 127.0.0.1 --port 8080
+uv run acp-server --transport ws --host 127.0.0.1 --port 8080
 ```
 
 ## ACP методы
 
 - `initialize`
+- `session/new`
+- `session/list`
+- `session/prompt`
+- `session/cancel`
+- `session/set_config_option`
+
+Временные legacy-методы:
+
 - `ping`
 - `echo`
 - `shutdown`

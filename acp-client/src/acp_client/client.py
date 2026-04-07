@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-import asyncio
+import json
+from collections.abc import Callable
 from typing import Literal
 
 from aiohttp import ClientSession, WSMsgType
@@ -17,30 +18,12 @@ class ACPClient:
         self,
         method: str,
         params: dict | None = None,
-        transport: Literal["tcp", "http", "ws"] = "tcp",
+        transport: Literal["http", "ws"] = "http",
+        on_update: Callable[[dict], None] | None = None,
     ) -> ACPMessage:
-        if transport == "tcp":
-            return await self._request_tcp(method=method, params=params)
         if transport == "http":
             return await self._request_http(method=method, params=params)
-        return await self._request_ws(method=method, params=params)
-
-    async def _request_tcp(self, method: str, params: dict | None = None) -> ACPMessage:
-        reader, writer = await asyncio.open_connection(self.host, self.port)
-        try:
-            request = ACPMessage.request(method=method, params=params)
-            writer.write((request.to_json() + "\n").encode())
-            await writer.drain()
-
-            raw = await reader.readline()
-            if not raw:
-                msg = "No response from server"
-                raise RuntimeError(msg)
-
-            return ACPMessage.from_json(raw.decode().strip())
-        finally:
-            writer.close()
-            await writer.wait_closed()
+        return await self._request_ws(method=method, params=params, on_update=on_update)
 
     async def _request_http(self, method: str, params: dict | None = None) -> ACPMessage:
         request = ACPMessage.request(method=method, params=params)
@@ -53,16 +36,32 @@ class ACPClient:
             payload = await response.json()
             return ACPMessage.from_dict(payload)
 
-    async def _request_ws(self, method: str, params: dict | None = None) -> ACPMessage:
+    async def _request_ws(
+        self,
+        method: str,
+        params: dict | None = None,
+        on_update: Callable[[dict], None] | None = None,
+    ) -> ACPMessage:
         request = ACPMessage.request(method=method, params=params)
         url = f"ws://{self.host}:{self.port}/acp/ws"
 
         async with ClientSession() as session, session.ws_connect(url) as ws:
             await ws.send_str(request.to_json())
-            message = await ws.receive()
 
-            if message.type != WSMsgType.TEXT:
-                msg = f"Unexpected WebSocket response type: {message.type}"
-                raise RuntimeError(msg)
+            while True:
+                message = await ws.receive()
 
-            return ACPMessage.from_json(message.data)
+                if message.type != WSMsgType.TEXT:
+                    msg = f"Unexpected WebSocket response type: {message.type}"
+                    raise RuntimeError(msg)
+
+                payload = json.loads(message.data)
+                raw_method = payload.get("method")
+                if raw_method == "session/update":
+                    # Промежуточные обновления отдаем в callback.
+                    # Финальный JSON-RPC response продолжаем ждать дальше.
+                    if on_update is not None:
+                        on_update(payload)
+                    continue
+
+                return ACPMessage.from_dict(payload)

@@ -2,8 +2,8 @@
 
 Монорепозиторий с двумя независимыми Python-проектами:
 
-- `acp-server` — ACP-сервер с транспортами TCP и HTTP/WebSocket
-- `acp-client` — ACP-клиент с транспортами TCP, HTTP и WebSocket
+- `acp-server` — ACP-сервер с транспортами HTTP/WebSocket
+- `acp-client` — ACP-клиент с транспортами HTTP/WebSocket
 
 Каждый подпроект содержит собственные `pyproject.toml`, `uv.lock`, тесты и CLI-команды.
 
@@ -29,29 +29,35 @@ uv sync --directory acp-client
 
 ## Быстрый старт
 
-1) Запустить сервер (TCP):
+1) Запустить сервер (HTTP/WS):
 
 ```bash
-make run-server-tcp
+make run-server-http
 ```
 
 2) Отправить запрос с клиента:
 
 ```bash
-make ping-tcp
+make ping-http
 ```
 
-Для HTTP/WebSocket:
+Для WebSocket:
 
 ```bash
-make run-server-http
-make ping-http
 make ping-ws
 ```
 
 ## Поддерживаемые методы
 
 - `initialize`
+- `session/new`
+- `session/list`
+- `session/prompt`
+- `session/cancel`
+- `session/set_config_option`
+
+Временные legacy-методы (для обратной совместимости):
+
 - `ping`
 - `echo`
 - `shutdown`

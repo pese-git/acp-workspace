@@ -3,15 +3,17 @@ from __future__ import annotations
 import asyncio
 
 from aiohttp import WSMsgType, web
+from pydantic import ValidationError
 
 from .messages import ACPMessage
-from .protocol import process_request
+from .protocol import ACPProtocol, ProtocolOutcome
 
 
 class ACPHttpServer:
     def __init__(self, host: str = "127.0.0.1", port: int = 8080) -> None:
         self.host = host
         self.port = port
+        self.protocol = ACPProtocol()
 
     async def run(self) -> None:
         app = web.Application()
@@ -34,17 +36,26 @@ class ACPHttpServer:
         try:
             payload = await request.json()
             acp_request = ACPMessage.from_dict(payload)
-            response = process_request(acp_request)
-            status = 200
-        except Exception as exc:
-            response = ACPMessage(
-                id="unknown",
-                type="response",
-                error={"code": -32700, "message": f"Parse error: {exc}"},
+            outcome = self.protocol.handle(acp_request)
+            if outcome.response is None:
+                return web.Response(status=204)
+            return web.json_response(outcome.response.to_dict(), status=200)
+        except ValidationError as exc:
+            error = ACPMessage.error_response(
+                None,
+                code=-32600,
+                message="Invalid Request",
+                data=str(exc),
             )
-            status = 400
-
-        return web.json_response(response.to_dict(), status=status)
+            return web.json_response(error.to_dict(), status=400)
+        except Exception as exc:
+            error = ACPMessage.error_response(
+                None,
+                code=-32700,
+                message="Parse error",
+                data=str(exc),
+            )
+            return web.json_response(error.to_dict(), status=400)
 
     async def handle_ws_request(self, request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse()
@@ -56,15 +67,23 @@ class ACPHttpServer:
                 try:
                     acp_request = ACPMessage.from_json(message.data)
                     method_name = acp_request.method
-                    response = process_request(acp_request)
+                    outcome = self.protocol.handle(acp_request)
                 except Exception as exc:
-                    response = ACPMessage(
-                        id="unknown",
-                        type="response",
-                        error={"code": -32700, "message": f"Parse error: {exc}"},
+                    outcome = ProtocolOutcome(
+                        response=ACPMessage.error_response(
+                            None,
+                            code=-32700,
+                            message="Parse error",
+                            data=str(exc),
+                        )
                     )
 
-                await ws.send_str(response.to_json())
+                for notification in outcome.notifications:
+                    await ws.send_str(notification.to_json())
+
+                if outcome.response is not None:
+                    await ws.send_str(outcome.response.to_json())
+
                 if method_name == "shutdown":
                     await ws.close()
                     break

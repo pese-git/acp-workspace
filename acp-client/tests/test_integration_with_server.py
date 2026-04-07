@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import socket
 
@@ -16,38 +15,6 @@ def _get_free_port() -> int:
         return int(sock.getsockname()[1])
 
 
-async def _handle_tcp_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-    raw = await reader.readline()
-    request = json.loads(raw.decode().strip())
-    response = {
-        "jsonrpc": request.get("jsonrpc", "2.0"),
-        "id": request["id"],
-        "type": "response",
-        "result": {"pong": True},
-    }
-    writer.write((json.dumps(response, separators=(",", ":")) + "\n").encode())
-    await writer.drain()
-    writer.close()
-    await writer.wait_closed()
-
-
-@pytest.mark.asyncio
-async def test_tcp_client_server_ping() -> None:
-    port = _get_free_port()
-    server = await asyncio.start_server(_handle_tcp_client, host="127.0.0.1", port=port)
-
-    try:
-        client = ACPClient(host="127.0.0.1", port=port)
-        response = await client.request(method="ping", transport="tcp")
-        assert response.type == "response"
-        assert response.jsonrpc == "2.0"
-        assert response.result is not None
-        assert response.result["pong"] is True
-    finally:
-        server.close()
-        await server.wait_closed()
-
-
 @pytest.mark.asyncio
 async def test_http_client_server_ping() -> None:
     async def handle_http_request(request: web.Request) -> web.Response:
@@ -55,7 +22,6 @@ async def test_http_client_server_ping() -> None:
         response = {
             "jsonrpc": payload.get("jsonrpc", "2.0"),
             "id": payload["id"],
-            "type": "response",
             "result": {"pong": True},
         }
         return web.json_response(response)
@@ -72,9 +38,63 @@ async def test_http_client_server_ping() -> None:
     try:
         client = ACPClient(host="127.0.0.1", port=port)
         response = await client.request(method="ping", transport="http")
-        assert response.type == "response"
         assert response.jsonrpc == "2.0"
         assert response.result is not None
         assert response.result["pong"] is True
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_ws_client_receives_updates() -> None:
+    async def handle_ws_request(request: web.Request) -> web.WebSocketResponse:
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        async for message in ws:
+            payload = json.loads(message.data)
+            await ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "session/update",
+                    "params": {
+                        "sessionId": "sess_1",
+                        "update": {
+                            "sessionUpdate": "agent_message_chunk",
+                            "content": {"type": "text", "text": "hello"},
+                        },
+                    },
+                }
+            )
+            await ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": payload["id"],
+                    "result": {"stopReason": "end_turn"},
+                }
+            )
+            break
+        return ws
+
+    port = _get_free_port()
+    app = web.Application()
+    app.router.add_get("/acp/ws", handle_ws_request)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="127.0.0.1", port=port)
+    await site.start()
+
+    updates: list[dict] = []
+    try:
+        client = ACPClient(host="127.0.0.1", port=port)
+        response = await client.request(
+            method="session/prompt",
+            params={"sessionId": "sess_1", "prompt": [{"type": "text", "text": "hi"}]},
+            transport="ws",
+            on_update=updates.append,
+        )
+        assert response.result == {"stopReason": "end_turn"}
+        assert len(updates) == 1
+        assert updates[0]["method"] == "session/update"
     finally:
         await runner.cleanup()
