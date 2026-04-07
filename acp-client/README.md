@@ -33,6 +33,7 @@ uv run acp-client --host 127.0.0.1 --port 8080 --method session/load --params '{
 
 - Перед вызовами `session/*` клиент автоматически выполняет `initialize` в рамках WS-соединения.
 - В auto-initialize отправляются baseline `clientCapabilities` (`fs.readTextFile=false`, `fs.writeTextFile=false`, `terminal=false`).
+- Для нескольких запросов в одном WS-канале используйте `open_ws_session()`; `initialize` выполняется один раз на соединение.
 
 Профиль транспорта клиента: только WebSocket.
 
