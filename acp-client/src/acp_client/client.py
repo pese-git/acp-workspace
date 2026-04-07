@@ -7,6 +7,7 @@ from typing import Any
 import structlog
 from aiohttp import ClientSession, WSMsgType
 
+from .helpers import pick_auth_method_id
 from .messages import (
     ACPMessage,
     AuthenticateResult,
@@ -676,24 +677,6 @@ class ACPClient:
                 raise RuntimeError(msg)
             return parse_authenticate_result(response)
 
-    def _pick_auth_method_id(self, init_result: InitializeResult) -> str | None:
-        """Выбирает auth method id из negotiated `authMethods`.
-
-        Пример использования:
-            method_id = client._pick_auth_method_id(init_result)
-        """
-
-        auth_methods = init_result.authMethods
-        if not auth_methods:
-            return None
-        if self.preferred_auth_method_id is not None:
-            for auth_method in auth_methods:
-                if auth_method.id == self.preferred_auth_method_id:
-                    return auth_method.id
-            msg = f"Preferred auth method not advertised: {self.preferred_auth_method_id}"
-            raise RuntimeError(msg)
-        return auth_methods[0].id
-
     def _build_permission_result(
         self,
         *,
@@ -1159,7 +1142,10 @@ class ACPClientWSSession:
         if should_initialize and not self._initialized:
             init_result = await self._client._perform_ws_initialize(self._ws)
             if self._client.auto_authenticate:
-                selected_auth_method = self._client._pick_auth_method_id(init_result)
+                selected_auth_method = pick_auth_method_id(
+                    init_result,
+                    self._client.preferred_auth_method_id,
+                )
                 if selected_auth_method is not None:
                     await self._client._perform_ws_authenticate(
                         self._ws,
