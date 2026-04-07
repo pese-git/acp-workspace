@@ -47,7 +47,18 @@ uv run --directory acp-client python -m pytest
 ## Где что находится
 
 - Сервер:
-  - `acp-server/src/acp_server/protocol.py` — обработка ACP-методов
+  - `acp-server/src/acp_server/protocol/` — модули протокола ACP:
+    - `__init__.py` — экспорт публичных классов (ACPProtocol, ProtocolOutcome)
+    - `core.py` — основной класс ACPProtocol
+    - `state.py` — dataclasses состояния (SessionState, ToolCallState, и т.д.)
+    - `handlers/` — обработчики методов протокола:
+      - `auth.py` — методы аутентификации
+      - `session.py` — управление сессиями
+      - `prompt.py` — работа с промптами
+      - `permissions.py` — управление разрешениями
+      - `config.py` — конфигурация сессий
+      - `legacy.py` — ping, echo, shutdown
+  - `acp-server/src/acp_server/protocol.py` — обработка ACP-методов (монолитная версия, совместимость)
   - `acp-server/src/acp_server/server.py` — TCP транспорт
   - `acp-server/src/acp_server/http_server.py` — WS транспорт
 - Клиент:
