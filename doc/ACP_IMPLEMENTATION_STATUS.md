@@ -21,7 +21,45 @@
 | HTTP transport | Removed | Проект переведен в WS-only режим, HTTP endpoint удален. |
 | WebSocket transport | Done | Поддержан update-поток, deferred response и agent->client RPC (permission/fs/terminal). |
 
+## Рефакторинг (2026-04)
+
+### Завершено
+
+- ✅ **Структурированное логирование** — добавлена интеграция structlog с JSON и консольными форматами
+  - Уровни логирования: DEBUG, INFO, WARNING, ERROR
+  - CLI флаг `--log-level` для конфигурации
+  - CLI флаг `--log-json` для JSON формата в production
+
+- ✅ **Модуляризация protocol layer** — разбит монолитный protocol.py на модули handlers
+  - `auth.py` — обработка authenticate, initialize
+  - `session.py` — session/new, load, list
+  - `prompt.py` — session/prompt, cancel
+  - `permissions.py` — session/request_permission
+  - `config.py` — session/set_config_option
+  - `legacy.py` — ping, echo, shutdown
+
+- ✅ **Storage abstraction** — создан plug-and-play storage layer
+  - `SessionStorage(ABC)` — абстрактный интерфейс
+  - `InMemoryStorage` — для development, данные в памяти
+  - `JsonFileStorage` — для production с persistence
+  - CLI флаг `--storage` для выбора backend (memory://, json://path)
+
+- ✅ **Документация** — обновлены и созданы документы
+  - Создан ARCHITECTURE.md с полным описанием архитектуры
+  - Обновлен README.md со ссылкой на ARCHITECTURE.md
+  - Обновлен AGENTS.md с актуальной структурой модулей
+  - Создан CHANGELOG.md с историей изменений
+
+### Результаты
+
+- Все 118 тестов проходят (pytest)
+- ruff check: 0 ошибок
+- ty check: 0 ошибок типов
+- Архитектура стала более модульной и расширяемой
+- Упрощено добавление новых features и storage backends
+
 ## Приоритетный backlog
 
 1. Финализировать production execution backend для `session/prompt` (убрать оставшийся in-memory executor stub и подключить реальное выполнение инструментов).
 2. Продолжить расширение conformance-набора на дополнительные edge-кейсы schema/wire (terminal/fs/permission), включая редкие negative payload combinations.
+3. Добавить метрики и мониторинг производительности (latency, throughput, error rates).

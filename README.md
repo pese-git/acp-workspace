@@ -78,6 +78,16 @@ make check
 - `ty check`
 - `python -m pytest`
 
+## Архитектура
+
+Подробное описание архитектуры проекта см. в [ARCHITECTURE.md](ARCHITECTURE.md).
+
+Ключевые компоненты:
+- **Protocol Layer** — модульная реализация ACP методов через handlers
+- **Transport Layer** — WebSocket с асинхронной обработкой
+- **Storage Layer** — plug-and-play backends (InMemoryStorage, JsonFileStorage)
+- **Logging Layer** — структурированное логирование с structlog
+
 ## Структура репозитория
 
 - `acp-server/` — серверная реализация ACP

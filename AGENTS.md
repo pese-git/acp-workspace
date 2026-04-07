@@ -52,15 +52,19 @@ uv run --directory acp-client python -m pytest
     - `core.py` — основной класс ACPProtocol
     - `state.py` — dataclasses состояния (SessionState, ToolCallState, и т.д.)
     - `handlers/` — обработчики методов протокола:
-      - `auth.py` — методы аутентификации
-      - `session.py` — управление сессиями
-      - `prompt.py` — работа с промптами
-      - `permissions.py` — управление разрешениями
-      - `config.py` — конфигурация сессий
+      - `auth.py` — методы аутентификации (authenticate, initialize)
+      - `session.py` — управление сессиями (session/new, load, list)
+      - `prompt.py` — обработка prompt-turn (session/prompt, cancel)
+      - `permissions.py` — управление разрешениями (session/request_permission)
+      - `config.py` — конфигурация сессий (session/set_config_option)
       - `legacy.py` — ping, echo, shutdown
-  - `acp-server/src/acp_server/protocol.py` — обработка ACP-методов (монолитная версия, совместимость)
-  - `acp-server/src/acp_server/server.py` — TCP транспорт
-  - `acp-server/src/acp_server/http_server.py` — WS транспорт
+  - `acp-server/src/acp_server/storage/` — хранилище сессий:
+    - `base.py` — SessionStorage(ABC) интерфейс
+    - `memory.py` — InMemoryStorage (development)
+    - `json_file.py` — JsonFileStorage (production с persistence)
+  - `acp-server/src/acp_server/http_server.py` — WebSocket транспорт
+  - `acp-server/src/acp_server/logging.py` — структурированное логирование
+  - `acp-server/src/acp_server/server.py` — TCP транспорт (legacy)
 - Клиент:
   - `acp-client/src/acp_client/client.py` — TCP/WS запросы
   - `acp-client/src/acp_client/cli.py` — CLI
