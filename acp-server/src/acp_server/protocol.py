@@ -154,6 +154,8 @@ class PendingClientRequestState:
     terminal_id: str | None = None
     terminal_output: str | None = None
     terminal_exit_code: int | None = None
+    terminal_signal: str | None = None
+    terminal_truncated: bool | None = None
 
 
 @dataclass(slots=True)
@@ -1372,47 +1374,25 @@ class ACPProtocol:
         notifications: list[ACPMessage] = []
 
         if error is not None:
-            self._update_tool_call_status(session, pending.tool_call_id, "failed")
-            notifications.append(
-                ACPMessage.notification(
-                    "session/update",
-                    {
-                        "sessionId": session_id,
-                        "update": {
-                            "sessionUpdate": "tool_call_update",
-                            "toolCallId": pending.tool_call_id,
-                            "status": "failed",
-                            "content": [
-                                {
-                                    "type": "content",
-                                    "content": {
-                                        "type": "text",
-                                        "text": "Client RPC request failed.",
-                                    },
-                                }
-                            ],
-                        },
-                    },
-                )
-            )
-            session.updated_at = datetime.now(UTC).isoformat()
-            notifications.append(
-                self._session_info_notification(
-                    session_id=session_id,
-                    title=None,
-                    updated_at=session.updated_at,
-                )
-            )
-            failed = self._finalize_active_turn(session=session, stop_reason="end_turn")
-            return ProtocolOutcome(
-                notifications=notifications,
-                followup_responses=[failed] if failed is not None else [],
+            error_message = error.get("message") if isinstance(error.get("message"), str) else ""
+            failure_suffix = f": {error_message}" if error_message else ""
+            return self._finalize_failed_client_rpc_request(
+                session=session,
+                session_id=session_id,
+                tool_call_id=pending.tool_call_id,
+                failure_text=f"Client RPC request failed{failure_suffix}",
             )
 
         if pending.kind == "fs_read":
+            if not isinstance(result, dict) or not isinstance(result.get("content"), str):
+                return self._finalize_failed_client_rpc_request(
+                    session=session,
+                    session_id=session_id,
+                    tool_call_id=pending.tool_call_id,
+                    failure_text="Invalid fs/read_text_file response.",
+                )
             content_text = ""
-            if isinstance(result, dict) and isinstance(result.get("content"), str):
-                content_text = result["content"]
+            content_text = result["content"]
             self._update_tool_call_status(
                 session,
                 pending.tool_call_id,
@@ -1450,13 +1430,19 @@ class ACPProtocol:
                 )
             )
         elif pending.kind == "fs_write":
+            if not isinstance(result, dict):
+                return self._finalize_failed_client_rpc_request(
+                    session=session,
+                    session_id=session_id,
+                    tool_call_id=pending.tool_call_id,
+                    failure_text="Invalid fs/write_text_file response.",
+                )
             old_text: str | None = None
             new_text = pending.expected_new_text or ""
-            if isinstance(result, dict):
-                if isinstance(result.get("oldText"), str):
-                    old_text = result["oldText"]
-                if isinstance(result.get("newText"), str):
-                    new_text = result["newText"]
+            if isinstance(result.get("oldText"), str):
+                old_text = result["oldText"]
+            if isinstance(result.get("newText"), str):
+                new_text = result["newText"]
 
             diff_content = [
                 {
@@ -1549,9 +1535,52 @@ class ACPProtocol:
             terminal_id = pending.terminal_id
             if terminal_id is None:
                 return None
+            if not isinstance(result, dict) or not isinstance(result.get("output"), str):
+                return self._finalize_failed_client_rpc_request(
+                    session=session,
+                    session_id=session_id,
+                    tool_call_id=pending.tool_call_id,
+                    failure_text="Invalid terminal/output response.",
+                )
             output_text = ""
-            if isinstance(result, dict) and isinstance(result.get("output"), str):
-                output_text = result["output"]
+            output_truncated = False
+            output_exit_code: int | None = None
+            output_signal: str | None = None
+            output_text = result["output"]
+            if isinstance(result.get("truncated"), bool):
+                output_truncated = result["truncated"]
+            raw_exit_status = result.get("exitStatus")
+            has_exit_status = isinstance(raw_exit_status, dict)
+            if has_exit_status:
+                if isinstance(raw_exit_status.get("exitCode"), int):
+                    output_exit_code = raw_exit_status["exitCode"]
+                if isinstance(raw_exit_status.get("signal"), str):
+                    output_signal = raw_exit_status["signal"]
+
+            # Если terminal/output уже содержит exitStatus, можно сразу release без wait_for_exit.
+            if has_exit_status:
+                release_request = ACPMessage.request(
+                    "terminal/release",
+                    {
+                        "sessionId": session_id,
+                        "terminalId": terminal_id,
+                    },
+                )
+                if release_request.id is None:
+                    return None
+                session.active_turn.pending_client_request = PendingClientRequestState(
+                    request_id=release_request.id,
+                    kind="terminal_release",
+                    tool_call_id=pending.tool_call_id,
+                    path=pending.path,
+                    terminal_id=terminal_id,
+                    terminal_output=output_text,
+                    terminal_exit_code=output_exit_code,
+                    terminal_signal=output_signal,
+                    terminal_truncated=output_truncated,
+                )
+                notifications.append(release_request)
+                return ProtocolOutcome(notifications=notifications)
 
             wait_request = ACPMessage.request(
                 "terminal/wait_for_exit",
@@ -1569,6 +1598,7 @@ class ACPProtocol:
                 path=pending.path,
                 terminal_id=terminal_id,
                 terminal_output=output_text,
+                terminal_truncated=output_truncated,
             )
             notifications.append(wait_request)
             return ProtocolOutcome(notifications=notifications)
@@ -1576,9 +1606,19 @@ class ACPProtocol:
             terminal_id = pending.terminal_id
             if terminal_id is None:
                 return None
+            if not isinstance(result, dict):
+                return self._finalize_failed_client_rpc_request(
+                    session=session,
+                    session_id=session_id,
+                    tool_call_id=pending.tool_call_id,
+                    failure_text="Invalid terminal/wait_for_exit response.",
+                )
             exit_code = None
-            if isinstance(result, dict) and isinstance(result.get("exitCode"), int):
+            signal: str | None = None
+            if isinstance(result.get("exitCode"), int):
                 exit_code = result["exitCode"]
+            if isinstance(result.get("signal"), str):
+                signal = result["signal"]
 
             release_request = ACPMessage.request(
                 "terminal/release",
@@ -1597,6 +1637,8 @@ class ACPProtocol:
                 terminal_id=terminal_id,
                 terminal_output=pending.terminal_output,
                 terminal_exit_code=exit_code,
+                terminal_signal=signal,
+                terminal_truncated=pending.terminal_truncated,
             )
             notifications.append(release_request)
             return ProtocolOutcome(notifications=notifications)
@@ -1604,11 +1646,22 @@ class ACPProtocol:
             terminal_id = pending.terminal_id
             if terminal_id is None:
                 return None
+            if not isinstance(result, dict):
+                return self._finalize_failed_client_rpc_request(
+                    session=session,
+                    session_id=session_id,
+                    tool_call_id=pending.tool_call_id,
+                    failure_text="Invalid terminal/release response.",
+                )
             completion_text = (
                 f"Terminal command finished with exit code {pending.terminal_exit_code}."
             )
             if pending.terminal_exit_code is None:
                 completion_text = "Terminal command finished."
+            if pending.terminal_signal is not None:
+                completion_text = f"{completion_text} Signal: {pending.terminal_signal}."
+            if pending.terminal_truncated:
+                completion_text = f"{completion_text} Output was truncated."
             if pending.terminal_output:
                 completion_text = f"{completion_text} Output: {pending.terminal_output}"
 
@@ -1643,6 +1696,8 @@ class ACPProtocol:
                             "content": completed_content,
                             "rawOutput": {
                                 "exitCode": pending.terminal_exit_code,
+                                "signal": pending.terminal_signal,
+                                "truncated": pending.terminal_truncated,
                             },
                         },
                     },
@@ -1664,6 +1719,58 @@ class ACPProtocol:
         return ProtocolOutcome(
             notifications=notifications,
             followup_responses=[completed] if completed is not None else [],
+        )
+
+    def _finalize_failed_client_rpc_request(
+        self,
+        *,
+        session: SessionState,
+        session_id: str,
+        tool_call_id: str,
+        failure_text: str,
+    ) -> ProtocolOutcome:
+        """Финализирует prompt-turn после неуспешного или невалидного client RPC.
+
+        Пример использования:
+            return protocol._finalize_failed_client_rpc_request(
+                session=state,
+                session_id="sess_1",
+                tool_call_id="call_1",
+                failure_text="Invalid terminal/output response.",
+            )
+        """
+
+        self._update_tool_call_status(session, tool_call_id, "failed")
+        failure_notification = ACPMessage.notification(
+            "session/update",
+            {
+                "sessionId": session_id,
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": tool_call_id,
+                    "status": "failed",
+                    "content": [
+                        {
+                            "type": "content",
+                            "content": {
+                                "type": "text",
+                                "text": failure_text,
+                            },
+                        }
+                    ],
+                },
+            },
+        )
+        session.updated_at = datetime.now(UTC).isoformat()
+        session_info = self._session_info_notification(
+            session_id=session_id,
+            title=None,
+            updated_at=session.updated_at,
+        )
+        failed = self._finalize_active_turn(session=session, stop_reason="end_turn")
+        return ProtocolOutcome(
+            notifications=[failure_notification, session_info],
+            followup_responses=[failed] if failed is not None else [],
         )
 
     def _find_session_by_pending_client_request_id(

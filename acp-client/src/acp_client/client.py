@@ -54,7 +54,14 @@ class ACPClient:
         response = await client.request("initialize")
     """
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 8765) -> None:
+    def __init__(
+        self,
+        host: str = "127.0.0.1",
+        port: int = 8765,
+        *,
+        preferred_auth_method_id: str | None = None,
+        auto_authenticate: bool = True,
+    ) -> None:
         """Создает клиент с адресом ACP-сервера.
 
         Пример использования:
@@ -63,6 +70,8 @@ class ACPClient:
 
         self.host = host
         self.port = port
+        self.preferred_auth_method_id = preferred_auth_method_id
+        self.auto_authenticate = auto_authenticate
 
     @staticmethod
     def _default_client_capabilities() -> dict[str, Any]:
@@ -545,7 +554,7 @@ class ACPClient:
 
         return None
 
-    async def _perform_ws_initialize(self, ws: Any) -> None:
+    async def _perform_ws_initialize(self, ws: Any) -> InitializeResult:
         """Выполняет ACP initialize в открытом WS-соединении.
 
         Метод нужен для соблюдения handshake-фазы протокола перед вызовом
@@ -581,7 +590,58 @@ class ACPClient:
             if response.error is not None:
                 msg = f"WebSocket initialize failed: {response.error.code} {response.error.message}"
                 raise RuntimeError(msg)
-            return
+            return parse_initialize_result(response)
+
+    async def _perform_ws_authenticate(self, ws: Any, *, method_id: str) -> AuthenticateResult:
+        """Выполняет ACP `authenticate` в открытом WS-соединении.
+
+        Пример использования:
+            await client._perform_ws_authenticate(ws, method_id="local")
+        """
+
+        auth_request = ACPMessage.request(
+            method="authenticate",
+            params={"methodId": method_id},
+        )
+        await ws.send_str(auth_request.to_json())
+
+        while True:
+            message = await ws.receive()
+            if message.type != WSMsgType.TEXT:
+                msg = f"Unexpected WebSocket response type during authenticate: {message.type}"
+                raise RuntimeError(msg)
+
+            payload = json.loads(message.data)
+            raw_method = payload.get("method") if isinstance(payload, dict) else None
+            if raw_method == "session/update":
+                continue
+            response = ACPMessage.from_dict(payload)
+            if response.id != auth_request.id:
+                continue
+            if response.error is not None:
+                msg = (
+                    f"WebSocket authenticate failed: {response.error.code} {response.error.message}"
+                )
+                raise RuntimeError(msg)
+            return parse_authenticate_result(response)
+
+    def _pick_auth_method_id(self, init_result: InitializeResult) -> str | None:
+        """Выбирает auth method id из negotiated `authMethods`.
+
+        Пример использования:
+            method_id = client._pick_auth_method_id(init_result)
+        """
+
+        auth_methods = init_result.authMethods
+        if not auth_methods:
+            return None
+        if self.preferred_auth_method_id is not None:
+            for auth_method in auth_methods:
+                if auth_method.id == self.preferred_auth_method_id:
+                    return auth_method.id
+            msg = f"Preferred auth method not advertised: {self.preferred_auth_method_id}"
+            raise RuntimeError(msg)
+        return auth_methods[0].id
 
     def _build_permission_result(
         self,
@@ -1034,7 +1094,14 @@ class ACPClientWSSession:
 
         should_initialize = method.startswith("session/") and method != "initialize"
         if should_initialize and not self._initialized:
-            await self._client._perform_ws_initialize(self._ws)
+            init_result = await self._client._perform_ws_initialize(self._ws)
+            if self._client.auto_authenticate:
+                selected_auth_method = self._client._pick_auth_method_id(init_result)
+                if selected_auth_method is not None:
+                    await self._client._perform_ws_authenticate(
+                        self._ws,
+                        method_id=selected_auth_method,
+                    )
             self._initialized = True
 
         request = ACPMessage.request(method=method, params=params)
@@ -1055,6 +1122,19 @@ class ACPClientWSSession:
         if method == "initialize" and response.error is None:
             self._initialized = True
         return response
+
+    async def authenticate(self, *, method_id: str) -> AuthenticateResult:
+        """Выполняет `authenticate` в рамках persistent WS-сессии.
+
+        Пример использования:
+            await ws_session.authenticate(method_id="local")
+        """
+
+        response = await self.request(
+            method="authenticate",
+            params={"methodId": method_id},
+        )
+        return parse_authenticate_result(response)
 
     async def prompt(
         self,

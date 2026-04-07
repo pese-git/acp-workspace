@@ -1039,6 +1039,109 @@ def test_fs_read_client_error_marks_tool_as_failed() -> None:
     )
 
 
+def test_fs_read_invalid_success_payload_marks_tool_as_failed() -> None:
+    protocol = ACPProtocol()
+    protocol.handle(
+        ACPMessage.request(
+            "initialize",
+            {
+                "protocolVersion": 1,
+                "clientCapabilities": {
+                    "fs": {"readTextFile": True, "writeTextFile": False},
+                    "terminal": False,
+                },
+            },
+        )
+    )
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    prompt_outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "read file"}],
+                "_meta": {"promptDirectives": {"fsReadPath": "README.md"}},
+            },
+        )
+    )
+    assert prompt_outcome.response is None
+    fs_request = next(
+        notification
+        for notification in prompt_outcome.notifications
+        if notification.method == "fs/read_text_file"
+    )
+    assert fs_request.id is not None
+
+    resolved = protocol.handle_client_response(ACPMessage.response(fs_request.id, {}))
+    assert len(resolved.followup_responses) == 1
+    assert resolved.followup_responses[0].result == {"stopReason": "end_turn"}
+    assert any(
+        notification.params is not None
+        and notification.params["update"].get("status") == "failed"
+        and "Invalid fs/read_text_file response"
+        in notification.params["update"]["content"][0]["content"]["text"]
+        for notification in resolved.notifications
+    )
+
+
+def test_fs_write_non_object_payload_marks_tool_as_failed() -> None:
+    protocol = ACPProtocol()
+    protocol.handle(
+        ACPMessage.request(
+            "initialize",
+            {
+                "protocolVersion": 1,
+                "clientCapabilities": {
+                    "fs": {"readTextFile": False, "writeTextFile": True},
+                    "terminal": False,
+                },
+            },
+        )
+    )
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    prompt_outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "write file"}],
+                "_meta": {
+                    "promptDirectives": {
+                        "fsWritePath": "notes.txt",
+                        "fsWriteContent": "updated",
+                    }
+                },
+            },
+        )
+    )
+    assert prompt_outcome.response is None
+    fs_request = next(
+        notification
+        for notification in prompt_outcome.notifications
+        if notification.method == "fs/write_text_file"
+    )
+    assert fs_request.id is not None
+
+    resolved = protocol.handle_client_response(ACPMessage.response(fs_request.id, "ok"))
+    assert len(resolved.followup_responses) == 1
+    assert resolved.followup_responses[0].result == {"stopReason": "end_turn"}
+    assert any(
+        notification.params is not None
+        and notification.params["update"].get("status") == "failed"
+        and "Invalid fs/write_text_file response"
+        in notification.params["update"]["content"][0]["content"]["text"]
+        for notification in resolved.notifications
+    )
+
+
 def test_prompt_terminal_run_emits_terminal_create_request() -> None:
     protocol = ACPProtocol()
     protocol.handle(
@@ -1148,6 +1251,148 @@ def test_terminal_rpc_chain_completes_prompt_turn() -> None:
         and notification.params["update"].get("sessionUpdate") == "tool_call_update"
         and notification.params["update"].get("status") == "completed"
         for notification in done.notifications
+    )
+
+
+def test_terminal_output_exit_status_skips_wait_for_exit() -> None:
+    protocol = ACPProtocol()
+    protocol.handle(
+        ACPMessage.request(
+            "initialize",
+            {
+                "protocolVersion": 1,
+                "clientCapabilities": {
+                    "fs": {"readTextFile": False, "writeTextFile": False},
+                    "terminal": True,
+                },
+            },
+        )
+    )
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    prompt_outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "run command"}],
+                "_meta": {"promptDirectives": {"terminalCommand": "sleep 1"}},
+            },
+        )
+    )
+    assert prompt_outcome.response is None
+
+    create_request = next(
+        notification
+        for notification in prompt_outcome.notifications
+        if notification.method == "terminal/create"
+    )
+    assert create_request.id is not None
+
+    output_step = protocol.handle_client_response(
+        ACPMessage.response(create_request.id, {"terminalId": "term_1"})
+    )
+    output_request = next(
+        notification
+        for notification in output_step.notifications
+        if notification.method == "terminal/output"
+    )
+    assert output_request.id is not None
+
+    release_step = protocol.handle_client_response(
+        ACPMessage.response(
+            output_request.id,
+            {
+                "output": "done",
+                "truncated": True,
+                "exitStatus": {"exitCode": None, "signal": "SIGTERM"},
+            },
+        )
+    )
+    assert any(
+        notification.method == "terminal/release" for notification in release_step.notifications
+    )
+    assert not any(
+        notification.method == "terminal/wait_for_exit"
+        for notification in release_step.notifications
+    )
+
+    release_request = next(
+        notification
+        for notification in release_step.notifications
+        if notification.method == "terminal/release"
+    )
+    assert release_request.id is not None
+    done = protocol.handle_client_response(ACPMessage.response(release_request.id, {}))
+    assert len(done.followup_responses) == 1
+    assert done.followup_responses[0].result == {"stopReason": "end_turn"}
+    assert any(
+        notification.params is not None
+        and notification.params["update"].get("sessionUpdate") == "tool_call_update"
+        and notification.params["update"].get("rawOutput", {}).get("signal") == "SIGTERM"
+        for notification in done.notifications
+    )
+
+
+def test_terminal_output_invalid_payload_marks_tool_as_failed() -> None:
+    protocol = ACPProtocol()
+    protocol.handle(
+        ACPMessage.request(
+            "initialize",
+            {
+                "protocolVersion": 1,
+                "clientCapabilities": {
+                    "fs": {"readTextFile": False, "writeTextFile": False},
+                    "terminal": True,
+                },
+            },
+        )
+    )
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    prompt_outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "run command"}],
+                "_meta": {"promptDirectives": {"terminalCommand": "ls"}},
+            },
+        )
+    )
+    assert prompt_outcome.response is None
+    create_request = next(
+        notification
+        for notification in prompt_outcome.notifications
+        if notification.method == "terminal/create"
+    )
+    assert create_request.id is not None
+
+    output_step = protocol.handle_client_response(
+        ACPMessage.response(create_request.id, {"terminalId": "term_1"})
+    )
+    output_request = next(
+        notification
+        for notification in output_step.notifications
+        if notification.method == "terminal/output"
+    )
+    assert output_request.id is not None
+
+    resolved = protocol.handle_client_response(ACPMessage.response(output_request.id, {}))
+    assert len(resolved.followup_responses) == 1
+    assert resolved.followup_responses[0].result == {"stopReason": "end_turn"}
+    assert any(
+        notification.params is not None
+        and notification.params["update"].get("status") == "failed"
+        and "Invalid terminal/output response"
+        in notification.params["update"]["content"][0]["content"]["text"]
+        for notification in resolved.notifications
     )
 
 

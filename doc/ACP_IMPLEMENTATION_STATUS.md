@@ -6,7 +6,7 @@
 
 | Область | Статус | Примечание |
 | --- | --- | --- |
-| `authenticate` | Partial | Метод реализован, `auth_required` для `session/new`/`session/load` поддержан при включенном `require_auth`; добавлены client helpers (`authenticate`) и WS integration coverage, production auth-backend пока не подключен. |
+| `authenticate` | Partial | Метод реализован, `auth_required` для `session/new`/`session/load` поддержан при включенном `require_auth`; добавлены client helpers (`authenticate`) и auto-auth на WS при наличии `authMethods`, production auth-backend пока не подключен. |
 | `initialize` | Done | Версия и capability negotiation реализованы; runtime-ветки запускаются только при согласованных client capabilities. |
 | `session/new` | Done | Поддерживается создание сессии, `configOptions` и legacy `modes`. |
 | `session/load` | Done | Поддерживается replay истории и ключевых `session/update` событий. |
@@ -24,4 +24,4 @@
 ## Приоритетный backlog
 
 1. Завершить переход от demo-семантики `session/request_permission` к production policy-model.
-2. Расширить conformance-набор до дополнительных edge-кейсов terminal/fs client-rpc и расширенных error-сценариев.
+2. Расширить conformance-набор до дополнительных edge-кейсов terminal/fs client-rpc (особенно race-сценарии cancel + pending client-rpc).

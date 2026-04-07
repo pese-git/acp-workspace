@@ -642,6 +642,161 @@ async def test_persistent_ws_session_initializes_once_for_multiple_session_metho
 
 
 @pytest.mark.asyncio
+async def test_ws_client_auto_authenticates_before_session_method() -> None:
+    async def handle_ws_request(request: web.Request) -> web.WebSocketResponse:
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        step = 0
+        async for message in ws:
+            payload = json.loads(message.data)
+            if step == 0:
+                assert payload["method"] == "initialize"
+                await ws.send_json(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": payload["id"],
+                        "result": {
+                            "protocolVersion": 1,
+                            "agentCapabilities": {
+                                "loadSession": True,
+                                "promptCapabilities": {
+                                    "image": False,
+                                    "audio": False,
+                                    "embeddedContext": False,
+                                },
+                                "mcpCapabilities": {"http": False, "sse": False},
+                                "sessionCapabilities": {"list": {}},
+                            },
+                            "agentInfo": {"name": "acp-server", "version": "0.1.0"},
+                            "authMethods": [{"id": "local"}],
+                        },
+                    }
+                )
+                step = 1
+                continue
+            if step == 1:
+                assert payload["method"] == "authenticate"
+                assert payload["params"]["methodId"] == "local"
+                await ws.send_json(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": payload["id"],
+                        "result": {},
+                    }
+                )
+                step = 2
+                continue
+
+            assert payload["method"] == "session/list"
+            await ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": payload["id"],
+                    "result": {"sessions": [], "nextCursor": None},
+                }
+            )
+            break
+
+        return ws
+
+    port = _get_free_port()
+    app = web.Application()
+    app.router.add_get("/acp/ws", handle_ws_request)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="127.0.0.1", port=port)
+    await site.start()
+
+    try:
+        client = ACPClient(host="127.0.0.1", port=port)
+        response = await client.request(method="session/list", params={})
+        assert response.result == {"sessions": [], "nextCursor": None}
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_persistent_ws_session_auto_authenticates_once() -> None:
+    async def handle_ws_request(request: web.Request) -> web.WebSocketResponse:
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        seen: list[str] = []
+        async for message in ws:
+            payload = json.loads(message.data)
+            method = payload.get("method")
+            if method == "initialize":
+                seen.append("initialize")
+                await ws.send_json(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": payload["id"],
+                        "result": {
+                            "protocolVersion": 1,
+                            "agentCapabilities": {
+                                "loadSession": True,
+                                "promptCapabilities": {
+                                    "image": False,
+                                    "audio": False,
+                                    "embeddedContext": False,
+                                },
+                                "mcpCapabilities": {"http": False, "sse": False},
+                                "sessionCapabilities": {"list": {}},
+                            },
+                            "agentInfo": {"name": "acp-server", "version": "0.1.0"},
+                            "authMethods": [{"id": "local"}],
+                        },
+                    }
+                )
+                continue
+            if method == "authenticate":
+                seen.append("authenticate")
+                await ws.send_json(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": payload["id"],
+                        "result": {},
+                    }
+                )
+                continue
+            if method == "session/list":
+                seen.append("session/list")
+                await ws.send_json(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": payload["id"],
+                        "result": {"sessions": [], "nextCursor": None},
+                    }
+                )
+                if seen.count("session/list") == 2:
+                    break
+                continue
+
+        assert seen.count("initialize") == 1
+        assert seen.count("authenticate") == 1
+        return ws
+
+    port = _get_free_port()
+    app = web.Application()
+    app.router.add_get("/acp/ws", handle_ws_request)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="127.0.0.1", port=port)
+    await site.start()
+
+    try:
+        client = ACPClient(host="127.0.0.1", port=port)
+        async with client.open_ws_session() as ws_session:
+            first = await ws_session.request(method="session/list", params={})
+            second = await ws_session.request(method="session/list", params={})
+        assert isinstance(first.result, dict)
+        assert isinstance(second.result, dict)
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
 async def test_ws_client_does_not_initialize_before_non_session_method() -> None:
     async def handle_ws_request(request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse()
@@ -978,6 +1133,43 @@ async def test_persistent_ws_prompt_helper_sends_meta_directives_and_parses_resu
                 prompt_directives={"forcedStopReason": "max_tokens"},
             )
         assert result.stopReason == "max_tokens"
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_persistent_ws_authenticate_helper_sends_method_id() -> None:
+    async def handle_ws_request(request: web.Request) -> web.WebSocketResponse:
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        async for message in ws:
+            payload = json.loads(message.data)
+            assert payload["method"] == "authenticate"
+            assert payload["params"]["methodId"] == "local"
+            await ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": payload["id"],
+                    "result": {},
+                }
+            )
+            break
+        return ws
+
+    port = _get_free_port()
+    app = web.Application()
+    app.router.add_get("/acp/ws", handle_ws_request)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="127.0.0.1", port=port)
+    await site.start()
+
+    try:
+        client = ACPClient(host="127.0.0.1", port=port)
+        async with client.open_ws_session() as ws_session:
+            result = await ws_session.authenticate(method_id="local")
+        assert result.model_dump() == {}
     finally:
         await runner.cleanup()
 

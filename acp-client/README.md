@@ -22,6 +22,7 @@ uv run acp-client --host 127.0.0.1 --port 8080 --method session/load --params '{
 - `authenticate(...)` — типизированный helper для ACP `authenticate`.
 - `prompt(...)` — типизированный helper для `session/prompt` с optional `_meta.promptDirectives`.
 - `open_ws_session().prompt(...)` — typed helper для `session/prompt` в persistent WS-сессии.
+- `open_ws_session().authenticate(...)` — typed helper для `authenticate` в persistent WS-сессии.
 - `create_session_parsed(...)` — типизированный helper для ответа `session/new`.
 - `load_session_setup_parsed(...)` — типизированный helper для ответа `session/load` и replay updates.
 - `load_session_parsed(...)` — возвращает типизированные `session/update` события.
@@ -35,6 +36,8 @@ uv run acp-client --host 127.0.0.1 --port 8080 --method session/load --params '{
 ## Поведение WebSocket
 
 - Перед вызовами `session/*` клиент автоматически выполняет `initialize` в рамках WS-соединения.
+- Если в `initialize` возвращены `authMethods`, клиент автоматически выполняет `authenticate` перед `session/*` (можно отключить через `auto_authenticate=False`).
+- Можно указать `preferred_auth_method_id`, чтобы выбрать конкретный advertised auth method вместо первого в списке.
 - В auto-initialize отправляются baseline `clientCapabilities` (`fs.readTextFile=false`, `fs.writeTextFile=false`, `terminal=false`).
 - Для нескольких запросов в одном WS-канале используйте `open_ws_session()`; `initialize` выполняется один раз на соединение.
 
