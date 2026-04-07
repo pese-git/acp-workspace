@@ -7,7 +7,12 @@ from typing import Any
 import structlog
 from aiohttp import ClientSession, WSMsgType
 
-from .helpers import pick_auth_method_id
+from .helpers import (
+    extract_plan_updates,
+    extract_structured_updates,
+    extract_tool_call_updates,
+    pick_auth_method_id,
+)
 from .messages import (
     ACPMessage,
     AuthenticateResult,
@@ -23,14 +28,11 @@ from .messages import (
     ToolCallUpdate,
     parse_authenticate_result,
     parse_initialize_result,
-    parse_plan_update,
     parse_prompt_result,
     parse_request_permission_request,
     parse_session_list_result,
     parse_session_setup_result,
     parse_session_update_notification,
-    parse_structured_session_update,
-    parse_tool_call_update,
 )
 
 type PermissionHandler = Callable[[dict[str, Any]], str | None]
@@ -769,6 +771,7 @@ class ACPClient:
             mcp_servers=mcp_servers,
         )
 
+        # Фильтруем и парсим updates в SessionUpdateNotification
         parsed_updates: list[SessionUpdateNotification] = []
         for raw_update in raw_updates:
             if not isinstance(raw_update, dict):
@@ -804,17 +807,13 @@ class ACPClient:
             )
         """
 
-        response, updates = await self.load_session_parsed(
+        response, raw_updates = await self.load_session(
             session_id=session_id,
             cwd=cwd,
             mcp_servers=mcp_servers,
         )
-        tool_updates: list[ToolCallUpdate] = []
-        for update in updates:
-            parsed = parse_tool_call_update(update)
-            if parsed is None:
-                continue
-            tool_updates.append(parsed)
+        # Выделяем только tool-call updates из raw списка
+        tool_updates = extract_tool_call_updates(raw_updates)
         return response, tool_updates
 
     async def load_session_plan_updates(
@@ -836,17 +835,13 @@ class ACPClient:
             )
         """
 
-        response, updates = await self.load_session_parsed(
+        response, raw_updates = await self.load_session(
             session_id=session_id,
             cwd=cwd,
             mcp_servers=mcp_servers,
         )
-        plan_updates: list[PlanUpdate] = []
-        for update in updates:
-            parsed = parse_plan_update(update)
-            if parsed is None:
-                continue
-            plan_updates.append(parsed)
+        # Выделяем только plan updates из raw списка
+        plan_updates = extract_plan_updates(raw_updates)
         return response, plan_updates
 
     async def list_sessions(
@@ -1011,17 +1006,13 @@ class ACPClient:
             )
         """
 
-        response, updates = await self.load_session_parsed(
+        response, raw_updates = await self.load_session(
             session_id=session_id,
             cwd=cwd,
             mcp_servers=mcp_servers,
         )
-        structured: list[StructuredSessionUpdate] = []
-        for update in updates:
-            parsed = parse_structured_session_update(update)
-            if parsed is None:
-                continue
-            structured.append(parsed)
+        # Выделяем только известные typed updates из raw списка
+        structured = extract_structured_updates(raw_updates)
         return response, structured
 
     async def set_config_option_with_updates(
@@ -1052,17 +1043,8 @@ class ACPClient:
             on_update=raw_updates.append,
         )
 
-        parsed_updates: list[StructuredSessionUpdate] = []
-        for raw in raw_updates:
-            if not isinstance(raw, dict):
-                continue
-            notification = parse_session_update_notification(raw)
-            if notification is None:
-                continue
-            parsed = parse_structured_session_update(notification)
-            if parsed is None:
-                continue
-            parsed_updates.append(parsed)
+        # Выделяем только известные typed updates из WS-потока
+        parsed_updates = extract_structured_updates(raw_updates)
 
         return response, parsed_updates
 
