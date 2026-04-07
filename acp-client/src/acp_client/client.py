@@ -10,11 +10,14 @@ from .messages import (
     ACPMessage,
     InitializeResult,
     PlanUpdate,
+    SessionListItem,
+    SessionListResult,
     SessionUpdateNotification,
     ToolCallUpdate,
     parse_initialize_result,
     parse_plan_update,
     parse_request_permission_request,
+    parse_session_list_result,
     parse_session_update_notification,
     parse_tool_call_update,
 )
@@ -395,5 +398,49 @@ class ACPClient:
                 msg = "Invalid session/list result: nextCursor must be string or null"
                 raise RuntimeError(msg)
             cursor = next_cursor
+
+        return collected
+
+    async def list_sessions_parsed(
+        self,
+        *,
+        cwd: str | None = None,
+        cursor: str | None = None,
+        transport: Literal["http", "ws"] = "http",
+    ) -> SessionListResult:
+        """Запрашивает страницу `session/list` и валидирует ответ.
+
+        Пример использования:
+            page = await client.list_sessions_parsed(cwd="/tmp")
+        """
+
+        response = await self.list_sessions(cwd=cwd, cursor=cursor, transport=transport)
+        return parse_session_list_result(response)
+
+    async def list_all_sessions_parsed(
+        self,
+        *,
+        cwd: str | None = None,
+        transport: Literal["http", "ws"] = "http",
+    ) -> list[SessionListItem]:
+        """Возвращает все сессии как типизированные элементы `SessionListItem`.
+
+        Пример использования:
+            sessions = await client.list_all_sessions_parsed(cwd="/tmp")
+        """
+
+        collected: list[SessionListItem] = []
+        cursor: str | None = None
+
+        while True:
+            page = await self.list_sessions_parsed(
+                cwd=cwd,
+                cursor=cursor,
+                transport=transport,
+            )
+            collected.extend(page.sessions)
+            if page.nextCursor is None:
+                break
+            cursor = page.nextCursor
 
         return collected

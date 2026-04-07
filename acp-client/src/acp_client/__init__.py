@@ -1,7 +1,14 @@
 """ACP client implementation."""
 
 from .client import ACPClient
-from .messages import InitializeResult, PlanUpdate, SessionUpdateNotification, ToolCallUpdate
+from .messages import (
+    InitializeResult,
+    PlanUpdate,
+    SessionListItem,
+    SessionListResult,
+    SessionUpdateNotification,
+    ToolCallUpdate,
+)
 
 __all__ = [
     "ACPClient",
@@ -9,4 +16,6 @@ __all__ = [
     "ToolCallUpdate",
     "PlanUpdate",
     "InitializeResult",
+    "SessionListItem",
+    "SessionListResult",
 ]

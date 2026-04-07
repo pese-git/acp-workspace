@@ -231,6 +231,36 @@ class InitializeResult(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class SessionListItem(BaseModel):
+    """Элемент списка сессий из ответа `session/list`.
+
+    Пример использования:
+        SessionListItem.model_validate({
+            "sessionId": "sess_1",
+            "cwd": "/tmp",
+            "updatedAt": "2026-04-07T00:00:00Z",
+        })
+    """
+
+    sessionId: str
+    cwd: str
+    title: str | None = None
+    updatedAt: str | None = None
+    model_config = ConfigDict(extra="allow")
+
+
+class SessionListResult(BaseModel):
+    """Типизированный `result` ответа `session/list`.
+
+    Пример использования:
+        SessionListResult.model_validate({"sessions": [], "nextCursor": None})
+    """
+
+    sessions: list[SessionListItem]
+    nextCursor: str | None = None
+    model_config = ConfigDict(extra="allow")
+
+
 class SessionUpdatePayload(BaseModel):
     """Полезная нагрузка события `session/update`.
 
@@ -511,6 +541,23 @@ def parse_initialize_result(message: ACPMessage) -> InitializeResult:
     if not isinstance(message.result, dict):
         raise ValueError("Initialize response must contain object result")
     return InitializeResult.model_validate(message.result)
+
+
+def parse_session_list_result(message: ACPMessage) -> SessionListResult:
+    """Преобразует JSON-RPC response в типизированный `session/list` result.
+
+    Бросает `ValueError`, если response содержит `error` или невалидный `result`.
+
+    Пример использования:
+        parsed = parse_session_list_result(response)
+    """
+
+    if message.error is not None:
+        msg = f"Session list failed: {message.error.code} {message.error.message}"
+        raise ValueError(msg)
+    if not isinstance(message.result, dict):
+        raise ValueError("session/list response must contain object result")
+    return SessionListResult.model_validate(message.result)
 
 
 def parse_json_params(value: str | None) -> dict[str, Any]:

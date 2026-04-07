@@ -27,6 +27,7 @@ uv run acp-client --transport ws --host 127.0.0.1 --port 8080 --method session/l
 - `load_session_tool_updates(...)` — возвращает только события tool call.
 - `load_session_plan_updates(...)` — возвращает только события `plan`.
 - `list_sessions(...)` и `list_all_sessions(...)` — работа с `session/list` и cursor-пагинацией.
+- `list_sessions_parsed(...)` и `list_all_sessions_parsed(...)` — типизированный разбор ответа `session/list`.
 
 ## Проверки
 

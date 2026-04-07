@@ -6,12 +6,14 @@ from acp_client.messages import (
     JsonRpcError,
     PlanUpdate,
     RequestPermissionRequest,
+    SessionListResult,
     ToolCallCreatedUpdate,
     ToolCallStateUpdate,
     parse_initialize_result,
     parse_json_params,
     parse_plan_update,
     parse_request_permission_request,
+    parse_session_list_result,
     parse_session_update_notification,
     parse_tool_call_update,
 )
@@ -193,3 +195,36 @@ def test_parse_initialize_result_error_response_raises() -> None:
 
     with pytest.raises(ValueError):
         parse_initialize_result(response)
+
+
+def test_parse_session_list_result_success() -> None:
+    response = ACPMessage.response(
+        "list_1",
+        {
+            "sessions": [
+                {
+                    "sessionId": "sess_1",
+                    "cwd": "/tmp",
+                    "title": "Demo",
+                    "updatedAt": "2026-04-07T00:00:00Z",
+                }
+            ],
+            "nextCursor": "cursor_2",
+        },
+    )
+
+    parsed = parse_session_list_result(response)
+    assert isinstance(parsed, SessionListResult)
+    assert len(parsed.sessions) == 1
+    assert parsed.sessions[0].sessionId == "sess_1"
+    assert parsed.nextCursor == "cursor_2"
+
+
+def test_parse_session_list_result_error_response_raises() -> None:
+    response = ACPMessage(
+        id="list_1",
+        error=JsonRpcError(code=-32602, message="Invalid params"),
+    )
+
+    with pytest.raises(ValueError):
+        parse_session_list_result(response)
