@@ -14,6 +14,29 @@ def test_initialize_request() -> None:
     assert outcome.response.result["protocolVersion"] == 1
 
 
+def test_initialize_negotiates_to_supported_version() -> None:
+    protocol = ACPProtocol()
+    request = ACPMessage.request("initialize", {"protocolVersion": 999})
+
+    outcome = protocol.handle(request)
+
+    assert outcome.response is not None
+    assert outcome.response.error is None
+    assert outcome.response.result is not None
+    assert outcome.response.result["protocolVersion"] == 1
+
+
+def test_initialize_rejects_non_integer_protocol_version() -> None:
+    protocol = ACPProtocol()
+    request = ACPMessage.request("initialize", {"protocolVersion": "1"})
+
+    outcome = protocol.handle(request)
+
+    assert outcome.response is not None
+    assert outcome.response.error is not None
+    assert outcome.response.error.code == -32602
+
+
 def test_unknown_method() -> None:
     protocol = ACPProtocol()
     request = ACPMessage.request("missing", {})
@@ -79,6 +102,41 @@ def test_session_list_returns_created_session() -> None:
     sessions = listed.response.result["sessions"]
     assert isinstance(sessions, list)
     assert any(session["sessionId"] == created_id for session in sessions)
+
+
+def test_session_list_supports_cursor_pagination() -> None:
+    protocol = ACPProtocol()
+    for _ in range(51):
+        created = protocol.handle(
+            ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+        )
+        assert created.response is not None
+
+    first_page = protocol.handle(ACPMessage.request("session/list", {}))
+    assert first_page.response is not None
+    assert isinstance(first_page.response.result, dict)
+    first_sessions = first_page.response.result["sessions"]
+    next_cursor = first_page.response.result["nextCursor"]
+    assert len(first_sessions) == 50
+    assert isinstance(next_cursor, str)
+
+    second_page = protocol.handle(ACPMessage.request("session/list", {"cursor": next_cursor}))
+    assert second_page.response is not None
+    assert isinstance(second_page.response.result, dict)
+    second_sessions = second_page.response.result["sessions"]
+    assert len(second_sessions) == 1
+    assert second_page.response.result["nextCursor"] is None
+
+
+def test_session_list_rejects_invalid_cursor() -> None:
+    protocol = ACPProtocol()
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+
+    listed = protocol.handle(ACPMessage.request("session/list", {"cursor": "not-a-valid-cursor"}))
+    assert listed.response is not None
+    assert listed.response.error is not None
+    assert listed.response.error.code == -32602
 
 
 def test_set_config_option_updates_value() -> None:

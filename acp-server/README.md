@@ -35,6 +35,11 @@ uv run acp-server --transport ws --host 127.0.0.1 --port 8080
 - Если turn отменяется методом `session/cancel`, исходный `session/prompt` завершается с `stopReason: "cancelled"`.
 - Через HTTP deferred-turn сразу финализируется в том же запросе, чтобы клиент всегда получил JSON-RPC response.
 
+### Поведение `session/list`
+
+- Поддерживается фильтр по `cwd` (абсолютный путь).
+- Поддерживается cursor-based пагинация через поля `cursor` и `nextCursor`.
+
 Временные legacy-методы:
 
 - `ping`
