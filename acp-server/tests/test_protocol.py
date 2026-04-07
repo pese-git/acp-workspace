@@ -80,6 +80,38 @@ def test_session_prompt_sends_update() -> None:
     assert "available_commands_update" in update_types
 
 
+def test_prompt_with_plan_marker_emits_plan_update() -> None:
+    protocol = ACPProtocol()
+
+    new_session = protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
+    assert new_session.response is not None
+    assert isinstance(new_session.response.result, dict)
+    session_id = new_session.response.result["sessionId"]
+
+    outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "build plan [plan]"}],
+            },
+        )
+    )
+
+    assert outcome.response is not None
+    plan_updates = [
+        notification
+        for notification in outcome.notifications
+        if notification.params is not None
+        and notification.params["update"].get("sessionUpdate") == "plan"
+    ]
+    assert len(plan_updates) == 1
+    assert plan_updates[0].params is not None
+    assert isinstance(plan_updates[0].params["update"].get("entries"), list)
+
+
 def test_session_new_returns_modes_state() -> None:
     protocol = ACPProtocol()
     created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
@@ -445,6 +477,44 @@ def test_session_load_replays_history_and_config() -> None:
     assert "config_option_update" in replay_updates
     assert "session_info_update" in replay_updates
     assert "available_commands_update" in replay_updates
+
+
+def test_session_load_replays_last_plan_update() -> None:
+    protocol = ACPProtocol()
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    prompted = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "compose [plan]"}],
+            },
+        )
+    )
+    assert prompted.response is not None
+
+    loaded = protocol.handle(
+        ACPMessage.request(
+            "session/load",
+            {
+                "sessionId": session_id,
+                "cwd": "/tmp",
+                "mcpServers": [],
+            },
+        )
+    )
+
+    assert loaded.response is not None
+    replay_updates = [
+        notification.params["update"]["sessionUpdate"]
+        for notification in loaded.notifications
+        if notification.params is not None
+    ]
+    assert "plan" in replay_updates
 
 
 def test_session_set_mode_updates_current_mode() -> None:

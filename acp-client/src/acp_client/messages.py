@@ -290,6 +290,38 @@ class ToolCallStateUpdate(BaseModel):
 type ToolCallUpdate = ToolCallCreatedUpdate | ToolCallStateUpdate
 
 
+class PlanEntry(BaseModel):
+    """Элемент плана из `session/update` с типом `plan`.
+
+    Пример использования:
+        PlanEntry.model_validate({
+            "content": "Собрать контекст",
+            "priority": "high",
+            "status": "pending",
+        })
+    """
+
+    content: str
+    priority: Literal["high", "medium", "low"]
+    status: Literal["pending", "in_progress", "completed"]
+    model_config = ConfigDict(extra="allow")
+
+
+class PlanUpdate(BaseModel):
+    """Типизированный payload события `plan`.
+
+    Пример использования:
+        PlanUpdate.model_validate({
+            "sessionUpdate": "plan",
+            "entries": [],
+        })
+    """
+
+    sessionUpdate: Literal["plan"]
+    entries: list[PlanEntry]
+    model_config = ConfigDict(extra="allow")
+
+
 class PermissionOption(BaseModel):
     """Описывает один вариант выбора в `session/request_permission`.
 
@@ -394,6 +426,21 @@ def parse_tool_call_update(update: SessionUpdateNotification) -> ToolCallUpdate 
     if session_update_type == "tool_call_update":
         return ToolCallStateUpdate.model_validate(payload)
     return None
+
+
+def parse_plan_update(update: SessionUpdateNotification) -> PlanUpdate | None:
+    """Пытается распарсить `session/update` как событие плана выполнения.
+
+    Возвращает `None`, если update относится к другому типу.
+
+    Пример использования:
+        parsed = parse_plan_update(notification)
+    """
+
+    payload = update.params.update.model_dump()
+    if payload.get("sessionUpdate") != "plan":
+        return None
+    return PlanUpdate.model_validate(payload)
 
 
 def parse_request_permission_request(payload: dict[str, Any]) -> RequestPermissionRequest | None:

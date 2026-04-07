@@ -51,6 +51,8 @@ class SessionState:
     tool_calls: dict[str, ToolCallState] = field(default_factory=dict)
     # Набор доступных slash-команд для `available_commands_update`.
     available_commands: list[dict[str, Any]] = field(default_factory=list)
+    # Последний опубликованный план выполнения для `session/update: plan`.
+    latest_plan: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -420,6 +422,20 @@ class ACPProtocol:
                         )
                     )
 
+        if session.latest_plan:
+            notifications.append(
+                ACPMessage.notification(
+                    "session/update",
+                    {
+                        "sessionId": session_id,
+                        "update": {
+                            "sessionUpdate": "plan",
+                            "entries": session.latest_plan,
+                        },
+                    },
+                )
+            )
+
         # Реплеим текущее состояние tool calls, чтобы клиент восстановил UI.
         for tool_call in session.tool_calls.values():
             notifications.append(
@@ -701,6 +717,39 @@ class ACPProtocol:
             },
         )
         notifications.append(update)
+
+        if "[plan]" in text_preview:
+            # В demo-режиме публикуем пример плана для клиентских UI.
+            plan_entries = [
+                {
+                    "content": "Проанализировать текущее состояние проекта",
+                    "priority": "high",
+                    "status": "completed",
+                },
+                {
+                    "content": "Внести минимальные изменения в код",
+                    "priority": "high",
+                    "status": "in_progress",
+                },
+                {
+                    "content": "Запустить проверки и подготовить результат",
+                    "priority": "medium",
+                    "status": "pending",
+                },
+            ]
+            session.latest_plan = plan_entries
+            notifications.append(
+                ACPMessage.notification(
+                    "session/update",
+                    {
+                        "sessionId": session_id,
+                        "update": {
+                            "sessionUpdate": "plan",
+                            "entries": plan_entries,
+                        },
+                    },
+                )
+            )
 
         # В режиме `ask` эмулируем обязательный permission-request перед tool call.
         should_request_permission = (
