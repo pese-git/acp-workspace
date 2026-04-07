@@ -699,6 +699,88 @@ async def test_ws_client_receives_updates() -> None:
 
 
 @pytest.mark.asyncio
+async def test_ws_client_auto_initializes_when_server_requires_it() -> None:
+    async def handle_ws_request(request: web.Request) -> web.WebSocketResponse:
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        step = 0
+        async for message in ws:
+            payload = json.loads(message.data)
+            if step == 0:
+                assert payload["method"] == "session/list"
+                await ws.send_json(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": payload["id"],
+                        "error": {
+                            "code": -32000,
+                            "message": "Initialize required before session methods",
+                        },
+                    }
+                )
+                step = 1
+                continue
+
+            if step == 1:
+                assert payload["method"] == "initialize"
+                await ws.send_json(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": payload["id"],
+                        "result": {
+                            "protocolVersion": 1,
+                            "agentCapabilities": {
+                                "loadSession": True,
+                                "promptCapabilities": {
+                                    "image": False,
+                                    "audio": False,
+                                    "embeddedContext": False,
+                                },
+                                "mcpCapabilities": {"http": False, "sse": False},
+                                "sessionCapabilities": {"list": {}},
+                            },
+                            "agentInfo": {"name": "acp-server", "version": "0.1.0"},
+                            "authMethods": [],
+                        },
+                    }
+                )
+                step = 2
+                continue
+
+            assert payload["method"] == "session/list"
+            await ws.send_json(
+                {
+                    "jsonrpc": "2.0",
+                    "id": payload["id"],
+                    "result": {
+                        "sessions": [],
+                        "nextCursor": None,
+                    },
+                }
+            )
+            break
+
+        return ws
+
+    port = _get_free_port()
+    app = web.Application()
+    app.router.add_get("/acp/ws", handle_ws_request)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="127.0.0.1", port=port)
+    await site.start()
+
+    try:
+        client = ACPClient(host="127.0.0.1", port=port)
+        response = await client.request(method="session/list", params={}, transport="ws")
+        assert isinstance(response.result, dict)
+        assert response.result["sessions"] == []
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
 async def test_set_config_option_with_updates_returns_structured_updates() -> None:
     async def handle_ws_request(request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse()

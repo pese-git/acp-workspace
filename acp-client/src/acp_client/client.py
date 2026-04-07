@@ -142,6 +142,8 @@ class ACPClient:
 
         request = ACPMessage.request(method=method, params=params)
         url = f"ws://{self.host}:{self.port}/acp/ws"
+        retry_with_initialize = method != "initialize"
+        init_request_id: str | None = None
 
         async with ClientSession() as session, session.ws_connect(url) as ws:
             await ws.send_str(request.to_json())
@@ -175,7 +177,52 @@ class ACPClient:
                     )
                     continue
 
-                return ACPMessage.from_dict(payload)
+                response = ACPMessage.from_dict(payload)
+                if init_request_id is not None and response.id == init_request_id:
+                    if response.error is not None:
+                        msg = (
+                            "WebSocket initialize failed before retry: "
+                            f"{response.error.code} {response.error.message}"
+                        )
+                        raise RuntimeError(msg)
+                    await ws.send_str(request.to_json())
+                    init_request_id = None
+                    continue
+
+                if (
+                    retry_with_initialize
+                    and self._is_initialize_required_error(response)
+                    and init_request_id is None
+                ):
+                    init_request = ACPMessage.request(
+                        method="initialize",
+                        params={
+                            "protocolVersion": 1,
+                            "clientCapabilities": {},
+                        },
+                    )
+                    if isinstance(init_request.id, str):
+                        init_request_id = init_request.id
+                    await ws.send_str(init_request.to_json())
+                    retry_with_initialize = False
+                    continue
+
+                return response
+
+    def _is_initialize_required_error(self, response: ACPMessage) -> bool:
+        """Проверяет, что response сигнализирует о необходимости initialize.
+
+        Метод нужен для совместимости с серверами, где `initialize` обязателен
+        перед `session/*` запросами в пределах WS-соединения.
+
+        Пример использования:
+            if client._is_initialize_required_error(response):
+                ...
+        """
+
+        if response.error is None:
+            return False
+        return response.error.code == -32000 and "Initialize required" in response.error.message
 
     def _build_permission_result(
         self,

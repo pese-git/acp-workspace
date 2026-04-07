@@ -33,6 +33,10 @@ uv run acp-client --transport ws --host 127.0.0.1 --port 8080 --method session/l
 - `list_sessions(...)` и `list_all_sessions(...)` — работа с `session/list` и cursor-пагинацией.
 - `list_sessions_parsed(...)` и `list_all_sessions_parsed(...)` — типизированный разбор ответа `session/list`.
 
+## Поведение WebSocket
+
+- Если сервер требует `initialize` перед `session/*`, клиент автоматически выполняет `initialize` и повторяет исходный запрос.
+
 ## Проверки
 
 ```bash
