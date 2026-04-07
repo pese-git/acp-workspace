@@ -305,3 +305,65 @@ class ACPClient:
                 continue
             plan_updates.append(parsed)
         return response, plan_updates
+
+    async def list_sessions(
+        self,
+        *,
+        cwd: str | None = None,
+        cursor: str | None = None,
+        transport: Literal["http", "ws"] = "http",
+    ) -> ACPMessage:
+        """Запрашивает одну страницу `session/list` с optional фильтрами.
+
+        Пример использования:
+            response = await client.list_sessions(cwd="/tmp", transport="http")
+        """
+
+        params: dict[str, Any] = {}
+        if cwd is not None:
+            params["cwd"] = cwd
+        if cursor is not None:
+            params["cursor"] = cursor
+        return await self.request(method="session/list", params=params, transport=transport)
+
+    async def list_all_sessions(
+        self,
+        *,
+        cwd: str | None = None,
+        transport: Literal["http", "ws"] = "http",
+    ) -> list[dict[str, Any]]:
+        """Возвращает все сессии, последовательно проходя cursor-пагинацию.
+
+        Если сервер вернет невалидный формат ответа, метод аварийно завершится
+        исключением `RuntimeError`, чтобы клиент явно увидел нарушение контракта.
+
+        Пример использования:
+            sessions = await client.list_all_sessions(cwd="/tmp", transport="http")
+        """
+
+        collected: list[dict[str, Any]] = []
+        cursor: str | None = None
+
+        while True:
+            response = await self.list_sessions(cwd=cwd, cursor=cursor, transport=transport)
+            if not isinstance(response.result, dict):
+                msg = "Invalid session/list result: expected object"
+                raise RuntimeError(msg)
+
+            page_sessions = response.result.get("sessions")
+            if not isinstance(page_sessions, list):
+                msg = "Invalid session/list result: sessions must be array"
+                raise RuntimeError(msg)
+            for session in page_sessions:
+                if isinstance(session, dict):
+                    collected.append(session)
+
+            next_cursor = response.result.get("nextCursor")
+            if next_cursor is None:
+                break
+            if not isinstance(next_cursor, str):
+                msg = "Invalid session/list result: nextCursor must be string or null"
+                raise RuntimeError(msg)
+            cursor = next_cursor
+
+        return collected

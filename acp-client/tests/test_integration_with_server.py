@@ -46,6 +46,64 @@ async def test_http_client_server_ping() -> None:
 
 
 @pytest.mark.asyncio
+async def test_list_all_sessions_walks_http_pagination() -> None:
+    pages = [
+        {
+            "sessions": [
+                {
+                    "sessionId": "sess_1",
+                    "cwd": "/tmp",
+                    "updatedAt": "2026-04-07T00:00:00Z",
+                }
+            ],
+            "nextCursor": "cursor_2",
+        },
+        {
+            "sessions": [
+                {
+                    "sessionId": "sess_2",
+                    "cwd": "/tmp",
+                    "updatedAt": "2026-04-07T00:01:00Z",
+                }
+            ],
+            "nextCursor": None,
+        },
+    ]
+
+    async def handle_http_request(request: web.Request) -> web.Response:
+        payload = await request.json()
+        assert payload["method"] == "session/list"
+        params = payload.get("params", {})
+        cursor = params.get("cursor")
+        page = pages[0] if cursor is None else pages[1]
+        return web.json_response(
+            {
+                "jsonrpc": "2.0",
+                "id": payload["id"],
+                "result": page,
+            }
+        )
+
+    port = _get_free_port()
+    app = web.Application()
+    app.router.add_post("/acp", handle_http_request)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="127.0.0.1", port=port)
+    await site.start()
+
+    try:
+        client = ACPClient(host="127.0.0.1", port=port)
+        sessions = await client.list_all_sessions(cwd="/tmp", transport="http")
+        assert len(sessions) == 2
+        assert sessions[0]["sessionId"] == "sess_1"
+        assert sessions[1]["sessionId"] == "sess_2"
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
 async def test_load_session_helper_collects_replay_updates() -> None:
     async def handle_ws_request(request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse()
