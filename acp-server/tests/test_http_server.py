@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import socket
+from typing import Any
 
 import pytest
 from aiohttp import ClientSession, web
@@ -31,6 +32,25 @@ async def _start_test_server() -> tuple[web.AppRunner, int]:
     site = web.TCPSite(runner, host="127.0.0.1", port=port)
     await site.start()
     return runner, port
+
+
+async def _ws_initialize(ws: Any) -> None:
+    """Выполняет обязательный ACP initialize в рамках WS-соединения."""
+
+    await ws.send_json(
+        {
+            "jsonrpc": "2.0",
+            "id": "init_1",
+            "method": "initialize",
+            "params": {
+                "protocolVersion": 1,
+                "clientCapabilities": {},
+            },
+        }
+    )
+    payload = await asyncio.wait_for(ws.receive_json(), timeout=1.0)
+    assert payload["id"] == "init_1"
+    assert payload.get("error") is None
 
 
 @pytest.mark.asyncio
@@ -80,6 +100,7 @@ async def test_ws_prompt_with_permission_selection_finishes_with_end_turn() -> N
         async with ClientSession() as session:
             ws = await session.ws_connect(f"http://127.0.0.1:{port}/acp/ws")
             try:
+                await _ws_initialize(ws)
                 await ws.send_json(
                     {
                         "jsonrpc": "2.0",
@@ -138,6 +159,7 @@ async def test_ws_cancel_finishes_deferred_prompt_with_cancelled() -> None:
         async with ClientSession() as session:
             ws = await session.ws_connect(f"http://127.0.0.1:{port}/acp/ws")
             try:
+                await _ws_initialize(ws)
                 await ws.send_json(
                     {
                         "jsonrpc": "2.0",
@@ -188,6 +210,32 @@ async def test_ws_cancel_finishes_deferred_prompt_with_cancelled() -> None:
 
                 assert responses["cancel_1"]["result"] is None
                 assert responses["prompt_1"]["result"] == {"stopReason": "cancelled"}
+            finally:
+                await ws.close()
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_ws_rejects_session_methods_before_initialize() -> None:
+    runner, port = await _start_test_server()
+
+    try:
+        async with ClientSession() as session:
+            ws = await session.ws_connect(f"http://127.0.0.1:{port}/acp/ws")
+            try:
+                await ws.send_json(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": "new_1",
+                        "method": "session/new",
+                        "params": {"cwd": "/tmp", "mcpServers": []},
+                    }
+                )
+                payload = await asyncio.wait_for(ws.receive_json(), timeout=1.0)
+
+                assert payload["id"] == "new_1"
+                assert payload["error"]["code"] == -32000
             finally:
                 await ws.close()
     finally:

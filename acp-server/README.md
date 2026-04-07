@@ -32,6 +32,7 @@ uv run acp-server --transport ws --host 127.0.0.1 --port 8080
 
 - Сервер ожидает обязательные поля `protocolVersion` (integer) и `clientCapabilities` (object).
 - Поле `clientInfo` опционально, но если передано — должно быть объектом.
+- Для WebSocket сначала должен быть выполнен `initialize`, иначе `session/*` запросы отклоняются.
 
 ### Поведение `session/prompt` и `session/cancel`
 

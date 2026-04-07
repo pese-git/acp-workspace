@@ -120,6 +120,8 @@ class ACPHttpServer:
         await ws.prepare(request)
         # Храним отложенные завершения prompt-turn по sessionId в рамках WS-соединения.
         deferred_prompt_tasks: dict[str, asyncio.Task[None]] = {}
+        # По ACP любые session-методы в WS доступны только после initialize.
+        initialized = False
 
         try:
             async for message in ws:
@@ -132,6 +134,28 @@ class ACPHttpServer:
                         if method_name is None:
                             outcome = self.protocol.handle_client_response(acp_request)
                         else:
+                            if method_name == "initialize":
+                                initialized = True
+                            elif not initialized:
+                                if acp_request.is_notification:
+                                    outcome = ProtocolOutcome()
+                                else:
+                                    outcome = ProtocolOutcome(
+                                        response=ACPMessage.error_response(
+                                            acp_request.id,
+                                            code=-32000,
+                                            message="Initialize required before session methods",
+                                        )
+                                    )
+                                method_name = None
+                                session_id = None
+                                for notification in outcome.notifications:
+                                    await ws.send_str(notification.to_json())
+                                if outcome.response is not None:
+                                    await ws.send_str(outcome.response.to_json())
+                                for followup_response in outcome.followup_responses:
+                                    await ws.send_str(followup_response.to_json())
+                                continue
                             if isinstance(acp_request.params, dict):
                                 raw_session_id = acp_request.params.get("sessionId")
                                 if isinstance(raw_session_id, str):
