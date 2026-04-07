@@ -44,6 +44,40 @@ uv run acp-client --host 127.0.0.1 --port 8080 --method session/load --params '{
 
 Профиль транспорта клиента: только WebSocket.
 
+## Логирование
+
+Клиент поддерживает структурированное логирование с настраиваемым уровнем и форматом.
+
+### Уровни логирования
+
+```bash
+# DEBUG - подробная информация для отладки
+uv run acp-client --host 127.0.0.1 --port 8080 --method ping --log-level DEBUG
+
+# INFO - основные события (default)
+uv run acp-client --host 127.0.0.1 --port 8080 --method ping --log-level INFO
+
+# WARNING - предупреждения
+uv run acp-client --host 127.0.0.1 --port 8080 --method ping --log-level WARNING
+
+# ERROR - только ошибки
+uv run acp-client --host 127.0.0.1 --port 8080 --method ping --log-level ERROR
+```
+
+### JSON формат
+
+Для production окружения можно использовать JSON формат:
+
+```bash
+uv run acp-client --host 127.0.0.1 --port 8080 --method ping --log-json
+```
+
+Пример вывода:
+```json
+{"event": "client_started", "host": "127.0.0.1", "port": 8080, "method": "ping", "timestamp": "2026-04-07T20:00:00.000000Z", "level": "info"}
+{"event": "ws_request_sent", "method": "ping", "timestamp": "2026-04-07T20:00:00.100000Z", "level": "debug"}
+```
+
 ## Проверки
 
 ```bash

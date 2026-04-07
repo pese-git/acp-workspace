@@ -4,6 +4,7 @@ import json
 from collections.abc import Callable
 from typing import Any
 
+import structlog
 from aiohttp import ClientSession, WSMsgType
 
 from .messages import (
@@ -74,6 +75,7 @@ class ACPClient:
         self.preferred_auth_method_id = preferred_auth_method_id
         self.auth_api_key = auth_api_key
         self.auto_authenticate = auto_authenticate
+        self.logger = structlog.get_logger("acp_client")
 
     @staticmethod
     def _default_client_capabilities() -> dict[str, Any]:
@@ -155,6 +157,8 @@ class ACPClient:
             result = await client.initialize()
         """
 
+        self.logger.info("initialize_started", protocol_version=protocol_version)
+
         params: dict[str, Any] = {
             "protocolVersion": protocol_version,
             "clientCapabilities": client_capabilities or self._default_client_capabilities(),
@@ -166,7 +170,14 @@ class ACPClient:
             method="initialize",
             params=params,
         )
-        return parse_initialize_result(response)
+        result = parse_initialize_result(response)
+        
+        self.logger.info(
+            "initialize_completed",
+            server_version=result.protocolVersion,
+            has_auth=len(result.authMethods) > 0 if result.authMethods else False,
+        )
+        return result
 
     async def authenticate(
         self, *, method_id: str, api_key: str | None = None
@@ -176,6 +187,8 @@ class ACPClient:
         Пример использования:
             result = await client.authenticate(method_id="local")
         """
+
+        self.logger.info("authenticate_started", method_id=method_id)
 
         resolved_api_key = api_key if isinstance(api_key, str) and api_key else self.auth_api_key
         auth_params: dict[str, Any] = {
@@ -188,7 +201,10 @@ class ACPClient:
             method="authenticate",
             params=auth_params,
         )
-        return parse_authenticate_result(response)
+        result = parse_authenticate_result(response)
+        
+        self.logger.info("authenticate_completed", method_id=method_id)
+        return result
 
     async def prompt(
         self,
@@ -219,6 +235,8 @@ class ACPClient:
             )
         """
 
+        self.logger.info("prompt_started", session_id=session_id, prompt_items=len(prompt))
+
         params: dict[str, Any] = {
             "sessionId": session_id,
             "prompt": prompt,
@@ -241,7 +259,10 @@ class ACPClient:
             on_terminal_release=on_terminal_release,
             on_terminal_kill=on_terminal_kill,
         )
-        return parse_prompt_result(response)
+        result = parse_prompt_result(response)
+        
+        self.logger.info("prompt_completed", session_id=session_id, stop_reason=result.stopReason)
+        return result
 
     async def _request_ws(
         self,
@@ -266,8 +287,10 @@ class ACPClient:
             await client._request_ws("session/prompt", params, updates.append)
         """
 
+        self.logger.debug("ws_request_sent", method=method, has_params=params is not None)
+
         async with self.open_ws_session() as ws_session:
-            return await ws_session.request(
+            response = await ws_session.request(
                 method=method,
                 params=params,
                 on_update=on_update,
@@ -280,6 +303,14 @@ class ACPClient:
                 on_terminal_release=on_terminal_release,
                 on_terminal_kill=on_terminal_kill,
             )
+            
+            self.logger.debug(
+                "ws_response_received",
+                method=method,
+                has_result=response.result is not None,
+                has_error=response.error is not None,
+            )
+            return response
 
     async def _await_ws_response(
         self,
@@ -742,6 +773,13 @@ class ACPClient:
             )
         """
 
+        self.logger.info(
+            "load_session_started",
+            session_id=session_id,
+            cwd=cwd,
+            mcp_servers_count=len(mcp_servers) if mcp_servers else 0,
+        )
+
         raw_response, raw_updates = await self.load_session(
             session_id=session_id,
             cwd=cwd,
@@ -757,6 +795,11 @@ class ACPClient:
                 continue
             parsed_updates.append(parsed)
 
+        self.logger.info(
+            "load_session_completed",
+            session_id=session_id,
+            updates_count=len(parsed_updates),
+        )
         return raw_response, parsed_updates
 
     async def load_session_tool_updates(

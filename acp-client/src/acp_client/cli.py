@@ -15,6 +15,7 @@ import json
 from typing import Any
 
 from .client import ACPClient
+from .logging import setup_logging
 from .messages import parse_json_params
 
 
@@ -41,7 +42,22 @@ def run_client() -> None:
         action="store_true",
         help="Показать replay/update события для session/load (полезно для WS)",
     )
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Уровень логирования (default: INFO)",
+    )
+    parser.add_argument(
+        "--log-json",
+        action="store_true",
+        help="Использовать JSON формат для логов",
+    )
     args = parser.parse_args()
+
+    # Настроить логирование только если явно указаны флаги
+    if args.log_level != "INFO" or args.log_json:
+        setup_logging(level=args.log_level, json_format=args.log_json)
 
     params = parse_json_params(args.params)
     client = ACPClient(host=args.host, port=args.port)
