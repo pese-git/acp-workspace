@@ -335,6 +335,81 @@ class SessionSetupResult(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class TextContentBlock(BaseModel):
+    """Текстовый блок контента ACP (`ContentBlock::text`).
+
+    Пример использования:
+        TextContentBlock.model_validate({"type": "text", "text": "hello"})
+    """
+
+    type: Literal["text"]
+    text: str
+    model_config = ConfigDict(extra="allow")
+
+
+class ImageContentBlock(BaseModel):
+    """Изображение в контенте ACP (`ContentBlock::image`).
+
+    Пример использования:
+        ImageContentBlock.model_validate({"type": "image", "data": "...", "mimeType": "image/png"})
+    """
+
+    type: Literal["image"]
+    data: str
+    mimeType: str
+    uri: str | None = None
+    model_config = ConfigDict(extra="allow")
+
+
+class AudioContentBlock(BaseModel):
+    """Аудио-блок ACP (`ContentBlock::audio`).
+
+    Пример использования:
+        AudioContentBlock.model_validate({"type": "audio", "data": "...", "mimeType": "audio/wav"})
+    """
+
+    type: Literal["audio"]
+    data: str
+    mimeType: str
+    model_config = ConfigDict(extra="allow")
+
+
+class ResourceLinkContentBlock(BaseModel):
+    """Ссылка на ресурс в ACP (`ContentBlock::resource_link`).
+
+    Пример использования:
+        ResourceLinkContentBlock.model_validate(
+            {"type": "resource_link", "uri": "file:///a", "name": "a"}
+        )
+    """
+
+    type: Literal["resource_link"]
+    uri: str
+    name: str
+    model_config = ConfigDict(extra="allow")
+
+
+class EmbeddedResourceContentBlock(BaseModel):
+    """Встроенный ресурс ACP (`ContentBlock::resource`).
+
+    Пример использования:
+        EmbeddedResourceContentBlock.model_validate({"type": "resource", "resource": {"uri": "file:///a"}})
+    """
+
+    type: Literal["resource"]
+    resource: dict[str, Any]
+    model_config = ConfigDict(extra="allow")
+
+
+type ContentBlock = (
+    TextContentBlock
+    | ImageContentBlock
+    | AudioContentBlock
+    | ResourceLinkContentBlock
+    | EmbeddedResourceContentBlock
+)
+
+
 class MessageChunkUpdate(BaseModel):
     """Событие chunk-сообщения (`agent_message_chunk` / `user_message_chunk`).
 
@@ -346,7 +421,7 @@ class MessageChunkUpdate(BaseModel):
     """
 
     sessionUpdate: Literal["agent_message_chunk", "user_message_chunk"]
-    content: dict[str, Any]
+    content: ContentBlock
     model_config = ConfigDict(extra="allow")
 
 
@@ -361,7 +436,7 @@ class ThoughtChunkUpdate(BaseModel):
     """
 
     sessionUpdate: Literal["agent_thought_chunk"]
-    content: dict[str, Any]
+    content: ContentBlock
     model_config = ConfigDict(extra="allow")
 
 
@@ -397,6 +472,17 @@ class CurrentModeUpdate(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class AvailableCommandInput(BaseModel):
+    """Спецификация строкового ввода для slash-команды.
+
+    Пример использования:
+        AvailableCommandInput.model_validate({"hint": "Введите текст запроса"})
+    """
+
+    hint: str
+    model_config = ConfigDict(extra="allow")
+
+
 class AvailableCommand(BaseModel):
     """Описание одной slash-команды из `available_commands_update`.
 
@@ -405,7 +491,8 @@ class AvailableCommand(BaseModel):
     """
 
     name: str
-    description: str | None = None
+    description: str
+    input: AvailableCommandInput | None = None
     model_config = ConfigDict(extra="allow")
 
 
@@ -536,7 +623,7 @@ class ToolCallContentBlock(BaseModel):
     """
 
     type: Literal["content"]
-    content: dict[str, Any]
+    content: ContentBlock
     model_config = ConfigDict(extra="allow")
 
 

@@ -3,17 +3,22 @@ from pydantic import ValidationError
 
 from acp_client.messages import (
     ACPMessage,
+    AudioContentBlock,
+    AvailableCommandInput,
     AvailableCommandsUpdate,
     ConfigOptionUpdate,
     CurrentModeUpdate,
+    ImageContentBlock,
     InitializeResult,
     JsonRpcError,
     MessageChunkUpdate,
     PlanUpdate,
     RequestPermissionRequest,
+    ResourceLinkContentBlock,
     SessionInfoUpdate,
     SessionListResult,
     SessionSetupResult,
+    TextContentBlock,
     ThoughtChunkUpdate,
     ToolCallContentBlock,
     ToolCallCreatedUpdate,
@@ -367,6 +372,61 @@ def test_parse_structured_session_update_for_message_chunk() -> None:
 
     parsed = parse_structured_session_update(notification)
     assert isinstance(parsed, MessageChunkUpdate)
+    assert isinstance(parsed.content, TextContentBlock)
+
+
+def test_parse_structured_session_update_for_non_text_content_blocks() -> None:
+    fixtures: list[tuple[dict[str, object], type[object]]] = [
+        (
+            {
+                "sessionUpdate": "agent_message_chunk",
+                "content": {
+                    "type": "image",
+                    "mimeType": "image/png",
+                    "data": "iVBORw0KGgoAAAANSUhEUg==",
+                },
+            },
+            ImageContentBlock,
+        ),
+        (
+            {
+                "sessionUpdate": "agent_message_chunk",
+                "content": {
+                    "type": "audio",
+                    "mimeType": "audio/wav",
+                    "data": "UklGRjQAAABXQVZFZm10",
+                },
+            },
+            AudioContentBlock,
+        ),
+        (
+            {
+                "sessionUpdate": "agent_message_chunk",
+                "content": {
+                    "type": "resource_link",
+                    "uri": "file:///tmp/README.md",
+                    "name": "README.md",
+                },
+            },
+            ResourceLinkContentBlock,
+        ),
+    ]
+
+    for payload, expected_content_type in fixtures:
+        notification = parse_session_update_notification(
+            {
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": {
+                    "sessionId": "sess_1",
+                    "update": payload,
+                },
+            }
+        )
+        assert notification is not None
+        parsed = parse_structured_session_update(notification)
+        assert isinstance(parsed, MessageChunkUpdate)
+        assert isinstance(parsed.content, expected_content_type)
 
 
 def test_parse_structured_session_update_for_thought_chunk() -> None:
@@ -409,7 +469,13 @@ def test_parse_structured_session_update_for_session_state_updates() -> None:
         (
             {
                 "sessionUpdate": "available_commands_update",
-                "availableCommands": [{"name": "status", "description": "show"}],
+                "availableCommands": [
+                    {
+                        "name": "status",
+                        "description": "show",
+                        "input": {"hint": "optional query"},
+                    }
+                ],
             },
             AvailableCommandsUpdate,
         ),
@@ -445,6 +511,9 @@ def test_parse_structured_session_update_for_session_state_updates() -> None:
         assert notification is not None
         parsed = parse_structured_session_update(notification)
         assert isinstance(parsed, expected_type)
+        if isinstance(parsed, AvailableCommandsUpdate):
+            assert parsed.availableCommands[0].input is not None
+            assert isinstance(parsed.availableCommands[0].input, AvailableCommandInput)
 
 
 def test_parse_structured_session_update_rejects_invalid_current_mode_shape() -> None:

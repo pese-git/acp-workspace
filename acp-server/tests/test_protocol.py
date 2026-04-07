@@ -996,6 +996,64 @@ def test_permission_reject_option_finishes_turn_with_cancelled() -> None:
     assert resolved.followup_responses[0].result == {"stopReason": "cancelled"}
 
 
+def test_late_permission_response_after_cancel_is_ignored() -> None:
+    protocol = ACPProtocol()
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    prompt_outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "/tool run"}],
+            },
+        )
+    )
+    assert prompt_outcome.response is None
+
+    permission_request = next(
+        notification
+        for notification in prompt_outcome.notifications
+        if notification.method == "session/request_permission"
+    )
+    assert permission_request.id is not None
+
+    cancel_outcome = protocol.handle(
+        ACPMessage.notification("session/cancel", {"sessionId": session_id})
+    )
+    assert len(cancel_outcome.followup_responses) == 1
+    assert cancel_outcome.followup_responses[0].result == {"stopReason": "cancelled"}
+
+    late_permission = protocol.handle_client_response(
+        ACPMessage.response(
+            permission_request.id,
+            {
+                "outcome": {
+                    "outcome": "selected",
+                    "optionId": "allow_once",
+                },
+            },
+        )
+    )
+    assert late_permission.notifications == []
+    assert late_permission.followup_responses == []
+
+    next_prompt = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "normal prompt"}],
+            },
+        )
+    )
+    assert next_prompt.response is not None
+    assert next_prompt.response.result == {"stopReason": "end_turn"}
+
+
 def test_cancel_without_active_turn_does_not_affect_next_prompt() -> None:
     protocol = ACPProtocol()
     created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
