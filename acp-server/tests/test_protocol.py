@@ -135,7 +135,7 @@ def test_prompt_with_plan_marker_emits_plan_update() -> None:
             "session/prompt",
             {
                 "sessionId": session_id,
-                "prompt": [{"type": "text", "text": "build plan [plan]"}],
+                "prompt": [{"type": "text", "text": "/plan build steps"}],
             },
         )
     )
@@ -187,6 +187,48 @@ def test_session_new_returns_modes_state() -> None:
     assert isinstance(created.response.result, dict)
     assert isinstance(created.response.result.get("modes"), dict)
     assert created.response.result["modes"]["currentModeId"] == "ask"
+
+
+def test_prompt_tool_flow_respects_negotiated_client_capabilities() -> None:
+    protocol = ACPProtocol()
+    init = protocol.handle(
+        ACPMessage.request(
+            "initialize",
+            {
+                "protocolVersion": 1,
+                "clientCapabilities": {
+                    "fs": {"readTextFile": False, "writeTextFile": False},
+                    "terminal": False,
+                },
+            },
+        )
+    )
+    assert init.response is not None
+    assert init.response.error is None
+
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "/tool run"}],
+            },
+        )
+    )
+
+    assert outcome.response is not None
+    assert outcome.response.result == {"stopReason": "end_turn"}
+    update_types = [
+        notification.params["update"]["sessionUpdate"]
+        for notification in outcome.notifications
+        if notification.params is not None
+    ]
+    assert "tool_call" not in update_types
 
 
 def test_session_list_returns_created_session() -> None:
@@ -319,7 +361,7 @@ def test_prompt_can_emit_tool_call_updates() -> None:
             "session/prompt",
             {
                 "sessionId": created_id,
-                "prompt": [{"type": "text", "text": "run [tool] for me"}],
+                "prompt": [{"type": "text", "text": "/tool run for me"}],
             },
         )
     )
@@ -347,7 +389,7 @@ def test_cancel_marks_active_tool_call_as_cancelled() -> None:
             "session/prompt",
             {
                 "sessionId": created_id,
-                "prompt": [{"type": "text", "text": "run [tool] with [tool-pending]"}],
+                "prompt": [{"type": "text", "text": "/tool-pending run"}],
             },
         )
     )
@@ -395,7 +437,7 @@ def test_deferred_prompt_can_be_completed_without_cancel() -> None:
             "session/prompt",
             {
                 "sessionId": session_id,
-                "prompt": [{"type": "text", "text": "run [tool] with [tool-pending]"}],
+                "prompt": [{"type": "text", "text": "/tool-pending run"}],
             },
         )
     )
@@ -456,7 +498,7 @@ def test_permission_selected_completes_prompt_turn() -> None:
             "session/prompt",
             {
                 "sessionId": session_id,
-                "prompt": [{"type": "text", "text": "run [tool]"}],
+                "prompt": [{"type": "text", "text": "/tool run"}],
             },
         )
     )
@@ -502,7 +544,7 @@ def test_permission_cancelled_finishes_turn_with_cancelled() -> None:
             "session/prompt",
             {
                 "sessionId": session_id,
-                "prompt": [{"type": "text", "text": "run [tool]"}],
+                "prompt": [{"type": "text", "text": "/tool run"}],
             },
         )
     )
@@ -519,6 +561,41 @@ def test_permission_cancelled_finishes_turn_with_cancelled() -> None:
         ACPMessage.response(
             permission_request.id,
             {"outcome": {"outcome": "cancelled"}},
+        )
+    )
+    assert len(resolved.followup_responses) == 1
+    assert resolved.followup_responses[0].result == {"stopReason": "cancelled"}
+
+
+def test_permission_reject_option_finishes_turn_with_cancelled() -> None:
+    protocol = ACPProtocol()
+    created = protocol.handle(ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []}))
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    prompt_outcome = protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "/tool run"}],
+            },
+        )
+    )
+    assert prompt_outcome.response is None
+
+    permission_request = next(
+        notification
+        for notification in prompt_outcome.notifications
+        if notification.method == "session/request_permission"
+    )
+    assert permission_request.id is not None
+
+    resolved = protocol.handle_client_response(
+        ACPMessage.response(
+            permission_request.id,
+            {"outcome": {"outcome": "selected", "optionId": "reject_once"}},
         )
     )
     assert len(resolved.followup_responses) == 1
@@ -608,7 +685,7 @@ def test_session_load_replays_last_plan_update() -> None:
             "session/prompt",
             {
                 "sessionId": session_id,
-                "prompt": [{"type": "text", "text": "compose [plan]"}],
+                "prompt": [{"type": "text", "text": "/plan compose"}],
             },
         )
     )
@@ -673,7 +750,7 @@ def test_session_load_replays_tool_call_state() -> None:
             "session/prompt",
             {
                 "sessionId": session_id,
-                "prompt": [{"type": "text", "text": "run [tool] with [tool-pending]"}],
+                "prompt": [{"type": "text", "text": "/tool-pending run"}],
             },
         )
     )

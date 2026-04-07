@@ -44,7 +44,10 @@ async def _ws_initialize(ws: Any) -> None:
             "method": "initialize",
             "params": {
                 "protocolVersion": 1,
-                "clientCapabilities": {},
+                "clientCapabilities": {
+                    "fs": {"readTextFile": False, "writeTextFile": False},
+                    "terminal": True,
+                },
             },
         }
     )
@@ -79,7 +82,7 @@ async def test_http_prompt_with_pending_tool_returns_end_turn() -> None:
                     "method": "session/prompt",
                     "params": {
                         "sessionId": session_id,
-                        "prompt": [{"type": "text", "text": "run [tool] with [tool-pending]"}],
+                        "prompt": [{"type": "text", "text": "/tool-pending run"}],
                     },
                 },
             )
@@ -119,7 +122,7 @@ async def test_ws_prompt_with_permission_selection_finishes_with_end_turn() -> N
                         "method": "session/prompt",
                         "params": {
                             "sessionId": session_id,
-                            "prompt": [{"type": "text", "text": "run [tool] with [tool-pending]"}],
+                            "prompt": [{"type": "text", "text": "/tool-pending run"}],
                         },
                     }
                 )
@@ -180,7 +183,7 @@ async def test_ws_cancel_finishes_deferred_prompt_with_cancelled() -> None:
                         "method": "session/prompt",
                         "params": {
                             "sessionId": session_id,
-                            "prompt": [{"type": "text", "text": "run [tool] with [tool-pending]"}],
+                            "prompt": [{"type": "text", "text": "/tool-pending run"}],
                         },
                     }
                 )

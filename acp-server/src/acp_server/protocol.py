@@ -95,6 +95,8 @@ class ActiveTurnState:
     permission_request_id: JsonRpcId | None = None
     # Связанный tool call, ожидающий решения пользователя.
     permission_tool_call_id: str | None = None
+    # Фаза жизненного цикла prompt-turn для детерминированного поведения.
+    phase: str = "running"
 
 
 @dataclass(slots=True)
@@ -111,6 +113,22 @@ class PromptDirectives:
     request_tool: bool = False
     keep_tool_pending: bool = False
     publish_plan: bool = False
+
+
+@dataclass(slots=True)
+class ClientRuntimeCapabilities:
+    """Согласованные на `initialize` возможности клиентского runtime.
+
+    Используются как feature-gate для веток, где агент ожидает клиентские
+    RPC-возможности (например, запуск инструментов через client-side runtime).
+
+    Пример использования:
+        caps = ClientRuntimeCapabilities(fs_read=False, fs_write=False, terminal=True)
+    """
+
+    fs_read: bool = False
+    fs_write: bool = False
+    terminal: bool = False
 
 
 @dataclass(slots=True)
@@ -149,6 +167,10 @@ class ACPProtocol:
         """
 
         self._sessions: dict[str, SessionState] = {}
+        # Последние capabilities, согласованные через initialize.
+        # Для in-memory demo-сервера это достаточно; по мере роста можно
+        # расширить до connection-scoped хранилища.
+        self._runtime_capabilities: ClientRuntimeCapabilities | None = None
 
     _config_specs: dict[str, dict[str, Any]] = {
         "mode": {
@@ -289,6 +311,9 @@ class ACPProtocol:
                 code=-32602,
                 message="Invalid params: clientInfo must be an object",
             )
+
+        # Сохраняем согласованные runtime-возможности клиента для feature-gate.
+        self._runtime_capabilities = self._parse_client_runtime_capabilities(client_capabilities)
 
         negotiated_version = self._supported_protocol_versions[-1]
         if (
@@ -740,6 +765,8 @@ class ACPProtocol:
         text_preview = text_blocks[0] if text_blocks else "Prompt received"
         prompt_for_title = text_preview.strip()
         directives = self._extract_prompt_directives(text_preview)
+        tool_runtime_available = self._can_run_tool_runtime()
+        should_run_tool_flow = directives.request_tool and tool_runtime_available
 
         # Все промежуточные события отправляются через `session/update`.
         notifications: list[ACPMessage] = []
@@ -795,7 +822,7 @@ class ACPProtocol:
 
         # В режиме `ask` эмулируем обязательный permission-request перед tool call.
         should_request_permission = (
-            directives.request_tool and session.config_values.get("mode", "ask") == "ask"
+            should_run_tool_flow and session.config_values.get("mode", "ask") == "ask"
         )
         if should_request_permission:
             tool_call_id = self._create_tool_call(
@@ -832,16 +859,37 @@ class ACPProtocol:
             )
             session.active_turn.permission_request_id = permission_request.id
             session.active_turn.permission_tool_call_id = tool_call_id
+            session.active_turn.phase = "waiting_permission"
             notifications.append(permission_request)
         else:
             # Демонстрационный tool-call lifecycle для совместимости с ACP-клиентами.
             tool_notifications = self._build_tool_call_updates(
                 session=session,
                 session_id=session_id,
-                prompt_requests_tool=directives.request_tool,
+                prompt_requests_tool=should_run_tool_flow,
                 leave_running=directives.keep_tool_pending,
             )
             notifications.extend(tool_notifications)
+
+            if directives.request_tool and not should_run_tool_flow:
+                notifications.append(
+                    ACPMessage.notification(
+                        "session/update",
+                        {
+                            "sessionId": session_id,
+                            "update": {
+                                "sessionUpdate": "agent_message_chunk",
+                                "content": {
+                                    "type": "text",
+                                    "text": (
+                                        "Tool runtime unavailable for this client "
+                                        "capabilities profile."
+                                    ),
+                                },
+                            },
+                        },
+                    )
+                )
 
         session.history.append({"role": "user", "content": prompt})
         session.history.append(
@@ -885,10 +933,14 @@ class ACPProtocol:
             )
         )
 
-        should_defer_completion = directives.keep_tool_pending or should_request_permission
+        should_defer_completion = (
+            directives.keep_tool_pending and should_run_tool_flow
+        ) or should_request_permission
         if should_defer_completion:
             # Для незавершенных tool-call оставляем prompt-request «в полете».
             # Финальный response будет отправлен позже (автозавершение или cancel).
+            if directives.keep_tool_pending and should_run_tool_flow:
+                session.active_turn.phase = "waiting_tool_completion"
             return ProtocolOutcome(response=None, notifications=notifications)
 
         outcome = ProtocolOutcome(
@@ -975,7 +1027,7 @@ class ACPProtocol:
         session = self._sessions.get(session_id)
         if session is None or session.active_turn is None:
             return False
-        return session.active_turn.permission_request_id is None
+        return session.active_turn.phase == "waiting_tool_completion"
 
     def handle_client_response(self, message: ACPMessage) -> ProtocolOutcome:
         """Обрабатывает входящий response от клиента для server-originated requests.
@@ -1035,7 +1087,12 @@ class ACPProtocol:
         session_id = session.session_id
         notifications: list[ACPMessage] = []
         outcome_value = self._extract_permission_outcome(result)
-        if outcome_value != "selected":
+        selected_option = self._extract_permission_option_id(result)
+        selected_option_id = selected_option if isinstance(selected_option, str) else None
+        should_allow = outcome_value == "selected" and selected_option_id is not None
+        if selected_option_id is not None:
+            should_allow = should_allow and selected_option_id.startswith("allow")
+        if not should_allow:
             self._update_tool_call_status(session, tool_call_id, "cancelled")
             notifications.append(
                 ACPMessage.notification(
@@ -1123,6 +1180,47 @@ class ACPProtocol:
             followup_responses=[completed] if completed is not None else [],
         )
 
+    def _parse_client_runtime_capabilities(
+        self,
+        capabilities: dict[str, Any],
+    ) -> ClientRuntimeCapabilities:
+        """Преобразует payload `clientCapabilities` в внутреннюю модель.
+
+        Пример использования:
+            caps = protocol._parse_client_runtime_capabilities(
+                {"fs": {"readTextFile": True}, "terminal": False},
+            )
+        """
+
+        fs_payload = capabilities.get("fs") if isinstance(capabilities, dict) else None
+        read_text = False
+        write_text = False
+        if isinstance(fs_payload, dict):
+            read_text = bool(fs_payload.get("readTextFile") is True)
+            write_text = bool(fs_payload.get("writeTextFile") is True)
+
+        terminal_enabled = bool(capabilities.get("terminal") is True)
+        return ClientRuntimeCapabilities(
+            fs_read=read_text,
+            fs_write=write_text,
+            terminal=terminal_enabled,
+        )
+
+    def _can_run_tool_runtime(self) -> bool:
+        """Проверяет, можно ли запускать tool-runtime ветки в текущем соединении.
+
+        Пример использования:
+            if protocol._can_run_tool_runtime():
+                ...
+        """
+
+        caps = self._runtime_capabilities
+        # Для прямых unit-тестов ACPProtocol без initialize сохраняем
+        # обратную совместимость (permissive behavior).
+        if caps is None:
+            return True
+        return caps.terminal or caps.fs_read or caps.fs_write
+
     def _find_session_by_permission_request_id(
         self,
         permission_request_id: JsonRpcId,
@@ -1165,6 +1263,32 @@ class ACPProtocol:
         # Legacy fallback для старых клиентов.
         if isinstance(nested_outcome, str):
             return nested_outcome
+        return None
+
+    def _extract_permission_option_id(self, result: Any) -> str | None:
+        """Извлекает `optionId` из `session/request_permission` response.
+
+        Поддерживает ACP shape (`{"outcome": {"optionId": ...}}`) и legacy
+        (`{"optionId": ...}`) формат для обратной совместимости.
+
+        Пример использования:
+            option_id = protocol._extract_permission_option_id(
+                {"outcome": {"outcome": "selected", "optionId": "allow_once"}},
+            )
+        """
+
+        if not isinstance(result, dict):
+            return None
+
+        nested_outcome = result.get("outcome")
+        if isinstance(nested_outcome, dict):
+            raw_option_id = nested_outcome.get("optionId")
+            if isinstance(raw_option_id, str):
+                return raw_option_id
+
+        raw_option_id = result.get("optionId")
+        if isinstance(raw_option_id, str):
+            return raw_option_id
         return None
 
     def _build_permission_options(self) -> list[dict[str, Any]]:
@@ -1446,9 +1570,9 @@ class ACPProtocol:
     def _extract_prompt_directives(self, text_preview: str) -> PromptDirectives:
         """Извлекает служебные флаги turn из текстового preview prompt.
 
-        В первую очередь поддерживаются slash-команды (`/plan`, `/tool`,
-        `/tool-pending`). Для обратной совместимости сохраняется fallback на
-        старые маркеры (`[plan]`, `[tool]`, `[tool-pending]`).
+        Основной путь — slash-команды (`/plan`, `/tool`, `/tool-pending`).
+        Legacy-маркеры (`[plan]`, `[tool]`, `[tool-pending]`) обрабатываются
+        только в явном mock-режиме через `/mock-markers`.
 
         Пример использования:
             directives = protocol._extract_prompt_directives("/tool /plan")
@@ -1460,11 +1584,15 @@ class ACPProtocol:
             if token.strip()
         }
 
-        has_plan_directive = "/plan" in normalized_tokens or "[plan]" in text_preview
-        has_tool_directive = "/tool" in normalized_tokens or "[tool]" in text_preview
-        has_pending_directive = (
-            "/tool-pending" in normalized_tokens or "[tool-pending]" in text_preview
-        )
+        has_plan_directive = "/plan" in normalized_tokens
+        has_tool_directive = "/tool" in normalized_tokens
+        has_pending_directive = "/tool-pending" in normalized_tokens
+
+        # Опциональный mock-режим для старых сценариев и backward-совместимости.
+        if "/mock-markers" in normalized_tokens:
+            has_plan_directive = has_plan_directive or "[plan]" in text_preview
+            has_tool_directive = has_tool_directive or "[tool]" in text_preview
+            has_pending_directive = has_pending_directive or "[tool-pending]" in text_preview
 
         return PromptDirectives(
             request_tool=has_tool_directive or has_pending_directive,
