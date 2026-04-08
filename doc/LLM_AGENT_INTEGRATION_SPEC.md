@@ -82,9 +82,14 @@ class LLMProvider(ABC):
 - Retry-логика при сбоях
 - Соблюдение rate limits
 
-### 2.3 Tool Registry
+### 2.3 Tool Call Generation & Client Delegation
 
-Централизованный реестр инструментов, доступных агенту:
+**Ключевой принцип архитектуры:**
+- **Сервер = мозг**: генерирует решения через LLM, определяет какие tool calls нужны
+- **Клиент = руки**: выполняет инструменты, имеет доступ к файловой системе и ресурсам
+- **Протокол ACP**: средство коммуникации для передачи tool calls и результатов
+
+Реестр инструментов управляет доступным набором tool definitions:
 
 ```python
 class ToolRegistry:
@@ -98,18 +103,36 @@ class ToolRegistry:
         """Получить инструменты для сессии с учетом прав."""
         pass
     
-    async def execute_tool(
+    async def send_tool_calls_to_client(
+        self,
+        session_id: str,
+        tool_calls: list[ToolCall],
+    ) -> None:
+        """Отправить tool calls клиенту через session/update."""
+        # Отправляет tool calls клиенту, который выполнит их
+        pass
+    
+    async def request_permission(
         self,
         session_id: str,
         tool_call: ToolCall,
-    ) -> ToolExecutionResult:
-        """Выполнить инструмент с обработкой разрешений."""
+        options: list[PermissionOption],
+    ) -> PermissionResponse:
+        """Запрос разрешения на выполнение tool call (если режим "ask")."""
         pass
 ```
 
+**Модель выполнения инструментов:**
+1. **Сервер генерирует tool calls** через LLM (NativeAgent или другой фреймворк)
+2. **Сервер отправляет tool calls клиенту** через протокол ACP (session/update)
+3. **Клиент выполняет инструменты** (имеет доступ к fs, terminal и т.д.)
+4. **Клиент возвращает результаты серверу** через session/update
+5. **Сервер передает результаты в LLM** для продолжения обработки
+
 **Требования:**
 - Интеграция с Permission System (session/request_permission)
-- Поддержка выполнения tool calls из LLM
+- Отправка tool calls клиенту через protocolнные сообщения
+- Ожидание результатов от клиента
 - Отслеживание статуса выполнения (pending → in_progress → completed)
 - Обработка результатов и ошибок
 
@@ -149,7 +172,8 @@ Client Request (session/prompt)
     ↓
 [1] Validate & Prepare
     - Валидация prompt содержимого
-    - Подготовка tool definitions
+    - Загрузка SessionState
+    - Подготовка tool definitions для LLM
     ↓
 [2] Initialize Turn
     - Создание ActiveTurnState
@@ -158,12 +182,15 @@ Client Request (session/prompt)
 [3] LLM Processing
     - Отправка в LLM с контекстом сессии
     - Потоковое получение ответов
+    - Генерация tool calls (если требуется)
     ↓
-[4] Tool Call Handling
+[4] Tool Call Generation & Client Delegation
     - Парсинг tool calls из LLM ответа
     - Запрос разрешений (если режим "ask")
-    - Выполнение инструментов
-    - Отправка результатов в LLM
+    - Отправка tool calls КЛИЕНТУ через session/update
+    - Ожидание результатов от клиента
+    - Получение результатов от клиента
+    - Отправка результатов в LLM для продолжения
     ↓
 [5] Finalization
     - Завершение turn с stopReason
@@ -177,7 +204,7 @@ Client Response (session/prompt result)
 
 ```mermaid
 sequenceDiagram
-    participant Client
+    participant Client as Client (руки)
     participant ACPProtocol
     participant AgentOrchestrator
     participant LLMAgent
@@ -201,12 +228,13 @@ sequenceDiagram
     
     AgentOrchestrator->>AgentOrchestrator: [2] Initialize Turn
     AgentOrchestrator->>ACPProtocol: send_update (plan)
+    ACPProtocol-->>Client: session/update (plan)
     
     AgentOrchestrator->>LLMAgent: process_prompt
     activate LLMAgent
     
     LLMAgent->>LLMAgent: [3] Prepare messages
-    LLMAgent->>LLMProvider: create_completion
+    LLMAgent->>LLMProvider: create_completion (with tools)
     activate LLMProvider
     LLMProvider-->>LLMAgent: CompletionResponse
     deactivate LLMProvider
@@ -216,20 +244,24 @@ sequenceDiagram
     AgentOrchestrator->>AgentOrchestrator: [4] Check stop_reason
     
     alt stop_reason == tool_call
-        AgentOrchestrator->>AgentOrchestrator: Parse tool calls
-        AgentOrchestrator->>PermissionsHandler: request_permission
-        activate PermissionsHandler
-        PermissionsHandler-->>AgentOrchestrator: PermissionResponse
-        deactivate PermissionsHandler
+        AgentOrchestrator->>AgentOrchestrator: Parse tool calls from LLM
         
-        AgentOrchestrator->>ToolRegistry: execute_tool
-        activate ToolRegistry
-        ToolRegistry-->>AgentOrchestrator: ToolExecutionResult
-        deactivate ToolRegistry
+        loop For each tool_call
+            AgentOrchestrator->>PermissionsHandler: request_permission
+            activate PermissionsHandler
+            PermissionsHandler-->>AgentOrchestrator: PermissionResponse
+            deactivate PermissionsHandler
+            
+            AgentOrchestrator->>ACPProtocol: send_update (tool_call)
+            ACPProtocol-->>Client: session/update (tool_call pending)
+            
+            Client->>ACPProtocol: session/update (tool_result)
+            ACPProtocol-->>AgentOrchestrator: tool_result
+        end
         
         AgentOrchestrator->>LLMAgent: continue_with_results
         activate LLMAgent
-        LLMAgent->>LLMProvider: create_completion
+        LLMAgent->>LLMProvider: create_completion (with results)
         LLMProvider-->>LLMAgent: CompletionResponse
         deactivate LLMAgent
     else stop_reason == end_turn or other
@@ -253,7 +285,80 @@ sequenceDiagram
 - Отправка промежуточных updates
 - Корректная обработка ошибок на каждом этапе
 
-### 2.6 Configuration System
+### 2.6 Режимы работы сервера
+
+Сервер поддерживает два режима работы агентов:
+
+#### Одно-агентный режим (Single-Agent Mode)
+- **Описание**: Один универсальный агент обрабатывает все запросы
+- **Компонент**: NativeAgent или адаптер фреймворка (Langchain, Langgraph)
+- **Конфигурация**: `agent_mode: "single"`
+- **Преимущества**:
+  - Простота реализации и понимания
+  - Снижение overhead коммуникации между агентами
+  - Полный контекст всей задачи в одном агенте
+- **Недостатки**:
+  - Один агент должен быть универсальным
+  - Может быть менее эффективен для сложных составных задач
+- **Сценарии использования**:
+  - Простые информационные запросы
+  - Линейные workflows
+  - Прототипирование и разработка
+
+```python
+config = {
+    "agent_mode": "single",
+    "agent_type": "native",  # или "langchain", "langgraph"
+    "llm_model": "gpt-4",
+    "llm_temperature": 0.7,
+}
+```
+
+#### Мульти-агентный режим (Multi-Agent Mode)
+- **Описание**: Несколько специализированных агентов работают согласованно под управлением оркестратора
+- **Компоненты**:
+  - MultiAgentOrchestrator (координатор)
+  - MasterAgent (разложение задач на подзадачи)
+  - SpecialistAgents (CodeAgent, FileSystemAgent, SearchAgent и т.д.)
+  - InterAgentCommunication (обмен контекстом между агентами)
+- **Конфигурация**: `agent_mode: "multi"`
+- **Преимущества**:
+  - Каждый агент специализирован на своей области
+  - Параллельное выполнение независимых подзадач
+  - Лучший баланс между эффективностью и универсальностью
+  - Возможность отдельного масштабирования каждого агента
+- **Недостатки**:
+  - Большая сложность реализации
+  - Overhead коммуникации между агентами
+  - Нужна координация и синхронизация
+- **Сценарии использования**:
+  - Сложные многошаговые задачи
+  - Работа с разными типами данных (код, файлы, информация)
+  - Production системы с высокими требованиями к качеству
+  - Необходимость параллельной обработки
+
+```python
+config = {
+    "agent_mode": "multi",
+    "master_agent": {
+        "type": "native",
+        "llm_model": "gpt-4",
+        "system_prompt": "You are a task decomposition expert...",
+    },
+    "specialist_agents": {
+        "code": {"type": "native", "llm_model": "gpt-4"},
+        "filesystem": {"type": "native", "llm_model": "gpt-3.5-turbo"},
+        "search": {"type": "native", "llm_model": "gpt-3.5-turbo"},
+    },
+}
+```
+
+**Переключение режимов:**
+- Режим выбирается при создании сессии (session/new с параметром agent_mode)
+- Режим можно изменить через session/set_config_option (перезагрузка агента)
+- Режим и конфигурация сохраняются в SessionState
+
+### 2.9 Configuration System
 
 Конфигурация агента через SessionState.config_values:
 
@@ -291,50 +396,48 @@ AGENT_CONFIG_SPECS = {
 - Валидация параметров LLM
 - Влияние на поведение агента в реальном времени
 
-### 2.7 Диаграмма компонентов системы
+### 2.8 Диаграмма компонентов системы
 
 **Архитектурные компоненты и их взаимосвязи:**
 
 ```mermaid
 graph TB
-    subgraph Transport["Транспортный слой"]
-        HTTP["HTTP/WebSocket<br/>Server"]
-        CLIENT["Client"]
+    subgraph ClientSide["Сторона клиента (руки)"]
+        CLIENT["Client<br/>имеет доступ к fs,<br/>terminal и т.д."]
     end
     
-    subgraph Protocol["Слой протокола ACP"]
-        ACPCORE["ACPProtocol<br/>Core"]
-        PROMPTS["Session/Prompt<br/>Handler"]
-    end
-    
-    subgraph Agent["Слой агентов и орхестрации"]
-        ORCH["AgentOrchestrator<br/>Управление prompt-turn"]
-        LLMAGENT["LLMAgent<br/>Interface"]
-        NATIVEAGENT["NativeAgent<br/>Реализация"]
-    end
-    
-    subgraph LLM["Слой провайдеров LLM"]
-        PROVIDER["LLMProvider<br/>Interface"]
-        OPENAI["OpenAILLMProvider"]
-        CUSTOM["Custom Providers"]
-    end
-    
-    subgraph Tools["Слой управления инструментами"]
-        REGISTRY["ToolRegistry<br/>Реестр инструментов"]
-        EXECUTOR["ToolExecutor<br/>Выполнитель"]
-        PERMS["PermissionsHandler<br/>Разрешения"]
-    end
-    
-    subgraph Implementations["Встроенные инструменты"]
-        FS["Файловая система<br/>fs:*"]
-        TERM["Терминал<br/>terminal:*"]
-        SEARCH["Поиск<br/>search:*"]
-    end
-    
-    subgraph State["Управление состоянием"]
-        SESSION["SessionStorage<br/>Interface"]
-        MEMORY["InMemoryStorage"]
-        JSON["JsonFileStorage"]
+    subgraph ServerSide["Сторона сервера (мозг)"]
+        subgraph Transport["Транспортный слой"]
+            HTTP["HTTP/WebSocket<br/>Server"]
+        end
+        
+        subgraph Protocol["Слой протокола ACP"]
+            ACPCORE["ACPProtocol<br/>Core"]
+            PROMPTS["Session/Prompt<br/>Handler"]
+        end
+        
+        subgraph Agent["Слой агентов и орхестрации"]
+            ORCH["AgentOrchestrator<br/>Управление prompt-turn"]
+            LLMAGENT["LLMAgent<br/>Interface"]
+            NATIVEAGENT["NativeAgent<br/>Реализация"]
+        end
+        
+        subgraph LLM["Слой провайдеров LLM"]
+            PROVIDER["LLMProvider<br/>Interface"]
+            OPENAI["OpenAILLMProvider"]
+            CUSTOM["Custom Providers"]
+        end
+        
+        subgraph Tools["Слой управления инструментами"]
+            REGISTRY["ToolRegistry<br/>Реестр и маршрутизация"]
+            PERMS["PermissionsHandler<br/>Управление разрешениями"]
+        end
+        
+        subgraph State["Управление состоянием"]
+            SESSION["SessionStorage<br/>Interface"]
+            MEMORY["InMemoryStorage"]
+            JSON["JsonFileStorage"]
+        end
     end
     
     CLIENT -->|WebSocket| HTTP
@@ -348,25 +451,25 @@ graph TB
     PROVIDER -->|реализуется| OPENAI
     PROVIDER -->|реализуется| CUSTOM
     
-    ORCH -->|запрашивает инструменты| REGISTRY
-    REGISTRY -->|выполняет| EXECUTOR
-    REGISTRY -->|проверяет разрешения| PERMS
+    ORCH -->|получает список инструментов| REGISTRY
+    ORCH -->|отправляет tool calls клиенту| CLIENT
+    CLIENT -->|возвращает результаты| ORCH
     
-    EXECUTOR -->|выполняет| FS
-    EXECUTOR -->|выполняет| TERM
-    EXECUTOR -->|выполняет| SEARCH
+    ORCH -->|запрашивает разрешения| PERMS
+    PERMS -->|запрашивает у пользователя| CLIENT
+    CLIENT -->|возвращает ответ| PERMS
     
     ORCH -->|сохраняет состояние| SESSION
     SESSION -->|реализуется| MEMORY
     SESSION -->|реализуется| JSON
     
-    ORCH -->|получает параметры| PERMS
-    
     style ACPCORE fill:#e1f5ff
     style ORCH fill:#f3e5f5
     style LLMAGENT fill:#fff3e0
     style REGISTRY fill:#f1f8e9
-    style EXECUTOR fill:#f1f8e9
+    style PERMS fill:#f1f8e9
+    style CLIENT fill:#fff9c4
+    style HTTP fill:#e1f5ff
 ```
 
 ## 3. Нефункциональные требования
