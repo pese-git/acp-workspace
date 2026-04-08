@@ -173,6 +173,80 @@ Client Request (session/prompt)
 Client Response (session/prompt result)
 ```
 
+**Диаграмма последовательности Execution Pipeline:**
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant ACPProtocol
+    participant AgentOrchestrator
+    participant LLMAgent
+    participant LLMProvider
+    participant ToolRegistry
+    participant PermissionsHandler
+    participant Storage
+    
+    Client->>ACPProtocol: session/prompt
+    activate ACPProtocol
+    
+    ACPProtocol->>AgentOrchestrator: execute_prompt_turn
+    activate AgentOrchestrator
+    
+    AgentOrchestrator->>AgentOrchestrator: [1] Validate & Prepare
+    AgentOrchestrator->>Storage: load_session
+    Storage-->>AgentOrchestrator: SessionState
+    
+    AgentOrchestrator->>ToolRegistry: get_tools_for_session
+    ToolRegistry-->>AgentOrchestrator: tools list
+    
+    AgentOrchestrator->>AgentOrchestrator: [2] Initialize Turn
+    AgentOrchestrator->>ACPProtocol: send_update (plan)
+    
+    AgentOrchestrator->>LLMAgent: process_prompt
+    activate LLMAgent
+    
+    LLMAgent->>LLMAgent: [3] Prepare messages
+    LLMAgent->>LLMProvider: create_completion
+    activate LLMProvider
+    LLMProvider-->>LLMAgent: CompletionResponse
+    deactivate LLMProvider
+    
+    deactivate LLMAgent
+    
+    AgentOrchestrator->>AgentOrchestrator: [4] Check stop_reason
+    
+    alt stop_reason == tool_call
+        AgentOrchestrator->>AgentOrchestrator: Parse tool calls
+        AgentOrchestrator->>PermissionsHandler: request_permission
+        activate PermissionsHandler
+        PermissionsHandler-->>AgentOrchestrator: PermissionResponse
+        deactivate PermissionsHandler
+        
+        AgentOrchestrator->>ToolRegistry: execute_tool
+        activate ToolRegistry
+        ToolRegistry-->>AgentOrchestrator: ToolExecutionResult
+        deactivate ToolRegistry
+        
+        AgentOrchestrator->>LLMAgent: continue_with_results
+        activate LLMAgent
+        LLMAgent->>LLMProvider: create_completion
+        LLMProvider-->>LLMAgent: CompletionResponse
+        deactivate LLMAgent
+    else stop_reason == end_turn or other
+        AgentOrchestrator->>AgentOrchestrator: Prepare final response
+    end
+    
+    AgentOrchestrator->>AgentOrchestrator: [5] Finalization
+    AgentOrchestrator->>Storage: update_session
+    Storage-->>AgentOrchestrator: OK
+    
+    AgentOrchestrator-->>ACPProtocol: PromptTurnResult
+    deactivate AgentOrchestrator
+    
+    ACPProtocol-->>Client: session/prompt result
+    deactivate ACPProtocol
+```
+
 **Требования:**
 - Поддержка deferred responses (WS)
 - Обработка отмены (session/cancel)
@@ -216,6 +290,84 @@ AGENT_CONFIG_SPECS = {
 - Динамическое изменение конфигурации через session/set_config_option
 - Валидация параметров LLM
 - Влияние на поведение агента в реальном времени
+
+### 2.7 Диаграмма компонентов системы
+
+**Архитектурные компоненты и их взаимосвязи:**
+
+```mermaid
+graph TB
+    subgraph Transport["Транспортный слой"]
+        HTTP["HTTP/WebSocket<br/>Server"]
+        CLIENT["Client"]
+    end
+    
+    subgraph Protocol["Слой протокола ACP"]
+        ACPCORE["ACPProtocol<br/>Core"]
+        PROMPTS["Session/Prompt<br/>Handler"]
+    end
+    
+    subgraph Agent["Слой агентов и орхестрации"]
+        ORCH["AgentOrchestrator<br/>Управление prompt-turn"]
+        LLMAGENT["LLMAgent<br/>Interface"]
+        NATIVEAGENT["NativeAgent<br/>Реализация"]
+    end
+    
+    subgraph LLM["Слой провайдеров LLM"]
+        PROVIDER["LLMProvider<br/>Interface"]
+        OPENAI["OpenAILLMProvider"]
+        CUSTOM["Custom Providers"]
+    end
+    
+    subgraph Tools["Слой управления инструментами"]
+        REGISTRY["ToolRegistry<br/>Реестр инструментов"]
+        EXECUTOR["ToolExecutor<br/>Выполнитель"]
+        PERMS["PermissionsHandler<br/>Разрешения"]
+    end
+    
+    subgraph Implementations["Встроенные инструменты"]
+        FS["Файловая система<br/>fs:*"]
+        TERM["Терминал<br/>terminal:*"]
+        SEARCH["Поиск<br/>search:*"]
+    end
+    
+    subgraph State["Управление состоянием"]
+        SESSION["SessionStorage<br/>Interface"]
+        MEMORY["InMemoryStorage"]
+        JSON["JsonFileStorage"]
+    end
+    
+    CLIENT -->|WebSocket| HTTP
+    HTTP --> ACPCORE
+    ACPCORE --> PROMPTS
+    PROMPTS --> ORCH
+    
+    ORCH -->|управляет| LLMAGENT
+    LLMAGENT -->|реализуется| NATIVEAGENT
+    NATIVEAGENT -->|использует| PROVIDER
+    PROVIDER -->|реализуется| OPENAI
+    PROVIDER -->|реализуется| CUSTOM
+    
+    ORCH -->|запрашивает инструменты| REGISTRY
+    REGISTRY -->|выполняет| EXECUTOR
+    REGISTRY -->|проверяет разрешения| PERMS
+    
+    EXECUTOR -->|выполняет| FS
+    EXECUTOR -->|выполняет| TERM
+    EXECUTOR -->|выполняет| SEARCH
+    
+    ORCH -->|сохраняет состояние| SESSION
+    SESSION -->|реализуется| MEMORY
+    SESSION -->|реализуется| JSON
+    
+    ORCH -->|получает параметры| PERMS
+    
+    style ACPCORE fill:#e1f5ff
+    style ORCH fill:#f3e5f5
+    style LLMAGENT fill:#fff3e0
+    style REGISTRY fill:#f1f8e9
+    style EXECUTOR fill:#f1f8e9
+```
 
 ## 3. Нефункциональные требования
 
