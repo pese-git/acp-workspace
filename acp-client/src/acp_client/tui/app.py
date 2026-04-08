@@ -24,6 +24,8 @@ from acp_client.messages import (
 
 from .components import (
     ChatView,
+    FileTree,
+    FileViewerModal,
     FooterBar,
     HeaderBar,
     PermissionModal,
@@ -34,6 +36,7 @@ from .components import (
 )
 from .managers import (
     ACPConnectionManager,
+    LocalFileSystemManager,
     SessionManager,
     TUIStateSnapshot,
     UIStateStore,
@@ -45,6 +48,7 @@ HELP_FOOTER_DETAIL = (
     "Help | Ctrl+S/B sessions | Tab cycle focus | Ctrl+N new | Ctrl+J/K switch | "
     "Ctrl+L clear | Ctrl+R retry | Ctrl+C cancel | Ctrl+Q quit"
 )
+FILE_VIEWER_LINE_LIMIT = 400
 
 
 class ConnectionState(StrEnum):
@@ -157,6 +161,7 @@ class ACPClientApp(App[None]):
             on_reconnect_recovered=self._on_reconnect_recovered,
         )
         self._sessions = SessionManager(self._connection)
+        self._filesystem = LocalFileSystemManager(on_file_written=self._on_file_written)
         self._updates = UpdateMessageHandler(
             on_agent_chunk=self._on_agent_chunk,
             on_user_chunk=self._on_user_chunk,
@@ -174,7 +179,9 @@ class ACPClientApp(App[None]):
 
         yield HeaderBar()
         with Horizontal(id="body"):
-            yield Sidebar()
+            with Vertical(id="sidebar-column"):
+                yield Sidebar()
+                yield FileTree(root_path=self._sessions.active_cwd)
             with Vertical(id="main-column"):
                 yield ChatView()
                 yield PlanPanel()
@@ -199,6 +206,7 @@ class ACPClientApp(App[None]):
 
         chat = self.query_one(ChatView)
         sidebar = self.query_one(Sidebar)
+        file_tree = self.query_one(FileTree)
         tools = self.query_one(ToolPanel)
         plans = self.query_one(PlanPanel)
         try:
@@ -214,6 +222,7 @@ class ACPClientApp(App[None]):
             prompt_input = self.query_one(PromptInput)
             prompt_input.set_active_session(self._sessions.active_session_id)
             sidebar.set_sessions(self._sessions.sessions, self._sessions.active_session_id)
+            file_tree.set_root_path(self._sessions.active_cwd)
             tools.reset()
             plans.reset()
             chat.clear_messages()
@@ -275,6 +284,8 @@ class ACPClientApp(App[None]):
                 text,
                 self._updates.handle,
                 self._on_permission_request,
+                self._on_fs_read,
+                self._on_fs_write,
             )
             chat.finish_agent_message()
             self._clear_failed_operations()
@@ -302,12 +313,14 @@ class ACPClientApp(App[None]):
         """Создает новую сессию и обновляет sidebar состояние."""
 
         sidebar = self.query_one(Sidebar)
+        file_tree = self.query_one(FileTree)
         chat = self.query_one(ChatView)
         tools = self.query_one(ToolPanel)
         plans = self.query_one(PlanPanel)
         try:
             new_session_id = await self._sessions.create_and_activate_session(str(Path.cwd()))
             sidebar.set_sessions(self._sessions.sessions, self._sessions.active_session_id)
+            file_tree.set_root_path(self._sessions.active_cwd)
             self.query_one(PromptInput).set_active_session(self._sessions.active_session_id)
             self.query_one(PromptInput).text = ""
             tools.reset()
@@ -439,6 +452,7 @@ class ACPClientApp(App[None]):
         """Переключает активную сессию по направлению и отражает это в UI."""
 
         sidebar = self.query_one(Sidebar)
+        file_tree = self.query_one(FileTree)
         chat = self.query_one(ChatView)
         tools = self.query_one(ToolPanel)
         plans = self.query_one(PlanPanel)
@@ -449,6 +463,7 @@ class ACPClientApp(App[None]):
             else:
                 switched = await self._sessions.activate_previous_session()
             sidebar.set_sessions(self._sessions.sessions, self._sessions.active_session_id)
+            file_tree.set_root_path(self._sessions.active_cwd)
             if switched is None:
                 self._set_connection_state(ConnectionState.CONNECTED, detail="No sessions")
                 return
@@ -483,16 +498,38 @@ class ACPClientApp(App[None]):
 
         await self._activate_session_by_id(message.session_id)
 
+    def on_file_tree_file_open_requested(self, message: FileTree.FileOpenRequested) -> None:
+        """Открывает модальное окно просмотра файла по выбору в дереве."""
+
+        target_path = message.path
+        if not target_path.is_absolute():
+            file_tree = self.query_one(FileTree)
+            target_path = (file_tree.root_path / target_path).resolve()
+
+        try:
+            content = self._filesystem.read_file(
+                str(target_path),
+                line=1,
+                limit=FILE_VIEWER_LINE_LIMIT,
+            )
+        except Exception as exc:
+            self.query_one(ChatView).add_system_message(f"Ошибка чтения файла: {exc}")
+            return
+
+        self.push_screen(FileViewerModal(file_path=str(target_path), content=content))
+
     async def _activate_session_by_id(self, session_id: str) -> None:
         """Активирует указанную сессию и синхронизирует все панели интерфейса."""
 
         sidebar = self.query_one(Sidebar)
+        file_tree = self.query_one(FileTree)
         chat = self.query_one(ChatView)
         tools = self.query_one(ToolPanel)
         plans = self.query_one(PlanPanel)
         try:
             await self._sessions.activate_session(session_id)
             sidebar.set_sessions(self._sessions.sessions, self._sessions.active_session_id)
+            file_tree.set_root_path(self._sessions.active_cwd)
             self.query_one(PromptInput).set_active_session(self._sessions.active_session_id)
             self.query_one(PromptInput).focus()
             self.query_one(PromptInput).text = ""
@@ -538,6 +575,21 @@ class ACPClientApp(App[None]):
 
         self.query_one(HeaderBar).set_status(state.value)
         self.query_one(FooterBar).set_status(format_footer_status(state=state, detail=detail))
+
+    def _on_fs_read(self, path: str) -> str:
+        """Обрабатывает server-originated fs/read_text_file через локальный менеджер."""
+
+        return self._filesystem.read_file(path)
+
+    def _on_fs_write(self, path: str, content: str) -> None:
+        """Обрабатывает server-originated fs/write_text_file через локальный менеджер."""
+
+        self._filesystem.write_file(path, content)
+
+    def _on_file_written(self, _path: Path) -> None:
+        """Обновляет FileTree после записи файла агентом."""
+
+        self.query_one(FileTree).refresh_tree()
 
     def _remember_failed_operation(
         self,

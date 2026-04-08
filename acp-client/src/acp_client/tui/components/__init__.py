@@ -1,6 +1,8 @@
 """Компоненты пользовательского интерфейса TUI."""
 
 from .chat_view import ChatView
+from .file_tree import FileTree
+from .file_viewer import FileViewerModal
 from .footer import FooterBar
 from .header import HeaderBar
 from .permission_modal import PermissionModal
@@ -13,6 +15,8 @@ __all__ = [
     "HeaderBar",
     "Sidebar",
     "ChatView",
+    "FileTree",
+    "FileViewerModal",
     "PromptInput",
     "FooterBar",
     "PlanPanel",

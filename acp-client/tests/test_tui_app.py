@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 import pytest
 
 from acp_client.tui.app import (
+    FILE_VIEWER_LINE_LIMIT,
     HELP_FOOTER_DETAIL,
     READY_FOOTER_DETAIL,
     ACPClientApp,
@@ -17,7 +19,7 @@ from acp_client.tui.app import (
     format_offline_footer_detail,
     format_retry_footer_error,
 )
-from acp_client.tui.components import ChatView, PlanPanel, PromptInput, Sidebar, ToolPanel
+from acp_client.tui.components import ChatView, FileTree, PlanPanel, PromptInput, Sidebar, ToolPanel
 
 
 class _FakeChatView:
@@ -79,6 +81,18 @@ class _FakeToolPanel:
         """Сохраняет факт применения update в тесте."""
 
         self.updates_count += 1
+
+
+class _FakeFileTree:
+    """Минимальный double FileTree для тестов file-system сценариев."""
+
+    def __init__(self) -> None:
+        self.refreshed = False
+
+    def refresh_tree(self) -> None:
+        """Отмечает факт обновления дерева файлов."""
+
+        self.refreshed = True
 
 
 class _FakePlanPanel:
@@ -460,6 +474,8 @@ async def test_offline_prompt_blocked_then_reconnect_then_retry_success(
         text: str,
         _on_update: object,
         _on_permission: object,
+        _on_fs_read: object,
+        _on_fs_write: object,
     ) -> None:
         sent_prompts.append(text)
 
@@ -530,6 +546,8 @@ async def test_offline_prompt_blocked_then_reconnect_retry_failure_returns_to_de
         text: str,
         _on_update: object,
         _on_permission: object,
+        _on_fs_read: object,
+        _on_fs_write: object,
     ) -> None:
         if text != "retry me":
             msg = f"Unexpected prompt: {text}"
@@ -609,6 +627,8 @@ async def test_offline_prompt_blocked_then_retry_loses_connection_returns_offlin
         text: str,
         _on_update: object,
         _on_permission: object,
+        _on_fs_read: object,
+        _on_fs_write: object,
     ) -> None:
         nonlocal connection_ready
         if text != "retry me":
@@ -691,6 +711,8 @@ async def test_multiple_offline_prompt_blocks_retry_latest_prompt_after_reconnec
         text: str,
         _on_update: object,
         _on_permission: object,
+        _on_fs_read: object,
+        _on_fs_write: object,
     ) -> None:
         sent_prompts.append(text)
 
@@ -816,3 +838,45 @@ async def test_cancel_prompt_failure_is_queued_for_retry(
         (ConnectionState.DEGRADED, "Error cancelling prompt | cancel failed"),
     ]
     assert chat.system_messages == ["Ошибка отмены prompt: cancel failed"]
+
+
+def test_on_file_written_refreshes_file_tree(monkeypatch: pytest.MonkeyPatch) -> None:
+    app = ACPClientApp(host="127.0.0.1", port=8765)
+    tree = _FakeFileTree()
+
+    def _query_one(selector: object) -> _FakeFileTree:
+        if selector is not FileTree:
+            msg = f"Unexpected selector: {selector}"
+            raise AssertionError(msg)
+        return tree
+
+    monkeypatch.setattr(app, "query_one", _query_one)
+
+    app._on_file_written(Path("/tmp/example.txt"))  # noqa: SLF001
+
+    assert tree.refreshed is True
+
+
+def test_file_tree_open_request_reads_file_and_opens_viewer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = ACPClientApp(host="127.0.0.1", port=8765)
+    pushed_screens: list[object] = []
+    read_calls: list[tuple[str, int, int]] = []
+
+    def _read_file(path: str, line: int | None = None, limit: int | None = None) -> str:
+        read_calls.append((path, line or 0, limit or 0))
+        return "print('ok')\n"
+
+    def _push_screen(screen: object) -> None:
+        pushed_screens.append(screen)
+
+    monkeypatch.setattr(app._filesystem, "read_file", _read_file)
+    monkeypatch.setattr(app, "push_screen", _push_screen)
+
+    from acp_client.tui.components.file_tree import FileTree as FileTreeWidget
+
+    app.on_file_tree_file_open_requested(FileTreeWidget.FileOpenRequested(Path("/tmp/demo.py")))
+
+    assert read_calls == [("/tmp/demo.py", 1, FILE_VIEWER_LINE_LIMIT)]
+    assert len(pushed_screens) == 1

@@ -38,6 +38,8 @@ class SessionConnection(Protocol):
         text: str,
         on_update: Callable[[dict[str, Any]], None] | None,
         on_permission: Callable[[dict[str, Any]], str | None | Awaitable[str | None]] | None,
+        on_fs_read: Callable[[str], str] | None,
+        on_fs_write: Callable[[str, str], None] | None,
     ) -> Any:
         """Отправляет prompt в активную сессию."""
 
@@ -166,6 +168,8 @@ class SessionManager:
         text: str,
         on_update: Callable[[dict[str, Any]], None],
         on_permission: Callable[[dict[str, Any]], str | None | Awaitable[str | None]] | None,
+        on_fs_read: Callable[[str], str] | None = None,
+        on_fs_write: Callable[[str, str], None] | None = None,
     ) -> None:
         """Отправляет prompt в активную сессию и прокидывает update callback."""
 
@@ -175,6 +179,8 @@ class SessionManager:
             text=text,
             on_update=on_update,
             on_permission=on_permission,
+            on_fs_read=on_fs_read,
+            on_fs_write=on_fs_write,
         )
 
     async def cancel(self) -> None:

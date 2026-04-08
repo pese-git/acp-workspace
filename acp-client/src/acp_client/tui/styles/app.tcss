@@ -15,15 +15,26 @@ Screen {
     height: 1fr;
 }
 
+#sidebar-column {
+    width: 30;
+}
+
 #main-column {
     width: 3fr;
 }
 
 #sidebar {
-    width: 30;
+    height: 1fr;
     background: #ebeff7;
     border: round #6d7f9a;
     padding: 1;
+}
+
+#file-tree {
+    height: 1fr;
+    background: #f4f7fc;
+    border: round #6d7f9a;
+    padding: 0 1;
 }
 
 #chat-view {
@@ -75,4 +86,25 @@ Screen {
 
 #permission-title {
     margin: 0 0 1 0;
+}
+
+#file-viewer-modal {
+    width: 90;
+    max-width: 95%;
+    height: 80%;
+    border: round #2f4a75;
+    background: #f6f9ff;
+    padding: 1;
+}
+
+#file-viewer-title {
+    margin: 0 0 1 0;
+}
+
+#file-viewer-content {
+    height: 1fr;
+    overflow: auto;
+    background: #ffffff;
+    border: round #6d7f9a;
+    padding: 0 1;
 }

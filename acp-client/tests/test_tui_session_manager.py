@@ -60,6 +60,8 @@ class FakeConnection:
         text: str,
         on_update: Any,
         on_permission: Any,
+        on_fs_read: Any = None,
+        on_fs_write: Any = None,
     ) -> None:
         self.prompt_calls.append((session_id, text))
         on_update(
@@ -120,6 +122,8 @@ class FakeConnectionWithExistingSession:
         text: str,
         on_update: Any,
         on_permission: Any,
+        on_fs_read: Any = None,
+        on_fs_write: Any = None,
     ) -> None:
         return None
 

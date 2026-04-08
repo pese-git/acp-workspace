@@ -23,6 +23,8 @@ from acp_client.messages import (
 from acp_client.transport import ACPClientWSSession
 
 type PermissionHandler = Callable[[dict[str, Any]], str | None | Awaitable[str | None]]
+type FsReadHandler = Callable[[str], str]
+type FsWriteHandler = Callable[[str, str], None]
 type ReconnectEventHandler = Callable[[str], None]
 
 
@@ -64,6 +66,8 @@ class ACPConnectionManager:
         params: dict[str, Any] | None = None,
         on_update: Callable[[dict[str, Any]], None] | None = None,
         on_permission: PermissionHandler | None = None,
+        on_fs_read: FsReadHandler | None = None,
+        on_fs_write: FsWriteHandler | None = None,
     ) -> Any:
         """Отправляет ACP-запрос через persistent WS с одним retry после reconnect."""
 
@@ -75,6 +79,8 @@ class ACPConnectionManager:
                     params=params,
                     on_update=on_update,
                     on_permission=on_permission,
+                    on_fs_read=on_fs_read,
+                    on_fs_write=on_fs_write,
                 )
                 if attempt > 0 and self._on_reconnect_recovered is not None:
                     self._on_reconnect_recovered(method)
@@ -128,7 +134,7 @@ class ACPConnectionManager:
             params={
                 "protocolVersion": 1,
                 "clientCapabilities": {
-                    "fs": {"readTextFile": False, "writeTextFile": False},
+                    "fs": {"readTextFile": True, "writeTextFile": True},
                     "terminal": False,
                 },
                 "clientInfo": {
@@ -207,6 +213,8 @@ class ACPConnectionManager:
         text: str,
         on_update: Callable[[dict[str, Any]], None] | None,
         on_permission: PermissionHandler | None = None,
+        on_fs_read: FsReadHandler | None = None,
+        on_fs_write: FsWriteHandler | None = None,
     ) -> PromptResult:
         """Отправляет текстовый prompt в активную сессию."""
 
@@ -219,6 +227,8 @@ class ACPConnectionManager:
             },
             on_update=on_update,
             on_permission=on_permission,
+            on_fs_read=on_fs_read,
+            on_fs_write=on_fs_write,
         )
         return parse_prompt_result(response)
 
