@@ -60,9 +60,12 @@ class LocalTerminalManager:
 
         try:
             chunk = stream.read()
-        except BlockingIOError:
+        except (BlockingIOError, ValueError, TypeError):
+            # BlockingIOError: неблокирующее чтение не имеет данных
+            # ValueError: поток закрыт
+            # TypeError: проблема с кодированием при завершенном процессе
             chunk = ""
-        if not isinstance(chunk, str):
+        if chunk is None or not isinstance(chunk, str):
             chunk = ""
         if chunk:
             state.output_buffer += chunk
