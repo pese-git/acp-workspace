@@ -17,7 +17,7 @@ from acp_client.tui.app import (
     format_offline_footer_detail,
     format_retry_footer_error,
 )
-from acp_client.tui.components import ChatView, PromptInput, Sidebar
+from acp_client.tui.components import ChatView, PlanPanel, PromptInput, Sidebar, ToolPanel
 
 
 class _FakeChatView:
@@ -67,6 +67,31 @@ class _FakeSidebar:
         """Отмечает перевод фокуса на sidebar."""
 
         self.focused = True
+
+
+class _FakeToolPanel:
+    """Минимальный double tool panel для replay-тестов."""
+
+    def __init__(self) -> None:
+        self.updates_count = 0
+
+    def apply_update(self, _update: object) -> None:
+        """Сохраняет факт применения update в тесте."""
+
+        self.updates_count += 1
+
+
+class _FakePlanPanel:
+    """Минимальный double plan panel для replay-тестов."""
+
+    def __init__(self) -> None:
+        self.entries_count = 0
+
+    def apply_update(self, update: object) -> None:
+        """Сохраняет размер snapshot плана из update объекта."""
+
+        entries = getattr(update, "entries", [])
+        self.entries_count = len(entries)
 
 
 def test_format_footer_error_extracts_jsonrpc_code_and_reason() -> None:
@@ -294,6 +319,54 @@ def test_open_help_adds_system_message_and_help_status(monkeypatch: pytest.Monke
     assert len(chat.system_messages) == 1
     assert "Горячие клавиши:" in chat.system_messages[0]
     assert transitions == [(ConnectionState.CONNECTED, HELP_FOOTER_DETAIL)]
+
+
+def test_render_replay_updates_routes_plan_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
+    app = ACPClientApp(host="127.0.0.1", port=8765)
+    chat = _FakeChatView()
+    tools = _FakeToolPanel()
+    plans = _FakePlanPanel()
+
+    def _query_one(selector: object) -> object:
+        if selector is ChatView:
+            return chat
+        if selector is ToolPanel:
+            return tools
+        if selector is PlanPanel:
+            return plans
+        msg = f"Unexpected selector: {selector}"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(app, "query_one", _query_one)
+
+    from acp_client.messages import SessionUpdateNotification
+
+    replay_updates = [
+        SessionUpdateNotification.model_validate(
+            {
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": {
+                    "sessionId": "sess_1",
+                    "update": {
+                        "sessionUpdate": "plan",
+                        "entries": [
+                            {"content": "Шаг 1", "priority": "high", "status": "completed"},
+                            {
+                                "content": "Шаг 2",
+                                "priority": "medium",
+                                "status": "in_progress",
+                            },
+                        ],
+                    },
+                },
+            }
+        )
+    ]
+
+    app._render_replay_updates(replay_updates)  # noqa: SLF001
+
+    assert plans.entries_count == 2
 
 
 def test_reconnect_callbacks_emit_runtime_state_transitions(

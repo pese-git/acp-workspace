@@ -13,9 +13,11 @@ from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 
 from acp_client.messages import (
+    PlanUpdate,
     RequestPermissionRequest,
     SessionUpdateNotification,
     ToolCallUpdate,
+    parse_plan_update,
     parse_request_permission_request,
     parse_tool_call_update,
 )
@@ -25,6 +27,7 @@ from .components import (
     FooterBar,
     HeaderBar,
     PermissionModal,
+    PlanPanel,
     PromptInput,
     Sidebar,
     ToolPanel,
@@ -158,6 +161,7 @@ class ACPClientApp(App[None]):
             on_agent_chunk=self._on_agent_chunk,
             on_user_chunk=self._on_user_chunk,
             on_tool_update=self._on_tool_update,
+            on_plan_update=self._on_plan_update,
         )
         self._failed_operations: list[FailedOperation] = []
         self._focus_order: tuple[type[Sidebar] | type[PromptInput], ...] = (Sidebar, PromptInput)
@@ -171,7 +175,9 @@ class ACPClientApp(App[None]):
         yield HeaderBar()
         with Horizontal(id="body"):
             yield Sidebar()
-            yield ChatView()
+            with Vertical(id="main-column"):
+                yield ChatView()
+                yield PlanPanel()
             yield ToolPanel()
         with Vertical(id="bottom"):
             yield PromptInput()
@@ -194,6 +200,7 @@ class ACPClientApp(App[None]):
         chat = self.query_one(ChatView)
         sidebar = self.query_one(Sidebar)
         tools = self.query_one(ToolPanel)
+        plans = self.query_one(PlanPanel)
         try:
             self._set_connection_state(
                 ConnectionState.RECONNECTING,
@@ -208,6 +215,7 @@ class ACPClientApp(App[None]):
             prompt_input.set_active_session(self._sessions.active_session_id)
             sidebar.set_sessions(self._sessions.sessions, self._sessions.active_session_id)
             tools.reset()
+            plans.reset()
             chat.clear_messages()
             self._render_replay_updates(self._sessions.last_replay_updates)
             if (
@@ -296,12 +304,14 @@ class ACPClientApp(App[None]):
         sidebar = self.query_one(Sidebar)
         chat = self.query_one(ChatView)
         tools = self.query_one(ToolPanel)
+        plans = self.query_one(PlanPanel)
         try:
             new_session_id = await self._sessions.create_and_activate_session(str(Path.cwd()))
             sidebar.set_sessions(self._sessions.sessions, self._sessions.active_session_id)
             self.query_one(PromptInput).set_active_session(self._sessions.active_session_id)
             self.query_one(PromptInput).text = ""
             tools.reset()
+            plans.reset()
             chat.clear_messages()
             self._clear_failed_operations()
             self._persist_ui_state()
@@ -420,12 +430,18 @@ class ACPClientApp(App[None]):
 
         self.query_one(ToolPanel).apply_update(update)
 
+    def _on_plan_update(self, update: PlanUpdate) -> None:
+        """Получает snapshot плана и обновляет панель плана."""
+
+        self.query_one(PlanPanel).apply_update(update)
+
     async def _switch_session(self, *, direction: str) -> None:
         """Переключает активную сессию по направлению и отражает это в UI."""
 
         sidebar = self.query_one(Sidebar)
         chat = self.query_one(ChatView)
         tools = self.query_one(ToolPanel)
+        plans = self.query_one(PlanPanel)
         try:
             await self._sessions.refresh_sessions()
             if direction == "next":
@@ -437,6 +453,7 @@ class ACPClientApp(App[None]):
                 self._set_connection_state(ConnectionState.CONNECTED, detail="No sessions")
                 return
             tools.reset()
+            plans.reset()
             chat.clear_messages()
             self._render_replay_updates(self._sessions.last_replay_updates)
             self.query_one(PromptInput).set_active_session(self._sessions.active_session_id)
@@ -472,6 +489,7 @@ class ACPClientApp(App[None]):
         sidebar = self.query_one(Sidebar)
         chat = self.query_one(ChatView)
         tools = self.query_one(ToolPanel)
+        plans = self.query_one(PlanPanel)
         try:
             await self._sessions.activate_session(session_id)
             sidebar.set_sessions(self._sessions.sessions, self._sessions.active_session_id)
@@ -479,6 +497,7 @@ class ACPClientApp(App[None]):
             self.query_one(PromptInput).focus()
             self.query_one(PromptInput).text = ""
             tools.reset()
+            plans.reset()
             chat.clear_messages()
             self._render_replay_updates(self._sessions.last_replay_updates)
             self._set_connection_state(
@@ -581,6 +600,10 @@ class ACPClientApp(App[None]):
             tool_update = parse_tool_call_update(update)
             if tool_update is not None:
                 self.query_one(ToolPanel).apply_update(tool_update)
+
+            plan_update = parse_plan_update(update)
+            if plan_update is not None:
+                self.query_one(PlanPanel).apply_update(plan_update)
 
             payload = update.params.update.model_dump()
             session_update_type = payload.get("sessionUpdate")

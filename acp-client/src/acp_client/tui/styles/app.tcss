@@ -15,6 +15,10 @@ Screen {
     height: 1fr;
 }
 
+#main-column {
+    width: 3fr;
+}
+
 #sidebar {
     width: 30;
     background: #ebeff7;
@@ -23,9 +27,16 @@ Screen {
 }
 
 #chat-view {
-    width: 3fr;
+    height: 1fr;
     border: round #6d7f9a;
     background: #ffffff;
+    padding: 1;
+}
+
+#plan-panel {
+    height: 8;
+    border: round #6d7f9a;
+    background: #f8fafc;
     padding: 1;
 }
 

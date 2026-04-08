@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from acp_client.messages import ToolCallUpdate
+from acp_client.messages import PlanUpdate, ToolCallUpdate
 from acp_client.tui.managers.handlers import UpdateMessageHandler
 
 
@@ -99,3 +99,39 @@ def test_update_handler_routes_tool_updates() -> None:
     )
 
     assert received_tool_updates == ["call_1"]
+
+
+def test_update_handler_routes_plan_updates() -> None:
+    received_plan_sizes: list[int] = []
+
+    def on_plan_update(update: PlanUpdate) -> None:
+        received_plan_sizes.append(len(update.entries))
+
+    handler = UpdateMessageHandler(
+        on_agent_chunk=lambda _text: None,
+        on_user_chunk=lambda _text: None,
+        on_plan_update=on_plan_update,
+    )
+
+    handler.handle(
+        {
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": "sess_1",
+                "update": {
+                    "sessionUpdate": "plan",
+                    "entries": [
+                        {"content": "Шаг 1", "priority": "high", "status": "completed"},
+                        {
+                            "content": "Шаг 2",
+                            "priority": "medium",
+                            "status": "in_progress",
+                        },
+                    ],
+                },
+            },
+        }
+    )
+
+    assert received_plan_sizes == [2]
