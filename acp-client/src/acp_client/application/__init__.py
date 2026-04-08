@@ -18,6 +18,7 @@ from .dto import (
     SendPromptResponse,
 )
 from .session_coordinator import SessionCoordinator
+from .state_machine import StateChange, StateTransitionError, UIState, UIStateMachine
 from .use_cases import (
     CreateSessionUseCase,
     InitializeUseCase,
@@ -40,4 +41,9 @@ __all__ = [
     "InitializeUseCase",
     # Coordinators
     "SessionCoordinator",
+    # State Machine
+    "UIState",
+    "UIStateMachine",
+    "StateChange",
+    "StateTransitionError",
 ]
