@@ -5,8 +5,11 @@
 - Парсеры сообщений
 - Обработчики ошибок
 - Структурированное логирование
+- DI контейнер
+- Repositories
 """
 
+from .di_container import ContainerBuilder, DIContainer, DIError, Scope
 from .handler_registry import (
     FsReadHandler,
     FsWriteHandler,
@@ -20,12 +23,16 @@ from .handler_registry import (
 )
 from .logging_config import OperationTimer, get_logger, setup_logging
 from .message_parser import MessageParser
+from .repositories import InMemorySessionRepository
 from .transport import Transport, WebSocketTransport
 
 __all__ = [
+    # Transport
     "Transport",
     "WebSocketTransport",
+    # Parsing
     "MessageParser",
+    # Handlers
     "HandlerRegistry",
     "PermissionHandler",
     "FsReadHandler",
@@ -35,7 +42,15 @@ __all__ = [
     "TerminalWaitHandler",
     "TerminalReleaseHandler",
     "TerminalKillHandler",
+    # Logging
     "setup_logging",
     "get_logger",
     "OperationTimer",
+    # DI
+    "DIContainer",
+    "ContainerBuilder",
+    "Scope",
+    "DIError",
+    # Repositories
+    "InMemorySessionRepository",
 ]
