@@ -56,7 +56,7 @@ uv run acp-client --tui --host 127.0.0.1 --port 8080
 uv run acp-client-tui --host 127.0.0.1 --port 8080
 ```
 
-Горячие клавиши TUI: `Ctrl+B` фокус сессий (дальше `Up/Down + Enter`), `Ctrl+Enter` отправить prompt, `Ctrl+N` новая сессия, `Ctrl+J/K` переключение сессий, `Ctrl+C` cancel, `Ctrl+Q` выход. При выборе сессии клиент загружает replay-обновления и дорисовывает текстовую историю.
+Горячие клавиши TUI: `Ctrl+B` фокус сессий (дальше `Up/Down + Enter`), `Ctrl+Enter` отправить prompt, `Ctrl+Up/Down` история prompt в активной сессии, `Ctrl+N` новая сессия, `Ctrl+J/K` переключение сессий, `Ctrl+C` cancel, `Ctrl+Q` выход. При выборе сессии клиент загружает replay-обновления и дорисовывает текстовую историю.
 
 ## Полезные helper-методы ACPClient
 

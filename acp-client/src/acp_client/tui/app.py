@@ -74,6 +74,7 @@ class ACPClientApp(App[None]):
             await self._connection.initialize()
             await self._sessions.refresh_sessions()
             await self._sessions.ensure_active_session()
+            self.query_one(PromptInput).set_active_session(self._sessions.active_session_id)
             sidebar.set_sessions(self._sessions.sessions, self._sessions.active_session_id)
             footer.set_status(
                 "Connected | Ready | Ctrl+B focus sessions | Ctrl+Enter send | Ctrl+J/K switch"
@@ -93,6 +94,7 @@ class ACPClientApp(App[None]):
         footer = self.query_one(FooterBar)
 
         chat.add_user_message(message.text)
+        prompt_input.remember_prompt(message.text)
         prompt_input.text = ""
         footer.set_status("Connected | Sending prompt...")
         self.run_worker(self._send_prompt(message.text), exclusive=True)
@@ -123,6 +125,8 @@ class ACPClientApp(App[None]):
         try:
             new_session_id = await self._sessions.create_and_activate_session(str(Path.cwd()))
             sidebar.set_sessions(self._sessions.sessions, self._sessions.active_session_id)
+            self.query_one(PromptInput).set_active_session(self._sessions.active_session_id)
+            self.query_one(PromptInput).text = ""
             footer.set_status(f"Connected | New session created: {new_session_id}")
             chat.add_system_message(f"Создана новая сессия: {new_session_id}")
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
@@ -180,6 +184,8 @@ class ACPClientApp(App[None]):
                 footer.set_status("Connected | No sessions")
                 return
             self._render_replay_updates(self._sessions.last_replay_updates)
+            self.query_one(PromptInput).set_active_session(self._sessions.active_session_id)
+            self.query_one(PromptInput).text = ""
             footer.set_status(f"Connected | Active session: {switched}")
             chat.add_system_message(f"Активная сессия: {switched}")
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
@@ -197,7 +203,9 @@ class ACPClientApp(App[None]):
         try:
             await self._sessions.activate_session(message.session_id)
             sidebar.set_sessions(self._sessions.sessions, self._sessions.active_session_id)
+            self.query_one(PromptInput).set_active_session(self._sessions.active_session_id)
             self.query_one(PromptInput).focus()
+            self.query_one(PromptInput).text = ""
             self._render_replay_updates(self._sessions.last_replay_updates)
             footer.set_status(f"Connected | Active session: {message.session_id}")
             chat.add_system_message(f"Выбрана сессия: {message.session_id}")
