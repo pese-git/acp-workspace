@@ -24,6 +24,7 @@ from .handler_registry import (
 from .logging_config import OperationTimer, get_logger, setup_logging
 from .message_parser import MessageParser
 from .repositories import InMemorySessionRepository
+from .services import ACPTransportService
 from .transport import Transport, WebSocketTransport
 
 __all__ = [
@@ -53,4 +54,6 @@ __all__ = [
     "DIError",
     # Repositories
     "InMemorySessionRepository",
+    # Services
+    "ACPTransportService",
 ]

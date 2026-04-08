@@ -17,6 +17,7 @@ from .dto import (
     SendPromptRequest,
     SendPromptResponse,
 )
+from .session_coordinator import SessionCoordinator
 from .use_cases import (
     CreateSessionUseCase,
     InitializeUseCase,
@@ -37,4 +38,6 @@ __all__ = [
     "LoadSessionUseCase",
     "SendPromptUseCase",
     "InitializeUseCase",
+    # Coordinators
+    "SessionCoordinator",
 ]
