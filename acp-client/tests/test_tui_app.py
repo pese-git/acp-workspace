@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -112,6 +113,26 @@ class _FakePlanPanel:
 
         entries = getattr(update, "entries", [])
         self.entries_count = len(entries)
+
+
+class _FakeHistoryCache:
+    """Минимальный double history cache для тестов fallback replay."""
+
+    def __init__(self) -> None:
+        self.saved_updates: list[tuple[str, list[Any]]] = []
+        self.loaded_session_ids: list[str] = []
+        self.load_result: list[Any] = []
+
+    def save_updates(self, *, session_id: str, updates: list[Any]) -> None:
+        """Сохраняет аргументы вызова save_updates для проверок."""
+
+        self.saved_updates.append((session_id, updates))
+
+    def load_updates(self, *, session_id: str) -> list[Any]:
+        """Возвращает заранее заданный результат load_updates."""
+
+        self.loaded_session_ids.append(session_id)
+        return self.load_result
 
 
 def test_format_footer_error_extracts_jsonrpc_code_and_reason() -> None:
@@ -387,6 +408,71 @@ def test_render_replay_updates_routes_plan_snapshot(monkeypatch: pytest.MonkeyPa
     app._render_replay_updates(replay_updates)  # noqa: SLF001
 
     assert plans.entries_count == 2
+
+
+def test_resolve_replay_updates_uses_server_snapshot_and_persists() -> None:
+    app = ACPClientApp(host="127.0.0.1", port=8765)
+    cache = _FakeHistoryCache()
+    cast(Any, app)._history_cache = cache  # noqa: SLF001
+
+    from acp_client.messages import SessionUpdateNotification
+
+    server_updates = [
+        SessionUpdateNotification.model_validate(
+            {
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": {
+                    "sessionId": "sess_1",
+                    "update": {
+                        "sessionUpdate": "agent_message_chunk",
+                        "content": {"type": "text", "text": "server"},
+                    },
+                },
+            }
+        )
+    ]
+
+    resolved = app._resolve_replay_updates(  # noqa: SLF001
+        session_id="sess_1",
+        server_updates=server_updates,
+    )
+
+    assert resolved == server_updates
+    assert cache.saved_updates == [("sess_1", server_updates)]
+
+
+def test_resolve_replay_updates_falls_back_to_history_cache() -> None:
+    app = ACPClientApp(host="127.0.0.1", port=8765)
+    cache = _FakeHistoryCache()
+    cast(Any, app)._history_cache = cache  # noqa: SLF001
+
+    from acp_client.messages import SessionUpdateNotification
+
+    cached_updates = [
+        SessionUpdateNotification.model_validate(
+            {
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": {
+                    "sessionId": "sess_1",
+                    "update": {
+                        "sessionUpdate": "agent_message_chunk",
+                        "content": {"type": "text", "text": "cached"},
+                    },
+                },
+            }
+        )
+    ]
+    cache.load_result = cached_updates
+
+    resolved = app._resolve_replay_updates(  # noqa: SLF001
+        session_id="sess_1",
+        server_updates=[],
+    )
+
+    assert resolved == cached_updates
+    assert cache.loaded_session_ids == ["sess_1"]
 
 
 def test_reconnect_callbacks_emit_runtime_state_transitions(

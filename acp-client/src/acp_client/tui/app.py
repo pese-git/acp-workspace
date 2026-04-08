@@ -19,6 +19,7 @@ from acp_client.messages import (
     ToolCallUpdate,
     parse_plan_update,
     parse_request_permission_request,
+    parse_session_update_notification,
     parse_tool_call_update,
 )
 
@@ -36,6 +37,7 @@ from .components import (
 )
 from .managers import (
     ACPConnectionManager,
+    HistoryCache,
     LocalFileSystemManager,
     LocalTerminalManager,
     PermissionManager,
@@ -166,6 +168,7 @@ class ACPClientApp(App[None]):
         self._sessions = SessionManager(self._connection)
         self._filesystem = LocalFileSystemManager(on_file_written=self._on_file_written)
         self._terminal = LocalTerminalManager()
+        self._history_cache = HistoryCache()
         self._permission_manager = PermissionManager()
         self._updates = UpdateMessageHandler(
             on_agent_chunk=self._on_agent_chunk,
@@ -233,7 +236,11 @@ class ACPClientApp(App[None]):
             tools.reset()
             plans.reset()
             chat.clear_messages()
-            self._render_replay_updates(self._sessions.last_replay_updates)
+            resolved_replay = self._resolve_replay_updates(
+                session_id=self._sessions.active_session_id,
+                server_updates=self._sessions.last_replay_updates,
+            )
+            self._render_replay_updates(resolved_replay)
             if (
                 self._loaded_ui_state.draft_prompt_text
                 and self._loaded_ui_state.draft_session_id == self._sessions.active_session_id
@@ -292,7 +299,7 @@ class ACPClientApp(App[None]):
         try:
             await self._sessions.send_prompt(
                 text,
-                self._updates.handle,
+                self._handle_update,
                 self._on_permission_request,
                 self._on_fs_read,
                 self._on_fs_write,
@@ -458,6 +465,19 @@ class ACPClientApp(App[None]):
 
         self.query_one(ChatView).add_user_message(text)
 
+    def _handle_update(self, payload: dict[str, object]) -> None:
+        """Маршрутизирует update в UI и сохраняет его в локальный history cache."""
+
+        normalized_payload = dict(payload)
+        self._updates.handle(normalized_payload)
+
+        parsed_update = parse_session_update_notification(normalized_payload)
+        if parsed_update is None:
+            return
+
+        session_id = parsed_update.params.sessionId
+        self._history_cache.save_update(session_id=session_id, update=parsed_update)
+
     def _on_tool_update(self, update: ToolCallUpdate) -> None:
         """Получает update вызова инструмента и обновляет правую панель."""
 
@@ -490,7 +510,11 @@ class ACPClientApp(App[None]):
             tools.reset()
             plans.reset()
             chat.clear_messages()
-            self._render_replay_updates(self._sessions.last_replay_updates)
+            resolved_replay = self._resolve_replay_updates(
+                session_id=self._sessions.active_session_id,
+                server_updates=self._sessions.last_replay_updates,
+            )
+            self._render_replay_updates(resolved_replay)
             self.query_one(PromptInput).set_active_session(self._sessions.active_session_id)
             self.query_one(PromptInput).text = ""
             self._set_connection_state(
@@ -556,7 +580,11 @@ class ACPClientApp(App[None]):
             tools.reset()
             plans.reset()
             chat.clear_messages()
-            self._render_replay_updates(self._sessions.last_replay_updates)
+            resolved_replay = self._resolve_replay_updates(
+                session_id=self._sessions.active_session_id,
+                server_updates=self._sessions.last_replay_updates,
+            )
+            self._render_replay_updates(resolved_replay)
             self._set_connection_state(
                 ConnectionState.CONNECTED,
                 detail=f"Active session: {session_id}",
@@ -738,6 +766,23 @@ class ACPClientApp(App[None]):
                 self.query_one(ChatView).add_user_message(text)
 
         self.query_one(ChatView).finish_agent_message()
+
+    def _resolve_replay_updates(
+        self,
+        *,
+        session_id: str | None,
+        server_updates: list[SessionUpdateNotification],
+    ) -> list[SessionUpdateNotification]:
+        """Возвращает server replay или fallback из локального history cache."""
+
+        if session_id is None:
+            return server_updates
+
+        if server_updates:
+            self._history_cache.save_updates(session_id=session_id, updates=server_updates)
+            return server_updates
+
+        return self._history_cache.load_updates(session_id=session_id)
 
     async def _on_permission_request(self, payload: dict[str, object]) -> str | None:
         """Показывает модальное окно и возвращает выбранный optionId."""

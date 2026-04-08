@@ -19,6 +19,7 @@
 - Реализована значимая часть горячих клавиш и навигации (включая `Ctrl+S/B`, `Tab`, `Ctrl+L`, `Ctrl+H`).
 - Реализованы `plan`-панель, файловая подсистема UI (`FileTree`, `fs/read_text_file`, `fs/write_text_file`, `FileViewer`) и базовая терминальная подсистема UI (`terminal/*` lifecycle + вывод в `ToolPanel`).
 - Реализован persistent permission policy manager с auto-apply для `allow_always`/`reject_always`.
+- Реализован базовый локальный history cache `session/update` с fallback при пустом replay после переключения/восстановления сессии.
 - В работе остаются расширенный UX-polish терминального вывода, полная state/cache/config подсистема, e2e/perf тесты и пакет отдельной TUI-документации.
 
 Ниже требования остаются целевыми для полного v1.0 и могут быть закрыты поэтапно.

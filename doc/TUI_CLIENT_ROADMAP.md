@@ -29,6 +29,7 @@
 - [x] Hotkeys/navigation (актуальный набор): `Ctrl+S/B`, `Tab`, `Ctrl+N`, `Ctrl+J/K`, `Ctrl+L`, `Ctrl+H`, `Ctrl+C`, `Ctrl+Q`, `Ctrl+Enter`, `Ctrl+Up/Down`
 - [x] Расширенное покрытие unit-тестами для TUI-слоя
 - [x] Базовая `UIStateMachine` с валидацией переходов и интеграцией в runtime-сценарии
+- [x] Базовый `HistoryCache` (локальный JSON cache `session/update`, fallback при пустом replay)
 
 ### Остается по roadmap
 
@@ -1099,9 +1100,9 @@ class HistoryCache:
 ```
 
 **Технические работы:**
-- [ ] Использовать JSON или SQLite для кэша
-- [ ] Сохранять при каждом update
-- [ ] Загружать при переключении сессии
+- [x] Использовать JSON или SQLite для кэша
+- [x] Сохранять при каждом update
+- [x] Загружать при переключении сессии
 - [ ] Обработать конфликты
 
 **Оценка сложности:** Средняя
