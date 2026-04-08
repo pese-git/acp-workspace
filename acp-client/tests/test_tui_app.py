@@ -83,6 +83,11 @@ class _FakeToolPanel:
 
         self.updates_count += 1
 
+    def latest_terminal_snapshot(self) -> tuple[str, str, object] | None:
+        """Возвращает заглушку terminal snapshot для тестов action_open_terminal_output."""
+
+        return None
+
 
 class _FakeFileTree:
     """Минимальный double FileTree для тестов file-system сценариев."""
@@ -360,6 +365,70 @@ def test_open_help_adds_system_message_and_help_status(monkeypatch: pytest.Monke
     assert len(chat.system_messages) == 1
     assert "Горячие клавиши:" in chat.system_messages[0]
     assert transitions == [(ConnectionState.CONNECTED, HELP_FOOTER_DETAIL)]
+
+
+def test_open_terminal_output_shows_message_when_snapshot_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = ACPClientApp(host="127.0.0.1", port=8765)
+    chat = _FakeChatView()
+    tools = _FakeToolPanel()
+    transitions: list[tuple[ConnectionState, str]] = []
+
+    def _query_one(selector: object) -> object:
+        if selector is ChatView:
+            return chat
+        if selector is ToolPanel:
+            return tools
+        msg = f"Unexpected selector: {selector}"
+        raise AssertionError(msg)
+
+    def _capture_state(state: ConnectionState, *, detail: str) -> None:
+        transitions.append((state, detail))
+
+    monkeypatch.setattr(app, "query_one", _query_one)
+    monkeypatch.setattr(app, "_set_connection_state", _capture_state)
+
+    app.action_open_terminal_output()
+
+    assert chat.system_messages == ["Нет terminal output для просмотра"]
+    assert transitions == [(ConnectionState.CONNECTED, "No terminal output")]
+
+
+def test_open_terminal_output_pushes_modal_when_snapshot_exists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = ACPClientApp(host="127.0.0.1", port=8765)
+    transitions: list[tuple[ConnectionState, str]] = []
+    pushed_screens: list[object] = []
+
+    class _ToolPanelWithSnapshot(_FakeToolPanel):
+        def latest_terminal_snapshot(self) -> tuple[str, str, object] | None:
+            from rich.text import Text
+
+            return "Run command", "term_1", Text("line")
+
+    tools = _ToolPanelWithSnapshot()
+
+    def _query_one(selector: object) -> object:
+        if selector is ToolPanel:
+            return tools
+        if selector is ChatView:
+            return _FakeChatView()
+        msg = f"Unexpected selector: {selector}"
+        raise AssertionError(msg)
+
+    def _capture_state(state: ConnectionState, *, detail: str) -> None:
+        transitions.append((state, detail))
+
+    monkeypatch.setattr(app, "query_one", _query_one)
+    monkeypatch.setattr(app, "_set_connection_state", _capture_state)
+    monkeypatch.setattr(app, "push_screen", lambda screen: pushed_screens.append(screen))
+
+    app.action_open_terminal_output()
+
+    assert len(pushed_screens) == 1
+    assert transitions == [(ConnectionState.CONNECTED, "Terminal output opened")]
 
 
 def test_render_replay_updates_routes_plan_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -33,6 +33,7 @@ from .components import (
     PlanPanel,
     PromptInput,
     Sidebar,
+    TerminalLogModal,
     ToolPanel,
 )
 from .config import TUIConfig, TUIConfigStore, resolve_tui_connection
@@ -52,7 +53,7 @@ from .managers import (
 READY_FOOTER_DETAIL = "Ready | Ctrl+S/B sessions | Tab cycle focus | Ctrl+L clear | Ctrl+Enter send"
 HELP_FOOTER_DETAIL = (
     "Help | Ctrl+S/B sessions | Tab cycle focus | Ctrl+N new | Ctrl+J/K switch | "
-    "Ctrl+L clear | Ctrl+R retry | Ctrl+C cancel | Ctrl+Q quit"
+    "Ctrl+L clear | Ctrl+R retry | Ctrl+T terminal | Ctrl+C cancel | Ctrl+Q quit"
 )
 FILE_VIEWER_LINE_LIMIT = 400
 
@@ -149,6 +150,7 @@ class ACPClientApp(App[None]):
         ("ctrl+k", "previous_session", "Prev Session"),
         ("ctrl+l", "clear_chat", "Clear Chat"),
         ("ctrl+h", "open_help", "Help"),
+        ("ctrl+t", "open_terminal_output", "Terminal Output"),
         ("tab", "cycle_focus", "Cycle Focus"),
         ("ctrl+c", "cancel_prompt", "Cancel"),
     ]
@@ -405,9 +407,23 @@ class ACPClientApp(App[None]):
 
         self.query_one(ChatView).add_system_message(
             "Горячие клавиши: Ctrl+S/B сессии, Tab фокус, Ctrl+N новая сессия, "
-            "Ctrl+J/K переключение, Ctrl+L очистить чат, Ctrl+R retry, Ctrl+C cancel, Ctrl+Q выход"
+            "Ctrl+J/K переключение, Ctrl+L очистить чат, Ctrl+R retry, Ctrl+T вывод терминала, "
+            "Ctrl+C cancel, Ctrl+Q выход"
         )
         self._set_connection_state(ConnectionState.CONNECTED, detail=HELP_FOOTER_DETAIL)
+
+    def action_open_terminal_output(self) -> None:
+        """Открывает модальное окно с полным выводом последнего terminal tool-call."""
+
+        snapshot = self.query_one(ToolPanel).latest_terminal_snapshot()
+        if snapshot is None:
+            self.query_one(ChatView).add_system_message("Нет terminal output для просмотра")
+            self._set_connection_state(ConnectionState.CONNECTED, detail="No terminal output")
+            return
+
+        title, terminal_id, output = snapshot
+        self.push_screen(TerminalLogModal(title=title, terminal_id=terminal_id, output=output))
+        self._set_connection_state(ConnectionState.CONNECTED, detail="Terminal output opened")
 
     def action_clear_chat(self) -> None:
         """Очищает историю чата текущей сессии и сообщает об этом в footer."""

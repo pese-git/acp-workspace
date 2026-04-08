@@ -9,6 +9,7 @@ from .permission_modal import PermissionModal
 from .plan_panel import PlanPanel
 from .prompt_input import PromptInput
 from .sidebar import Sidebar
+from .terminal_log_modal import TerminalLogModal
 from .terminal_output import TerminalOutputPanel
 from .tool_panel import ToolPanel
 
@@ -21,6 +22,7 @@ __all__ = [
     "PromptInput",
     "FooterBar",
     "PlanPanel",
+    "TerminalLogModal",
     "TerminalOutputPanel",
     "ToolPanel",
     "PermissionModal",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from rich.text import Text
 from textual.widgets import Static
 
 from acp_client.messages import ToolCallUpdate
@@ -86,6 +87,22 @@ class ToolPanel(Static):
                 if rendered_output and rendered_output != "Нет вывода терминала":
                     lines.append(f"  output: {self._shorten_output(rendered_output)}")
         return "\n".join(lines)
+
+    def latest_terminal_snapshot(self) -> tuple[str, str, Text] | None:
+        """Возвращает полный вывод последнего tool call с terminal-контентом."""
+
+        for payload in reversed(list(self._tool_calls.values())):
+            terminal_id = payload.get("terminal_id")
+            terminal_view = payload.get("terminal_view")
+            title = payload.get("title")
+            if not isinstance(terminal_id, str) or not terminal_id:
+                continue
+            if not isinstance(terminal_view, TerminalOutputPanel):
+                continue
+            if not isinstance(title, str) or not title:
+                title = "Tool call"
+            return title, terminal_id, terminal_view.render_text()
+        return None
 
     @staticmethod
     def _extract_terminal_id(payload: dict[str, Any]) -> str | None:

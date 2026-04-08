@@ -67,3 +67,32 @@ def test_tool_panel_renders_terminal_id_and_output_excerpt() -> None:
 
     assert "terminal: term_1" in rendered
     assert "output: line1 line2 Exit code: 0" in rendered
+
+
+def test_tool_panel_returns_latest_terminal_snapshot() -> None:
+    panel = ToolPanel()
+    panel.apply_update(
+        ToolCallCreatedUpdate(
+            sessionUpdate="tool_call",
+            toolCallId="call_1",
+            title="Run command",
+            status="in_progress",
+            content=[ToolCallTerminalContent(type="terminal", terminalId="term_9")],
+        )
+    )
+    panel.apply_update(
+        ToolCallStateUpdate(
+            sessionUpdate="tool_call_update",
+            toolCallId="call_1",
+            status="completed",
+            rawOutput={"output": "done\n", "exitCode": 0},
+        )
+    )
+
+    snapshot = panel.latest_terminal_snapshot()
+
+    assert snapshot is not None
+    title, terminal_id, output = snapshot
+    assert title == "Run command"
+    assert terminal_id == "term_9"
+    assert "done" in output.plain

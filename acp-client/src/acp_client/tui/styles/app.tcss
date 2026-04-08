@@ -119,3 +119,24 @@ Screen {
     border: round #6d7f9a;
     padding: 0 1;
 }
+
+#terminal-log-modal {
+    width: 110;
+    max-width: 95%;
+    height: 80%;
+    border: round #2f4a75;
+    background: #f6f9ff;
+    padding: 1;
+}
+
+#terminal-log-title {
+    margin: 0 0 1 0;
+}
+
+#terminal-log-content {
+    height: 1fr;
+    overflow: auto;
+    background: #ffffff;
+    border: round #6d7f9a;
+    padding: 0 1;
+}

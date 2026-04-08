@@ -17,7 +17,7 @@
 - Реализован reliability/UX слой: `Connected/Reconnecting/Degraded/Offline`, retry очереди, повтор через `Ctrl+R`, защита от отправки prompt в offline.
 - Реализована персистентность UI-состояния между запусками (последняя сессия + черновик prompt).
 - Реализована значимая часть горячих клавиш и навигации (включая `Ctrl+S/B`, `Tab`, `Ctrl+L`, `Ctrl+H`).
-- Реализованы `plan`-панель, файловая подсистема UI (`FileTree`, `fs/read_text_file`, `fs/write_text_file`, `FileViewer`) и базовая терминальная подсистема UI (`terminal/*` lifecycle + вывод в `ToolPanel`).
+- Реализованы `plan`-панель, файловая подсистема UI (`FileTree`, `fs/read_text_file`, `fs/write_text_file`, `FileViewer`) и терминальная подсистема UI (`terminal/*` lifecycle + вывод в `ToolPanel` + модальный просмотр полного terminal output).
 - Реализован persistent permission policy manager с auto-apply для `allow_always`/`reject_always`.
 - Реализован базовый локальный history cache `session/update` с fallback при пустом replay после переключения/восстановления сессии.
 - Реализован базовый менеджер конфигурации TUI (локальный `tui_config.json`) с загрузкой default host/port/theme и автосохранением runtime-значений подключения.
