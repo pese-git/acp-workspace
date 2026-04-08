@@ -105,7 +105,7 @@ class ACPClientApp(App[None]):
         sidebar = self.query_one(Sidebar)
         tools = self.query_one(ToolPanel)
         try:
-            header.set_status("Connected")
+            header.set_status("Reconnecting")
             await self._connection.initialize()
             await self._sessions.refresh_sessions()
             restored = await self._restore_active_session_from_snapshot()
@@ -123,14 +123,19 @@ class ACPClientApp(App[None]):
             ):
                 prompt_input.text = self._loaded_ui_state.draft_prompt_text
                 chat.add_system_message("Восстановлен черновик prompt")
+            header.set_status("Connected")
             footer.set_status(
                 "Connected | Ready | Ctrl+B focus sessions | Ctrl+Enter send | Ctrl+J/K switch"
             )
             chat.add_system_message("TUI ready")
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
             self._app_logger.error("tui_bootstrap_failed", error=str(exc))
-            header.set_status("Degraded")
-            footer.set_status(format_footer_error(exc, prefix="Connection error"))
+            header.set_status("Offline")
+            footer.set_status(
+                format_offline_footer_status(
+                    reason=format_footer_error(exc, prefix="Connection error")
+                )
+            )
             chat.add_system_message(f"Ошибка подключения: {exc}")
 
     async def on_prompt_input_submitted(self, message: PromptInput.Submitted) -> None:
@@ -139,6 +144,15 @@ class ACPClientApp(App[None]):
         prompt_input = self.query_one(PromptInput)
         chat = self.query_one(ChatView)
         footer = self.query_one(FooterBar)
+
+        # При критическом disconnect блокируем отправку и оставляем черновик в поле.
+        if not self._connection.is_ready():
+            self.query_one(HeaderBar).set_status("Offline")
+            footer.set_status(
+                format_offline_footer_status(reason="Prompt blocked: connection unavailable")
+            )
+            chat.add_system_message("Отправка prompt отложена: нет подключения к серверу")
+            return
 
         chat.add_user_message(message.text)
         prompt_input.remember_prompt(message.text)
@@ -166,7 +180,10 @@ class ACPClientApp(App[None]):
             )
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
             self._app_logger.error("tui_prompt_failed", error=str(exc))
-            self.query_one(HeaderBar).set_status("Degraded")
+            if self._connection.is_ready():
+                self.query_one(HeaderBar).set_status("Degraded")
+            else:
+                self.query_one(HeaderBar).set_status("Offline")
             chat.finish_agent_message()
             chat.add_system_message(f"Ошибка отправки prompt: {exc}")
             self._remember_failed_operation(
@@ -201,7 +218,10 @@ class ACPClientApp(App[None]):
             chat.add_system_message(f"Создана новая сессия: {new_session_id}")
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
             self._app_logger.error("tui_new_session_failed", error=str(exc))
-            self.query_one(HeaderBar).set_status("Degraded")
+            if self._connection.is_ready():
+                self.query_one(HeaderBar).set_status("Degraded")
+            else:
+                self.query_one(HeaderBar).set_status("Offline")
             self._remember_failed_operation(label="new_session", action=self.action_new_session)
             footer.set_status(format_footer_error(exc, prefix="Connected | Error creating session"))
 
@@ -286,7 +306,10 @@ class ACPClientApp(App[None]):
             self._persist_ui_state()
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
             self._app_logger.error("tui_switch_session_failed", error=str(exc))
-            self.query_one(HeaderBar).set_status("Degraded")
+            if self._connection.is_ready():
+                self.query_one(HeaderBar).set_status("Degraded")
+            else:
+                self.query_one(HeaderBar).set_status("Offline")
             self._remember_failed_operation(
                 label=f"switch_session_{direction}",
                 action=lambda: self._switch_session(direction=direction),
@@ -322,7 +345,10 @@ class ACPClientApp(App[None]):
             self._persist_ui_state()
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
             self._app_logger.error("tui_sidebar_select_failed", error=str(exc))
-            self.query_one(HeaderBar).set_status("Degraded")
+            if self._connection.is_ready():
+                self.query_one(HeaderBar).set_status("Degraded")
+            else:
+                self.query_one(HeaderBar).set_status("Offline")
             self._remember_failed_operation(
                 label="select_session",
                 action=lambda: self._activate_session_by_id(session_id),
@@ -496,6 +522,15 @@ def format_retry_footer_error(
         f"{format_footer_error(exc, prefix='Connected | Error')}"
         f" | Ctrl+R retry {action_label} | queued={pending_count}"
     )
+
+
+def format_offline_footer_status(*, reason: str) -> str:
+    """Формирует status footer для offline режима с подсказкой по retry."""
+
+    compact_reason = reason.strip()
+    if not compact_reason:
+        compact_reason = "connection unavailable"
+    return f"Offline | {compact_reason} | Ctrl+R retry failed op"
 
 
 @dataclass(slots=True)

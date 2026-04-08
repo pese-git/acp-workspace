@@ -98,3 +98,19 @@ async def test_connection_manager_raises_after_second_transport_error() -> None:
     assert second.exit_calls == 1
     assert reconnect_attempts == ["ping"]
     assert reconnect_recovered == []
+
+
+def test_connection_manager_is_ready_returns_false_by_default() -> None:
+    manager = ACPConnectionManager(host="127.0.0.1", port=8765)
+
+    assert manager.is_ready() is False
+
+
+def test_connection_manager_is_ready_requires_session_and_initialize() -> None:
+    manager = ACPConnectionManager(host="127.0.0.1", port=8765)
+    manager._ws_session = cast(ACPClientWSSession, object())  # noqa: SLF001
+
+    assert manager.is_ready() is False
+
+    manager._initialized = True  # noqa: SLF001
+    assert manager.is_ready() is True

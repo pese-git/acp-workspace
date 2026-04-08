@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from acp_client.tui.app import ACPClientApp, format_footer_error, format_retry_footer_error
+from acp_client.tui.app import (
+    ACPClientApp,
+    format_footer_error,
+    format_offline_footer_status,
+    format_retry_footer_error,
+)
 
 
 def test_format_footer_error_extracts_jsonrpc_code_and_reason() -> None:
@@ -65,3 +70,15 @@ def test_failed_operations_queue_keeps_latest_five() -> None:
     assert len(app._failed_operations) == 5  # noqa: SLF001
     assert app._failed_operations[0].label == "op_1"  # noqa: SLF001
     assert app._failed_operations[-1].label == "op_5"  # noqa: SLF001
+
+
+def test_format_offline_footer_status_includes_retry_hint() -> None:
+    formatted = format_offline_footer_status(reason="Prompt blocked: connection unavailable")
+
+    assert formatted == "Offline | Prompt blocked: connection unavailable | Ctrl+R retry failed op"
+
+
+def test_format_offline_footer_status_uses_default_reason_when_empty() -> None:
+    formatted = format_offline_footer_status(reason="   ")
+
+    assert formatted == "Offline | connection unavailable | Ctrl+R retry failed op"

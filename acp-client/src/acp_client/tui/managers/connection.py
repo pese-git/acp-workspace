@@ -114,6 +114,11 @@ class ACPConnectionManager:
         self._initialized = False
         self._logger.debug("tui_ws_session_closed")
 
+    def is_ready(self) -> bool:
+        """Возвращает True, когда соединение открыто и initialize уже выполнен."""
+
+        return self._ws_session is not None and self._initialized
+
     async def initialize(self) -> InitializeResult:
         """Выполняет initialize handshake и возвращает negotiated capabilities."""
 
