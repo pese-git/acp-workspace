@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from acp_client.tui.app import (
     ACPClientApp,
+    ConnectionState,
     format_footer_error,
-    format_offline_footer_status,
+    format_footer_status,
+    format_offline_footer_detail,
     format_retry_footer_error,
 )
 
@@ -31,10 +33,7 @@ def test_format_retry_footer_error_adds_retry_hint() -> None:
 
     formatted = format_retry_footer_error(error, action_label="prompt", pending_count=2)
 
-    assert (
-        formatted
-        == "Connected | Error | temporary network timeout | Ctrl+R retry prompt | queued=2"
-    )
+    assert formatted == "Error | temporary network timeout | Ctrl+R retry prompt | queued=2"
 
 
 def test_failed_operations_queue_deduplicates_by_label() -> None:
@@ -72,13 +71,19 @@ def test_failed_operations_queue_keeps_latest_five() -> None:
     assert app._failed_operations[-1].label == "op_5"  # noqa: SLF001
 
 
-def test_format_offline_footer_status_includes_retry_hint() -> None:
-    formatted = format_offline_footer_status(reason="Prompt blocked: connection unavailable")
+def test_format_offline_footer_detail_includes_retry_hint() -> None:
+    formatted = format_offline_footer_detail(reason="Prompt blocked: connection unavailable")
 
-    assert formatted == "Offline | Prompt blocked: connection unavailable | Ctrl+R retry failed op"
+    assert formatted == "Prompt blocked: connection unavailable | Ctrl+R retry failed op"
 
 
-def test_format_offline_footer_status_uses_default_reason_when_empty() -> None:
-    formatted = format_offline_footer_status(reason="   ")
+def test_format_offline_footer_detail_uses_default_reason_when_empty() -> None:
+    formatted = format_offline_footer_detail(reason="   ")
 
-    assert formatted == "Offline | connection unavailable | Ctrl+R retry failed op"
+    assert formatted == "connection unavailable | Ctrl+R retry failed op"
+
+
+def test_format_footer_status_builds_state_prefixed_line() -> None:
+    formatted = format_footer_status(state=ConnectionState.OFFLINE, detail="connection unavailable")
+
+    assert formatted == "Offline | connection unavailable"
