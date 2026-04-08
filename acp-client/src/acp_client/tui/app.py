@@ -283,11 +283,16 @@ class ACPClientApp(App[None]):
         """Показывает модальное окно и возвращает выбранный optionId."""
 
         footer = self.query_one(FooterBar)
+        chat = self.query_one(ChatView)
         parsed_request = parse_request_permission_request(payload)
         if parsed_request is None:
             footer.set_status("Connected | Permission request parse error")
             return None
 
+        tool_name = (
+            parsed_request.params.toolCall.title or parsed_request.params.toolCall.toolCallId
+        )
+        chat.add_system_message(f"Запрошено разрешение: {tool_name}")
         footer.set_status("Connected | Waiting permission decision")
         selected_option_id = await self.push_screen_wait(
             self._build_permission_modal(parsed_request)
@@ -295,9 +300,11 @@ class ACPClientApp(App[None]):
 
         if selected_option_id is None:
             footer.set_status("Connected | Permission cancelled")
+            chat.add_system_message("Разрешение отклонено или отменено")
             return None
 
         footer.set_status(f"Connected | Permission selected: {selected_option_id}")
+        chat.add_system_message(f"Выбрано разрешение: {selected_option_id}")
         return selected_option_id
 
     def _build_permission_modal(self, request: RequestPermissionRequest) -> PermissionModal:

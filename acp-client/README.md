@@ -61,6 +61,7 @@ uv run acp-client-tui --host 127.0.0.1 --port 8080
 В правой панели TUI отображаются события `tool_call` и `tool_call_update` с текущими статусами вызовов инструментов.
 
 При получении `session/request_permission` клиент показывает модальное окно с вариантами решения и отправляет выбранную опцию обратно агенту.
+В модальном окне разрешений работают быстрые клавиши: `A` (allow once/always), `R` (reject once/always), `Esc` (cancel).
 
 ## Полезные helper-методы ACPClient
 
