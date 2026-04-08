@@ -1,7 +1,9 @@
 """Тесты для SessionViewModel."""
 
+from unittest.mock import AsyncMock, MagicMock, Mock
+
 import pytest
-from unittest.mock import Mock, AsyncMock, MagicMock
+
 from acp_client.presentation.session_view_model import SessionViewModel
 
 

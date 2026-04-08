@@ -1,7 +1,9 @@
 """Тесты для Observable Pattern."""
 
 import asyncio
+
 import pytest
+
 from acp_client.presentation.observable import Observable, ObservableCommand
 
 

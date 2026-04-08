@@ -7,7 +7,8 @@
 - Обработку событий жизненного цикла сессий
 """
 
-from typing import Any, Optional, Callable
+from typing import Any
+
 from acp_client.presentation.base_view_model import BaseViewModel
 from acp_client.presentation.observable import Observable, ObservableCommand
 
@@ -41,8 +42,8 @@ class SessionViewModel(BaseViewModel):
     def __init__(
         self,
         coordinator: Any,  # SessionCoordinator
-        event_bus: Optional[Any] = None,
-        logger: Optional[Any] = None,
+        event_bus: Any | None = None,
+        logger: Any | None = None,
     ) -> None:
         """Инициализировать SessionViewModel.
         
@@ -70,9 +71,9 @@ class SessionViewModel(BaseViewModel):
         # Подписываемся на события (если EventBus доступен)
         try:
             from acp_client.domain.events import (
+                SessionClosedEvent,
                 SessionCreatedEvent,
                 SessionInitializedEvent,
-                SessionClosedEvent,
             )
             self.on_event(SessionCreatedEvent, self._handle_session_created)
             self.on_event(SessionInitializedEvent, self._handle_session_initialized)
@@ -151,7 +152,9 @@ class SessionViewModel(BaseViewModel):
         if not session_exists:
             error_msg = f"Session {session_id} not found"
             self.error_message.value = error_msg
-            self.logger.warning("Attempted to switch to non-existent session", session_id=session_id)
+            self.logger.warning(
+                "Attempted to switch to non-existent session", session_id=session_id
+            )
             return
 
         self.selected_session_id.value = session_id

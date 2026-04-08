@@ -7,8 +7,9 @@
 - Отслеживание статуса streaming
 """
 
-from typing import Any, Optional, Callable
 from dataclasses import dataclass
+from typing import Any
+
 from acp_client.presentation.base_view_model import BaseViewModel
 from acp_client.presentation.observable import Observable, ObservableCommand
 
@@ -53,8 +54,8 @@ class ChatViewModel(BaseViewModel):
     def __init__(
         self,
         coordinator: Any,  # SessionCoordinator
-        event_bus: Optional[Any] = None,
-        logger: Optional[Any] = None,
+        event_bus: Any | None = None,
+        logger: Any | None = None,
     ) -> None:
         """Инициализировать ChatViewModel.
         
@@ -84,10 +85,10 @@ class ChatViewModel(BaseViewModel):
         # Подписываемся на события (если EventBus доступен)
         try:
             from acp_client.domain.events import (
-                PromptStartedEvent,
-                PromptCompletedEvent,
-                PermissionRequestedEvent,
                 ErrorOccurredEvent,
+                PermissionRequestedEvent,
+                PromptCompletedEvent,
+                PromptStartedEvent,
             )
             self.on_event(PromptStartedEvent, self._handle_prompt_started)
             self.on_event(PromptCompletedEvent, self._handle_prompt_completed)
@@ -124,7 +125,6 @@ class ChatViewModel(BaseViewModel):
             await self.coordinator.send_prompt(session_id, prompt_text, **kwargs)
 
         except Exception as e:
-            error_msg = f"Failed to send prompt: {str(e)}"
             self.logger.exception("Error sending prompt", error=str(e))
             raise
         finally:

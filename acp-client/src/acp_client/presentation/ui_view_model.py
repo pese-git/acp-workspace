@@ -8,7 +8,8 @@
 """
 
 from enum import Enum
-from typing import Any, Optional, Callable
+from typing import Any
+
 from acp_client.presentation.base_view_model import BaseViewModel
 from acp_client.presentation.observable import Observable
 
@@ -48,8 +49,8 @@ class UIViewModel(BaseViewModel):
 
     def __init__(
         self,
-        event_bus: Optional[Any] = None,
-        logger: Optional[Any] = None,
+        event_bus: Any | None = None,
+        logger: Any | None = None,
     ) -> None:
         """Инициализировать UIViewModel.
         
@@ -80,7 +81,7 @@ class UIViewModel(BaseViewModel):
         except ImportError:
             self.logger.debug("DomainEvents not available, skipping event subscriptions")
 
-    def show_error(self, message: str, error_type: Optional[str] = None) -> None:
+    def show_error(self, message: str, error_type: str | None = None) -> None:
         """Показать сообщение об ошибке.
         
         Args:
@@ -138,7 +139,7 @@ class UIViewModel(BaseViewModel):
         self.is_loading.value = is_loading
         self.logger.debug("Global loading status changed", is_loading=is_loading)
 
-    def show_modal(self, modal_type: str, data: Optional[dict] = None) -> None:
+    def show_modal(self, modal_type: str, data: dict | None = None) -> None:
         """Показать модальное окно.
         
         Args:
@@ -155,7 +156,7 @@ class UIViewModel(BaseViewModel):
         self.modal_data.value = {}
         self.logger.debug("Modal hidden")
 
-    def is_modal_open(self, modal_type: Optional[str] = None) -> bool:
+    def is_modal_open(self, modal_type: str | None = None) -> bool:
         """Проверить открыто ли модальное окно.
         
         Args:

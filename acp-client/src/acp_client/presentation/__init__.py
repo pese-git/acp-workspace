@@ -12,8 +12,8 @@
 - UIViewModel: ViewModel для общего UI состояния
 """
 
-from acp_client.presentation.observable import Observable, ObservableCommand
 from acp_client.presentation.base_view_model import BaseViewModel
+from acp_client.presentation.observable import Observable, ObservableCommand
 
 __all__ = [
     'Observable',

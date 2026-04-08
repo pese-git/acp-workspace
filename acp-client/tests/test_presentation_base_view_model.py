@@ -1,7 +1,7 @@
 """Тесты для BaseViewModel."""
 
-import pytest
-from unittest.mock import Mock, AsyncMock
+from unittest.mock import Mock
+
 from acp_client.presentation.base_view_model import BaseViewModel
 
 

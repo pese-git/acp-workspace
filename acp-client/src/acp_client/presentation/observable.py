@@ -3,8 +3,10 @@
 Простая и легковесная реализация Observer паттерна для MVVM.
 """
 
-from typing import TypeVar, Callable, Any, Optional
 import asyncio
+from collections.abc import Callable
+from typing import Any, TypeVar
+
 import structlog
 
 T = TypeVar('T')
@@ -117,9 +119,9 @@ class ObservableCommand:
         # Observable свойства для отслеживания статуса
         self.is_executing = Observable(False)
         self.error = Observable(None)
-        self.last_result: Optional[Any] = None
+        self.last_result: Any | None = None
 
-    async def execute(self, *args: Any, **kwargs: Any) -> Optional[Any]:
+    async def execute(self, *args: Any, **kwargs: Any) -> Any | None:
         """Выполнить команду с обработкой ошибок.
         
         Устанавливает is_executing в True, выполняет handler,
