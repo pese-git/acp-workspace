@@ -12,7 +12,7 @@ class FooterBar(Static):
         """Создает footer с базовым текстом статуса."""
 
         super().__init__(
-            "Disconnected | Ctrl+B sessions | Ctrl+Enter send | Ctrl+N new | Ctrl+Q quit",
+            "Disconnected | Ctrl+B sessions | Ctrl+Enter send | Ctrl+R retry | Ctrl+Q quit",
             id="footer",
         )
 

@@ -23,18 +23,28 @@ from acp_client.messages import (
 from acp_client.transport import ACPClientWSSession
 
 type PermissionHandler = Callable[[dict[str, Any]], str | None | Awaitable[str | None]]
+type ReconnectEventHandler = Callable[[str], None]
 
 
 class ACPConnectionManager:
     """Тонкая обертка над ACPClient для потребностей TUI."""
 
-    def __init__(self, host: str, port: int) -> None:
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        *,
+        on_reconnect_attempt: ReconnectEventHandler | None = None,
+        on_reconnect_recovered: ReconnectEventHandler | None = None,
+    ) -> None:
         """Инициализирует клиента и logger для сетевых вызовов."""
 
         self._client = ACPClient(host=host, port=port)
         self._logger = structlog.get_logger("acp_client.tui.connection")
         self._ws_session: ACPClientWSSession | None = None
         self._initialized = False
+        self._on_reconnect_attempt = on_reconnect_attempt
+        self._on_reconnect_recovered = on_reconnect_recovered
 
     async def _ensure_ws_session(self) -> ACPClientWSSession:
         """Открывает persistent WS при первом запросе и возвращает session-object."""
@@ -60,17 +70,22 @@ class ACPConnectionManager:
         for attempt in range(2):
             ws_session = await self._ensure_ws_session()
             try:
-                return await ws_session.request(
+                response = await ws_session.request(
                     method=method,
                     params=params,
                     on_update=on_update,
                     on_permission=on_permission,
                 )
+                if attempt > 0 and self._on_reconnect_recovered is not None:
+                    self._on_reconnect_recovered(method)
+                return response
             except Exception as error:
                 # При транспортной ошибке закрываем сокет и даем один retry,
                 # чтобы клиент автоматически восстановил соединение.
                 await self.close()
                 if attempt == 0:
+                    if self._on_reconnect_attempt is not None:
+                        self._on_reconnect_attempt(method)
                     self._logger.warning(
                         "tui_request_retry_after_reconnect",
                         method=method,

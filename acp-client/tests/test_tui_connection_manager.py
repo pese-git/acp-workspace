@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any, cast
 
 import pytest
@@ -31,8 +32,19 @@ class FakeWSSession:
 class RetryAwareConnectionManager(ACPConnectionManager):
     """Connection manager с подменой WS-сессий для тестов retry-поведения."""
 
-    def __init__(self, sessions: list[FakeWSSession]) -> None:
-        super().__init__(host="127.0.0.1", port=8765)
+    def __init__(
+        self,
+        sessions: list[FakeWSSession],
+        *,
+        on_reconnect_attempt: Callable[[str], None] | None = None,
+        on_reconnect_recovered: Callable[[str], None] | None = None,
+    ) -> None:
+        super().__init__(
+            host="127.0.0.1",
+            port=8765,
+            on_reconnect_attempt=on_reconnect_attempt,
+            on_reconnect_recovered=on_reconnect_recovered,
+        )
         self._fake_sessions = sessions
 
     async def _ensure_ws_session(self) -> ACPClientWSSession:
@@ -47,7 +59,13 @@ class RetryAwareConnectionManager(ACPConnectionManager):
 async def test_connection_manager_retries_once_after_transport_error() -> None:
     first = FakeWSSession(fail_request=True)
     second = FakeWSSession(fail_request=False, result={"ok": True})
-    manager = RetryAwareConnectionManager([first, second])
+    reconnect_attempts: list[str] = []
+    reconnect_recovered: list[str] = []
+    manager = RetryAwareConnectionManager(
+        [first, second],
+        on_reconnect_attempt=reconnect_attempts.append,
+        on_reconnect_recovered=reconnect_recovered.append,
+    )
 
     result = await manager._request("ping")  # noqa: SLF001
 
@@ -55,13 +73,21 @@ async def test_connection_manager_retries_once_after_transport_error() -> None:
     assert first.request_calls == 1
     assert first.exit_calls == 1
     assert second.request_calls == 1
+    assert reconnect_attempts == ["ping"]
+    assert reconnect_recovered == ["ping"]
 
 
 @pytest.mark.asyncio
 async def test_connection_manager_raises_after_second_transport_error() -> None:
     first = FakeWSSession(fail_request=True)
     second = FakeWSSession(fail_request=True)
-    manager = RetryAwareConnectionManager([first, second])
+    reconnect_attempts: list[str] = []
+    reconnect_recovered: list[str] = []
+    manager = RetryAwareConnectionManager(
+        [first, second],
+        on_reconnect_attempt=reconnect_attempts.append,
+        on_reconnect_recovered=reconnect_recovered.append,
+    )
 
     with pytest.raises(RuntimeError, match="network error"):
         await manager._request("ping")  # noqa: SLF001
@@ -70,3 +96,5 @@ async def test_connection_manager_raises_after_second_transport_error() -> None:
     assert second.request_calls == 1
     assert first.exit_calls == 1
     assert second.exit_calls == 1
+    assert reconnect_attempts == ["ping"]
+    assert reconnect_recovered == []

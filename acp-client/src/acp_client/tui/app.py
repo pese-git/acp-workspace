@@ -35,6 +35,7 @@ class ACPClientApp(App[None]):
     BINDINGS = [
         ("ctrl+q", "quit", "Quit"),
         ("ctrl+n", "new_session", "New Session"),
+        ("ctrl+r", "retry_prompt", "Retry Prompt"),
         ("ctrl+b", "focus_sidebar", "Focus Sessions"),
         ("ctrl+j", "next_session", "Next Session"),
         ("ctrl+k", "previous_session", "Prev Session"),
@@ -48,13 +49,19 @@ class ACPClientApp(App[None]):
 
         super().__init__()
         self._app_logger = structlog.get_logger("acp_client.tui.app")
-        self._connection = ACPConnectionManager(host=host, port=port)
+        self._connection = ACPConnectionManager(
+            host=host,
+            port=port,
+            on_reconnect_attempt=self._on_reconnect_attempt,
+            on_reconnect_recovered=self._on_reconnect_recovered,
+        )
         self._sessions = SessionManager(self._connection)
         self._updates = UpdateMessageHandler(
             on_agent_chunk=self._on_agent_chunk,
             on_user_chunk=self._on_user_chunk,
             on_tool_update=self._on_tool_update,
         )
+        self._pending_prompt_text: str | None = None
 
     def compose(self) -> ComposeResult:
         """Собирает базовый layout приложения."""
@@ -102,7 +109,7 @@ class ACPClientApp(App[None]):
             chat.add_system_message("TUI ready")
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
             self._app_logger.error("tui_bootstrap_failed", error=str(exc))
-            header.set_status("Error")
+            header.set_status("Degraded")
             footer.set_status(format_footer_error(exc, prefix="Connection error"))
             chat.add_system_message(f"Ошибка подключения: {exc}")
 
@@ -131,14 +138,17 @@ class ACPClientApp(App[None]):
                 self._on_permission_request,
             )
             chat.finish_agent_message()
+            self._pending_prompt_text = None
             footer.set_status(
                 "Connected | Ready | Ctrl+B focus sessions | Ctrl+Enter send | Ctrl+J/K switch"
             )
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
             self._app_logger.error("tui_prompt_failed", error=str(exc))
+            self.query_one(HeaderBar).set_status("Degraded")
             chat.finish_agent_message()
             chat.add_system_message(f"Ошибка отправки prompt: {exc}")
-            footer.set_status(format_footer_error(exc, prefix="Connected | Error"))
+            self._pending_prompt_text = text
+            footer.set_status(format_retry_footer_error(exc))
 
     async def action_new_session(self) -> None:
         """Создает новую сессию и обновляет sidebar состояние."""
@@ -158,6 +168,7 @@ class ACPClientApp(App[None]):
             chat.add_system_message(f"Создана новая сессия: {new_session_id}")
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
             self._app_logger.error("tui_new_session_failed", error=str(exc))
+            self.query_one(HeaderBar).set_status("Degraded")
             footer.set_status(format_footer_error(exc, prefix="Connected | Error creating session"))
 
     async def action_next_session(self) -> None:
@@ -183,6 +194,17 @@ class ACPClientApp(App[None]):
         await self._sessions.cancel()
         chat.finish_agent_message()
         footer.set_status("Connected | Cancel requested")
+
+    def action_retry_prompt(self) -> None:
+        """Повторяет последний неуспешно отправленный prompt по Ctrl+R."""
+
+        footer = self.query_one(FooterBar)
+        pending_text = self._pending_prompt_text
+        if pending_text is None:
+            footer.set_status("Connected | Retry skipped: no failed prompt")
+            return
+        footer.set_status("Connected | Retrying last prompt...")
+        self.run_worker(self._send_prompt(pending_text), exclusive=True)
 
     def _on_agent_chunk(self, text: str) -> None:
         """Получает agent chunk и рендерит его в ChatView."""
@@ -225,6 +247,7 @@ class ACPClientApp(App[None]):
             chat.add_system_message(f"Активная сессия: {switched}")
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
             self._app_logger.error("tui_switch_session_failed", error=str(exc))
+            self.query_one(HeaderBar).set_status("Degraded")
             footer.set_status(
                 format_footer_error(exc, prefix="Connected | Error switching session")
             )
@@ -249,9 +272,22 @@ class ACPClientApp(App[None]):
             chat.add_system_message(f"Выбрана сессия: {message.session_id}")
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
             self._app_logger.error("tui_sidebar_select_failed", error=str(exc))
+            self.query_one(HeaderBar).set_status("Degraded")
             footer.set_status(
                 format_footer_error(exc, prefix="Connected | Error selecting session")
             )
+
+    def _on_reconnect_attempt(self, method: str) -> None:
+        """Отмечает состояние reconnect в UI при автоматическом retry."""
+
+        self.query_one(HeaderBar).set_status("Reconnecting")
+        self.query_one(FooterBar).set_status(f"Reconnecting | retry method={method}")
+
+    def _on_reconnect_recovered(self, method: str) -> None:
+        """Возвращает статус connected после успешного retry-запроса."""
+
+        self.query_one(HeaderBar).set_status("Connected")
+        self.query_one(FooterBar).set_status(f"Connected | Recovered after retry: {method}")
 
     def _render_replay_updates(self, updates: list[SessionUpdateNotification]) -> None:
         """Отрисовывает replay updates сообщений и tool-call статусов."""
@@ -338,3 +374,9 @@ def format_footer_error(exc: Exception, *, prefix: str) -> str:
     if not compact:
         return f"{prefix} | unknown error"
     return f"{prefix} | {compact[:96]}"
+
+
+def format_retry_footer_error(exc: Exception) -> str:
+    """Формирует статус ошибки с подсказкой на повтор отправки prompt."""
+
+    return f"{format_footer_error(exc, prefix='Connected | Error')} | Ctrl+R retry"
