@@ -28,7 +28,13 @@ from .components import (
     Sidebar,
     ToolPanel,
 )
-from .managers import ACPConnectionManager, SessionManager, UpdateMessageHandler
+from .managers import (
+    ACPConnectionManager,
+    SessionManager,
+    TUIStateSnapshot,
+    UIStateStore,
+    UpdateMessageHandler,
+)
 
 
 class ACPClientApp(App[None]):
@@ -64,6 +70,8 @@ class ACPClientApp(App[None]):
             on_tool_update=self._on_tool_update,
         )
         self._failed_operations: list[FailedOperation] = []
+        self._ui_state_store = UIStateStore()
+        self._loaded_ui_state = self._ui_state_store.load()
 
     def compose(self) -> ComposeResult:
         """Собирает базовый layout приложения."""
@@ -85,6 +93,7 @@ class ACPClientApp(App[None]):
     async def on_unmount(self) -> None:
         """Закрывает persistent WS-соединение при завершении приложения."""
 
+        self._persist_ui_state()
         await self._connection.close()
 
     async def _bootstrap(self) -> None:
@@ -99,12 +108,21 @@ class ACPClientApp(App[None]):
             header.set_status("Connected")
             await self._connection.initialize()
             await self._sessions.refresh_sessions()
-            await self._sessions.ensure_active_session()
-            self.query_one(PromptInput).set_active_session(self._sessions.active_session_id)
+            restored = await self._restore_active_session_from_snapshot()
+            if not restored:
+                await self._sessions.ensure_active_session()
+            prompt_input = self.query_one(PromptInput)
+            prompt_input.set_active_session(self._sessions.active_session_id)
             sidebar.set_sessions(self._sessions.sessions, self._sessions.active_session_id)
             tools.reset()
             chat.clear_messages()
             self._render_replay_updates(self._sessions.last_replay_updates)
+            if (
+                self._loaded_ui_state.draft_prompt_text
+                and self._loaded_ui_state.draft_session_id == self._sessions.active_session_id
+            ):
+                prompt_input.text = self._loaded_ui_state.draft_prompt_text
+                chat.add_system_message("Восстановлен черновик prompt")
             footer.set_status(
                 "Connected | Ready | Ctrl+B focus sessions | Ctrl+Enter send | Ctrl+J/K switch"
             )
@@ -125,6 +143,7 @@ class ACPClientApp(App[None]):
         chat.add_user_message(message.text)
         prompt_input.remember_prompt(message.text)
         prompt_input.text = ""
+        self._persist_ui_state()
         footer.set_status("Connected | Sending prompt...")
         self.run_worker(self._send_prompt(message.text), exclusive=True)
 
@@ -141,6 +160,7 @@ class ACPClientApp(App[None]):
             )
             chat.finish_agent_message()
             self._clear_failed_operations()
+            self._persist_ui_state()
             footer.set_status(
                 "Connected | Ready | Ctrl+B focus sessions | Ctrl+Enter send | Ctrl+J/K switch"
             )
@@ -176,6 +196,7 @@ class ACPClientApp(App[None]):
             tools.reset()
             chat.clear_messages()
             self._clear_failed_operations()
+            self._persist_ui_state()
             footer.set_status(f"Connected | New session created: {new_session_id}")
             chat.add_system_message(f"Создана новая сессия: {new_session_id}")
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
@@ -262,6 +283,7 @@ class ACPClientApp(App[None]):
             footer.set_status(f"Connected | Active session: {switched}")
             chat.add_system_message(f"Активная сессия: {switched}")
             self._clear_failed_operations()
+            self._persist_ui_state()
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
             self._app_logger.error("tui_switch_session_failed", error=str(exc))
             self.query_one(HeaderBar).set_status("Degraded")
@@ -297,6 +319,7 @@ class ACPClientApp(App[None]):
             footer.set_status(f"Connected | Active session: {session_id}")
             chat.add_system_message(f"Выбрана сессия: {session_id}")
             self._clear_failed_operations()
+            self._persist_ui_state()
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
             self._app_logger.error("tui_sidebar_select_failed", error=str(exc))
             self.query_one(HeaderBar).set_status("Degraded")
@@ -344,6 +367,35 @@ class ACPClientApp(App[None]):
         """Очищает накопленные неуспешные операции после успешного выполнения."""
 
         self._failed_operations = []
+
+    async def _restore_active_session_from_snapshot(self) -> bool:
+        """Восстанавливает активную сессию из сохраненного snapshot, если возможно."""
+
+        session_id = self._loaded_ui_state.last_active_session_id
+        if not isinstance(session_id, str) or not session_id:
+            return False
+        for session in self._sessions.sessions:
+            if session.sessionId == session_id:
+                await self._sessions.activate_session(session_id)
+                return True
+        return False
+
+    def _persist_ui_state(self) -> None:
+        """Сохраняет активную сессию и текущий черновик prompt в локальный store."""
+
+        draft_text = ""
+        try:
+            draft_text = self.query_one(PromptInput).text
+        except Exception:
+            draft_text = ""
+
+        self._ui_state_store.save(
+            snapshot=TUIStateSnapshot(
+                last_active_session_id=self._sessions.active_session_id,
+                draft_prompt_text=draft_text,
+                draft_session_id=self._sessions.active_session_id,
+            )
+        )
 
     def _render_replay_updates(self, updates: list[SessionUpdateNotification]) -> None:
         """Отрисовывает replay updates сообщений и tool-call статусов."""
