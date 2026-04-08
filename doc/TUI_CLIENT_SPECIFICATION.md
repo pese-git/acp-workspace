@@ -11,7 +11,7 @@
 
 ### 1.1 Цель
 
-Разработать полнофункциональный TUI (Text User Interface) клиент для взаимодействия с ACP-протоколом (Agent Client Protocol) на базе фреймворка Textual. Клиент должен предоставлять интерактивный интерфейс для управления сессиями агента, отправки промптов, отслеживания выполнения инструментов и управления локальными ресурсами (файлы, терминал).
+Расширить существующий `acp-client` полнофункциональным TUI (Text User Interface) для взаимодействия с ACP-протоколом (Agent Client Protocol) на базе фреймворка Textual. Клиент должен предоставлять интерактивный интерфейс для управления сессиями агента, отправки промптов, отслеживания выполнения инструментов и управления локальными ресурсами (файлы, терминал), без выделения в отдельный продукт.
 
 ### 1.2 Область применения
 
@@ -506,6 +506,7 @@ Switch на тип:
 | `Enter` | В PromptInput: перевод строки |
 | `Ctrl+Enter` | В PromptInput: отправка |
 | `↑/↓` | В PromptInput: навигация по истории |
+| `Ctrl+H` | Открыть справку |
 | `Esc` | Закрыть модальное окно |
 | `Ctrl+Q` | Выход |
 
@@ -531,8 +532,8 @@ Switch на тип:
       "terminal": true
     },
     "clientInfo": {
-      "name": "acp-client-tui",
-      "title": "ACP-Client TUI",
+      "name": "acp-client",
+      "title": "ACP-Client",
       "version": "1.0.0"
     }
   }
@@ -707,9 +708,9 @@ Switch на тип:
 
 ### 10.1 Distribution
 
-- PyPI пакет: `acp-client-tui` (или расширение acp-client)
-- Требования: Python 3.11+
-- Установка: `pip install acp-client-tui`
+- Дистрибутив: существующий пакет `acp-client` (без отдельного пакета для TUI)
+- Требования: Python 3.12+
+- Установка: `pip install acp-client`
 
 ### 10.2 Конфигурация
 
@@ -747,7 +748,7 @@ auto_reject_kinds = []
 - **Helpers** - session, auth операции
 - **Transport** - WebSocket транспорт
 
-### 11.2 Новые компоненты для TUI
+### 11.2 Компоненты, добавляемые в acp-client для TUI
 
 - **Textual Components** - UI виджеты
 - **ChatView** - визуализация сообщений
@@ -761,7 +762,7 @@ auto_reject_kinds = []
 acp-client/
 ├── src/acp_client/
 │   ├── ... (существующий код)
-│   ├── tui/                    # Новый модуль TUI
+│   ├── tui/                    # Встроенная подсистема TUI внутри acp-client
 │   │   ├── __init__.py
 │   │   ├── app.py              # Main Textual app
 │   │   ├── components/         # Textual компоненты
@@ -779,7 +780,7 @@ acp-client/
 │   │   │   └── permission.py
 │   │   └── styles/             # Textual CSS
 │   │       └── app.tcss
-│   ├── cli.py                  # Обновить для TUI
+│   ├── cli.py                  # Обновить: запуск TUI в существующем CLI
 │   └── ...
 ```
 
@@ -842,8 +843,8 @@ Request:
       "terminal": true
     },
     "clientInfo": {
-      "name": "acp-client-tui",
-      "title": "ACP-Client TUI",
+      "name": "acp-client",
+      "title": "ACP-Client",
       "version": "1.0.0"
     }
   }

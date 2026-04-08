@@ -10,6 +10,8 @@
 
 Детальный план разработки TUI-клиента для ACP-протокола, основанного на существующем acp-client и фреймворке Textual. План структурирован по этапам разработки с описанием задач, зависимостей и критериев готовности.
 
+Принцип реализации: TUI внедряется как расширение текущего `acp-client`, без выделения в отдельный пакет или отдельный продукт.
+
 ---
 
 ## Этап 1: Подготовка и инфраструктура (Foundational)
@@ -129,7 +131,7 @@ class ACPClientApp(App):
 **Технические работы:**
 - [ ] Добавить правило `make check-tui` для lint/tests
 - [ ] Настроить pytest для TUI тестов
-- [ ] Добавить mypy типизацию
+- [ ] Добавить `ty check` для TUI модулей
 - [ ] Проверить ruff конфигурацию
 
 **Оценка сложности:** Низкая
@@ -363,6 +365,9 @@ class ACPConnectionManager:
     
     async def send_request(method: str, params: dict) -> dict:
         """Отправить request и ждать response."""
+
+    async def enqueue_request(method: str, params: dict) -> None:
+        """Поставить request в очередь при разрыве соединения."""
     
     async def on_update(callback) -> None:
         """Получать session/update уведомления."""
@@ -372,6 +377,7 @@ class ACPConnectionManager:
 - [ ] Использовать существующий `ACPClient` из acp-client
 - [ ] Обернуть в менеджер для TUI
 - [ ] Реализовать автопереподключение
+- [ ] Добавить очередь запросов на время reconnect
 - [ ] Добавить логирование
 - [ ] Обработать ошибки
 
@@ -535,7 +541,7 @@ class UpdateMessageHandler:
 
 **Описание:** Реализовать диалоги для создания новой сессии
 
-**Файл:** `acp_client/tui/components/dialogs.py` (новый)
+**Файл:** `acp_client/tui/components/dialogs.py` (новый файл в составе `acp-client`)
 
 **Функциональность:**
 - Dialog для выбора рабочей директории
@@ -546,6 +552,24 @@ class UpdateMessageHandler:
 - [ ] Создать LoadSessionDialog
 - [ ] Интегрировать в приложение
 - [ ] Тестировать
+
+**Оценка сложности:** Средняя
+
+---
+
+### Задача 4.5: Удаление сессии
+
+**Описание:** Реализовать удаление сессии с подтверждением, если операция поддерживается сервером
+
+**Файлы для изменения:**
+- `acp_client/tui/managers/session.py`
+- `acp_client/tui/components/dialogs.py`
+
+**Технические работы:**
+- [ ] Проверить capability удаления сессии
+- [ ] Добавить действие удаления в SessionListWidget
+- [ ] Показать confirm-dialog перед удалением
+- [ ] Обновить список сессий после успешного удаления
 
 **Оценка сложности:** Средняя
 
@@ -567,7 +591,7 @@ class UpdateMessageHandler:
 
 **Описание:** Компоненты для отображения user и agent сообщений
 
-**Файл:** `acp_client/tui/components/message_blocks.py` (новый)
+**Файл:** `acp_client/tui/components/message_blocks.py` (новый файл в составе `acp-client`)
 
 **Функциональность:**
 ```python
@@ -618,6 +642,8 @@ async def stream_message(text: str) -> None:
 
 **Функциональность:**
 - Отправка текста как session/prompt
+- Вложение файла как контекста (ContentBlock::Resource)
+- Поддержка вложений изображений при наличии capability сервера
 - Очистка поля после отправки
 - Добавление в историю
 
@@ -625,6 +651,7 @@ async def stream_message(text: str) -> None:
 - [ ] Подключить SessionManager.send_prompt()
 - [ ] Реализовать обработку response
 - [ ] Добавить индикатор отправки
+- [ ] Добавить валидацию вложений и graceful fallback
 - [ ] Обработать ошибки
 
 **Оценка сложности:** Средняя
@@ -640,6 +667,7 @@ async def stream_message(text: str) -> None:
 **Технические работы:**
 - [ ] Подписать ChatView на session/update
 - [ ] Маршрутизировать updates на правильные обработчики
+- [ ] Обработать `available_commands_update` и синхронизировать slash-команды
 - [ ] Обновлять UI синхронно
 
 **Оценка сложности:** Средняя
@@ -703,7 +731,7 @@ class ToolCallPanel(Static):
 
 **Описание:** Отображение плана выполнения
 
-**Файл:** `acp_client/tui/components/plan_panel.py` (новый)
+**Файл:** `acp_client/tui/components/plan_panel.py` (новый файл в составе `acp-client`)
 
 **Функциональность:**
 - Список пунктов плана
@@ -736,7 +764,7 @@ class ToolCallPanel(Static):
 
 **Описание:** Дерево файлов в sidebar
 
-**Файл:** `acp_client/tui/components/file_tree.py` (новый)
+**Файл:** `acp_client/tui/components/file_tree.py` (новый файл в составе `acp-client`)
 
 **Функциональность:**
 - DirectoryTree для структуры проекта
@@ -757,7 +785,7 @@ class ToolCallPanel(Static):
 
 **Описание:** Обработчик для fs/* операций (из acp-client)
 
-**Файл:** `acp_client/tui/managers/filesystem.py` (новый)
+**Файл:** `acp_client/tui/managers/filesystem.py` (новый файл в составе `acp-client`)
 
 **Функциональность:**
 ```python
@@ -783,7 +811,7 @@ class LocalFileSystemManager:
 
 **Описание:** Модальное окно для просмотра файла
 
-**Файл:** `acp_client/tui/components/file_viewer.py` (новый)
+**Файл:** `acp_client/tui/components/file_viewer.py` (новый файл в составе `acp-client`)
 
 **Функциональность:**
 - Просмотр содержимого файла
@@ -832,7 +860,7 @@ class LocalFileSystemManager:
 
 **Описание:** Менеджер для управления терминальными процессами
 
-**Файл:** `acp_client/tui/managers/terminal.py` (новый)
+**Файл:** `acp_client/tui/managers/terminal.py` (новый файл в составе `acp-client`)
 
 **Функциональность:**
 ```python
@@ -845,6 +873,12 @@ class LocalTerminalManager:
     
     async def kill_terminal(terminal_id: str) -> bool:
         """terminal/kill."""
+
+    async def wait_for_exit(terminal_id: str) -> tuple[str, bool, int]:
+        """terminal/wait_for_exit."""
+
+    async def release_terminal(terminal_id: str) -> bool:
+        """terminal/release."""
 ```
 
 **Технические работы:**
@@ -852,6 +886,7 @@ class LocalTerminalManager:
 - [ ] Обернуть в менеджер
 - [ ] Обработать ошибки
 - [ ] Управление процессами (PTY на Linux/macOS)
+- [ ] Реализовать жизненный цикл terminal: create/output/wait_for_exit/release
 
 **Оценка сложности:** Средняя
 
@@ -861,7 +896,7 @@ class LocalTerminalManager:
 
 **Описание:** Компонент для отображения вывода терминала в tool call
 
-**Файл:** `acp_client/tui/components/terminal_output.py` (новый)
+**Файл:** `acp_client/tui/components/terminal_output.py` (новый файл в составе `acp-client`)
 
 **Функциональность:**
 - Streaming вывода
@@ -934,7 +969,7 @@ class PermissionModal(Modal):
 
 **Описание:** Менеджер для обработки permission requests
 
-**Файл:** `acp_client/tui/managers/permission.py` (новый)
+**Файл:** `acp_client/tui/managers/permission.py` (новый файл в составе `acp-client`)
 
 **Функциональность:**
 ```python
@@ -1024,7 +1059,7 @@ class UIStateMachine:
 
 **Описание:** Локальное кэширование истории сообщений
 
-**Файл:** `acp_client/tui/managers/cache.py` (новый)
+**Файл:** `acp_client/tui/managers/cache.py` (новый файл в составе `acp-client`)
 
 **Функциональность:**
 ```python
@@ -1052,7 +1087,7 @@ class HistoryCache:
 
 **Описание:** Управление конфигурацией приложения
 
-**Файл:** `acp_client/tui/config.py` (новый)
+**Файл:** `acp_client/tui/config.py` (новый файл в составе `acp-client`)
 
 **Функциональность:**
 - Хост/порт сервера
@@ -1092,8 +1127,10 @@ class HistoryCache:
 - Ctrl+L → clear_chat
 - Ctrl+C → cancel_prompt
 - Tab → cycle_focus
+- Enter → newline (в PromptInput)
 - Ctrl+Enter → send_prompt (в PromptInput)
 - ↑/↓ → history_navigation (в PromptInput)
+- Ctrl+H → open_help
 - Esc → close_modal
 - Ctrl+Q → quit
 
@@ -1172,9 +1209,10 @@ class HistoryCache:
 **Файл:** `acp-client/tests/test_tui_performance.py`
 
 **Технические работы:**
-- [ ] Измерить startup time
-- [ ] Измерить UI rendering
-- [ ] Измерить memory usage
+- [ ] Измерить startup time (< 500 мс на целевой машине)
+- [ ] Измерить UI rendering chunk (< 50 мс)
+- [ ] Измерить terminal update latency (< 100 мс/chunk)
+- [ ] Измерить memory usage (в пределах лимитов спецификации)
 - [ ] Оптимизировать узкие места
 
 **Оценка сложности:** Средняя
@@ -1215,8 +1253,8 @@ class HistoryCache:
 
 **Файлы:**
 - `acp-client/README.md` (обновить)
-- `acp-client/TUI.md` (новый)
-- `acp-client/HOTKEYS.md` (новый)
+- `acp-client/TUI.md` (новый файл документации в `acp-client`)
+- `acp-client/HOTKEYS.md` (новый файл документации в `acp-client`)
 
 **Содержание:**
 - Установка и требования
@@ -1239,7 +1277,7 @@ class HistoryCache:
 
 **Описание:** Документация API для разработчиков
 
-**Файл:** `acp-client/docs/TUI_API.md` (новый)
+**Файл:** `acp-client/docs/TUI_API.md` (новый файл документации в `acp-client`)
 
 **Содержание:**
 - Architecture overview
@@ -1318,7 +1356,7 @@ class HistoryCache:
 | 1 | 4 | Низкая | Нет (стартовый) |
 | 2 | 7 | Средняя | Этап 1 |
 | 3 | 4 | Средняя | Этап 1, 2 |
-| 4 | 4 | Средняя | Этап 2, 3 |
+| 4 | 5 | Средняя | Этап 2, 3 |
 | 5 | 4 | Средняя | Этап 2, 3, 4 |
 | 6 | 3 | Средняя | Этап 5 |
 | 7 | 4 | Средняя | Этап 3, 4 |
@@ -1329,7 +1367,7 @@ class HistoryCache:
 | 12 | 4 | Средняя | Все предыдущие |
 | 13 | 4 | Низкая | Все предыдущие |
 
-**Итого задач:** 49
+**Итого задач:** 50
 
 ---
 
