@@ -5,6 +5,8 @@ import asyncio
 import pytest
 
 from acp_client.tui.app import (
+    HELP_FOOTER_DETAIL,
+    READY_FOOTER_DETAIL,
     ACPClientApp,
     ConnectionState,
     build_error_state_status,
@@ -15,7 +17,7 @@ from acp_client.tui.app import (
     format_offline_footer_detail,
     format_retry_footer_error,
 )
-from acp_client.tui.components import ChatView
+from acp_client.tui.components import ChatView, PromptInput, Sidebar
 
 
 class _FakeChatView:
@@ -23,6 +25,7 @@ class _FakeChatView:
 
     def __init__(self) -> None:
         self.finished = False
+        self.cleared = False
         self.system_messages: list[str] = []
 
     def finish_agent_message(self) -> None:
@@ -35,12 +38,35 @@ class _FakeChatView:
 
         self.system_messages.append(text)
 
+    def clear_messages(self) -> None:
+        """Эмулирует очистку чата для action_clear_chat тестов."""
+
+        self.cleared = True
+
 
 class _FakePromptInput:
     """Минимальный PromptInput double для сценариев retry и persist state."""
 
     def __init__(self, text: str = "") -> None:
         self.text = text
+        self.focused = False
+
+    def focus(self) -> None:
+        """Отмечает фокусировку поля ввода."""
+
+        self.focused = True
+
+
+class _FakeSidebar:
+    """Минимальный focusable sidebar double для hotkey-навигации."""
+
+    def __init__(self) -> None:
+        self.focused = False
+
+    def focus(self) -> None:
+        """Отмечает перевод фокуса на sidebar."""
+
+        self.focused = True
 
 
 def test_format_footer_error_extracts_jsonrpc_code_and_reason() -> None:
@@ -180,6 +206,94 @@ def test_build_retry_started_status_returns_reconnecting_when_disconnected() -> 
 
     assert state == ConnectionState.RECONNECTING
     assert detail == "Retrying failed operation: prompt (1 remaining)"
+
+
+def test_focus_session_list_alias_focuses_sidebar(monkeypatch: pytest.MonkeyPatch) -> None:
+    app = ACPClientApp(host="127.0.0.1", port=8765)
+    sidebar = _FakeSidebar()
+
+    def _query_one(selector: object) -> _FakeSidebar:
+        if selector is Sidebar:
+            return sidebar
+        msg = f"Unexpected selector: {selector}"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(app, "query_one", _query_one)
+
+    app.action_focus_session_list()
+
+    assert sidebar.focused is True
+    assert app._focus_index == 0  # noqa: SLF001
+
+
+def test_cycle_focus_switches_between_sidebar_and_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
+    app = ACPClientApp(host="127.0.0.1", port=8765)
+    sidebar = _FakeSidebar()
+    prompt = _FakePromptInput()
+
+    def _query_one(selector: object) -> _FakeSidebar | _FakePromptInput:
+        if selector is Sidebar:
+            return sidebar
+        if selector is PromptInput:
+            return prompt
+        msg = f"Unexpected selector: {selector}"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(app, "query_one", _query_one)
+
+    app.action_cycle_focus()
+    app.action_cycle_focus()
+
+    assert sidebar.focused is True
+    assert prompt.focused is True
+    assert app._focus_index == 1  # noqa: SLF001
+
+
+def test_clear_chat_resets_messages_and_updates_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    app = ACPClientApp(host="127.0.0.1", port=8765)
+    chat = _FakeChatView()
+    transitions: list[tuple[ConnectionState, str]] = []
+
+    def _query_one(selector: object) -> _FakeChatView:
+        if selector is ChatView:
+            return chat
+        msg = f"Unexpected selector: {selector}"
+        raise AssertionError(msg)
+
+    def _capture_state(state: ConnectionState, *, detail: str) -> None:
+        transitions.append((state, detail))
+
+    monkeypatch.setattr(app, "query_one", _query_one)
+    monkeypatch.setattr(app, "_set_connection_state", _capture_state)
+
+    app.action_clear_chat()
+
+    assert chat.cleared is True
+    assert transitions == [(ConnectionState.CONNECTED, "Chat cleared")]
+
+
+def test_open_help_adds_system_message_and_help_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    app = ACPClientApp(host="127.0.0.1", port=8765)
+    chat = _FakeChatView()
+    transitions: list[tuple[ConnectionState, str]] = []
+
+    def _query_one(selector: object) -> _FakeChatView:
+        if selector is ChatView:
+            return chat
+        msg = f"Unexpected selector: {selector}"
+        raise AssertionError(msg)
+
+    def _capture_state(state: ConnectionState, *, detail: str) -> None:
+        transitions.append((state, detail))
+
+    monkeypatch.setattr(app, "query_one", _query_one)
+    monkeypatch.setattr(app, "_set_connection_state", _capture_state)
+
+    app.action_open_help()
+
+    assert len(chat.system_messages) == 1
+    assert "Горячие клавиши:" in chat.system_messages[0]
+    assert transitions == [(ConnectionState.CONNECTED, HELP_FOOTER_DETAIL)]
 
 
 def test_reconnect_callbacks_emit_runtime_state_transitions(
@@ -324,10 +438,7 @@ async def test_offline_prompt_blocked_then_reconnect_then_retry_success(
     assert transitions[-3:] == [
         (ConnectionState.CONNECTED, "Recovered after retry: session/prompt"),
         (ConnectionState.CONNECTED, "Retrying failed operation: prompt (0 remaining)"),
-        (
-            ConnectionState.CONNECTED,
-            "Ready | Ctrl+B focus sessions | Ctrl+Enter send | Ctrl+J/K switch",
-        ),
+        (ConnectionState.CONNECTED, READY_FOOTER_DETAIL),
     ]
 
 
@@ -559,10 +670,7 @@ async def test_multiple_offline_prompt_blocks_retry_latest_prompt_after_reconnec
     assert transitions[-3:] == [
         (ConnectionState.CONNECTED, "Recovered after retry: session/prompt"),
         (ConnectionState.CONNECTED, "Retrying failed operation: prompt (0 remaining)"),
-        (
-            ConnectionState.CONNECTED,
-            "Ready | Ctrl+B focus sessions | Ctrl+Enter send | Ctrl+J/K switch",
-        ),
+        (ConnectionState.CONNECTED, READY_FOOTER_DETAIL),
     ]
 
 

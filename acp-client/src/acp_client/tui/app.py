@@ -37,7 +37,11 @@ from .managers import (
     UpdateMessageHandler,
 )
 
-READY_FOOTER_DETAIL = "Ready | Ctrl+B focus sessions | Ctrl+Enter send | Ctrl+J/K switch"
+READY_FOOTER_DETAIL = "Ready | Ctrl+S/B sessions | Tab cycle focus | Ctrl+L clear | Ctrl+Enter send"
+HELP_FOOTER_DETAIL = (
+    "Help | Ctrl+S/B sessions | Tab cycle focus | Ctrl+N new | Ctrl+J/K switch | "
+    "Ctrl+L clear | Ctrl+R retry | Ctrl+C cancel | Ctrl+Q quit"
+)
 
 
 class ConnectionState(StrEnum):
@@ -127,8 +131,12 @@ class ACPClientApp(App[None]):
         ("ctrl+n", "new_session", "New Session"),
         ("ctrl+r", "retry_prompt", "Retry Prompt"),
         ("ctrl+b", "focus_sidebar", "Focus Sessions"),
+        ("ctrl+s", "focus_session_list", "Focus Sessions"),
         ("ctrl+j", "next_session", "Next Session"),
         ("ctrl+k", "previous_session", "Prev Session"),
+        ("ctrl+l", "clear_chat", "Clear Chat"),
+        ("ctrl+h", "open_help", "Help"),
+        ("tab", "cycle_focus", "Cycle Focus"),
         ("ctrl+c", "cancel_prompt", "Cancel"),
     ]
 
@@ -152,6 +160,8 @@ class ACPClientApp(App[None]):
             on_tool_update=self._on_tool_update,
         )
         self._failed_operations: list[FailedOperation] = []
+        self._focus_order: tuple[type[Sidebar] | type[PromptInput], ...] = (Sidebar, PromptInput)
+        self._focus_index: int = 1
         self._ui_state_store = UIStateStore()
         self._loaded_ui_state = self._ui_state_store.load()
 
@@ -206,6 +216,8 @@ class ACPClientApp(App[None]):
             ):
                 prompt_input.text = self._loaded_ui_state.draft_prompt_text
                 chat.add_system_message("Восстановлен черновик prompt")
+            prompt_input.focus()
+            self._focus_index = 1
             self._set_connection_state(ConnectionState.CONNECTED, detail=READY_FOOTER_DETAIL)
             chat.add_system_message("TUI ready")
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
@@ -322,6 +334,33 @@ class ACPClientApp(App[None]):
         """Переводит фокус в sidebar для выбора сессии по Enter."""
 
         self.query_one(Sidebar).focus()
+        self._focus_index = 0
+
+    def action_focus_session_list(self) -> None:
+        """Алиас для быстрого перехода к списку сессий по Ctrl+S."""
+
+        self.action_focus_sidebar()
+
+    def action_cycle_focus(self) -> None:
+        """Переключает фокус между sidebar и prompt input по Tab."""
+
+        self._focus_index = (self._focus_index + 1) % len(self._focus_order)
+        self.query_one(self._focus_order[self._focus_index]).focus()
+
+    def action_open_help(self) -> None:
+        """Показывает краткую справку по горячим клавишам в чате и footer."""
+
+        self.query_one(ChatView).add_system_message(
+            "Горячие клавиши: Ctrl+S/B сессии, Tab фокус, Ctrl+N новая сессия, "
+            "Ctrl+J/K переключение, Ctrl+L очистить чат, Ctrl+R retry, Ctrl+C cancel, Ctrl+Q выход"
+        )
+        self._set_connection_state(ConnectionState.CONNECTED, detail=HELP_FOOTER_DETAIL)
+
+    def action_clear_chat(self) -> None:
+        """Очищает историю чата текущей сессии и сообщает об этом в footer."""
+
+        self.query_one(ChatView).clear_messages()
+        self._set_connection_state(ConnectionState.CONNECTED, detail="Chat cleared")
 
     async def action_cancel_prompt(self) -> None:
         """Отправляет session/cancel для текущей сессии."""
