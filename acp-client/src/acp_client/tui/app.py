@@ -55,6 +55,11 @@ class ACPClientApp(App[None]):
 
         self.run_worker(self._bootstrap(), exclusive=True)
 
+    async def on_unmount(self) -> None:
+        """Закрывает persistent WS-соединение при завершении приложения."""
+
+        await self._connection.close()
+
     async def _bootstrap(self) -> None:
         """Инициализирует соединение и обеспечивает активную сессию."""
 

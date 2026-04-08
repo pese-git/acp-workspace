@@ -8,7 +8,17 @@ from typing import Any
 import structlog
 
 from acp_client.client import ACPClient
-from acp_client.messages import InitializeResult, PromptResult, SessionListItem, SessionSetupResult
+from acp_client.messages import (
+    InitializeResult,
+    PromptResult,
+    SessionListItem,
+    SessionSetupResult,
+    parse_initialize_result,
+    parse_prompt_result,
+    parse_session_list_result,
+    parse_session_setup_result,
+)
+from acp_client.transport import ACPClientWSSession
 
 
 class ACPConnectionManager:
@@ -19,44 +29,123 @@ class ACPConnectionManager:
 
         self._client = ACPClient(host=host, port=port)
         self._logger = structlog.get_logger("acp_client.tui.connection")
+        self._ws_session: ACPClientWSSession | None = None
+        self._initialized = False
+
+    async def _ensure_ws_session(self) -> ACPClientWSSession:
+        """Открывает persistent WS при первом запросе и возвращает session-object."""
+
+        if self._ws_session is not None:
+            return self._ws_session
+
+        self._ws_session = self._client.open_ws_session()
+        await self._ws_session.__aenter__()
+        self._initialized = False
+        self._logger.debug("tui_ws_session_opened")
+        return self._ws_session
+
+    async def _request(
+        self,
+        method: str,
+        params: dict[str, Any] | None = None,
+        on_update: Callable[[dict[str, Any]], None] | None = None,
+    ) -> Any:
+        """Отправляет ACP-запрос через один и тот же persistent WS канал."""
+
+        ws_session = await self._ensure_ws_session()
+        try:
+            return await ws_session.request(method=method, params=params, on_update=on_update)
+        except Exception:
+            # При любой транспортной ошибке закрываем текущий сокет,
+            # чтобы следующий вызов прозрачно создал новое соединение.
+            await self.close()
+            raise
+
+    async def _ensure_initialized(self) -> None:
+        """Гарантирует ACP initialize перед вызовом session/* методов."""
+
+        if self._initialized:
+            return
+        await self.initialize()
+
+    async def close(self) -> None:
+        """Закрывает persistent WS-сессию TUI-клиента."""
+
+        if self._ws_session is None:
+            return
+        await self._ws_session.__aexit__(None, None, None)
+        self._ws_session = None
+        self._initialized = False
+        self._logger.debug("tui_ws_session_closed")
 
     async def initialize(self) -> InitializeResult:
         """Выполняет initialize handshake и возвращает negotiated capabilities."""
 
         self._logger.info("tui_initialize_started")
-        result = await self._client.initialize(
-            client_capabilities={
-                "fs": {"readTextFile": False, "writeTextFile": False},
-                "terminal": False,
-            },
-            client_info={
-                "name": "acp-client",
-                "title": "ACP-Client TUI",
-                "version": "0.1.0",
+        response = await self._request(
+            method="initialize",
+            params={
+                "protocolVersion": 1,
+                "clientCapabilities": {
+                    "fs": {"readTextFile": False, "writeTextFile": False},
+                    "terminal": False,
+                },
+                "clientInfo": {
+                    "name": "acp-client",
+                    "title": "ACP-Client TUI",
+                    "version": "0.1.0",
+                },
             },
         )
+        result = parse_initialize_result(response)
+        self._initialized = True
         self._logger.info("tui_initialize_completed")
         return result
 
     async def list_sessions(self) -> list[SessionListItem]:
         """Возвращает полный список сессий через helper пагинации."""
 
-        return await self._client.list_all_sessions_parsed()
+        await self._ensure_initialized()
+
+        sessions: list[SessionListItem] = []
+        cursor: str | None = None
+
+        while True:
+            params: dict[str, Any] = {}
+            if cursor is not None:
+                params["cursor"] = cursor
+            response = await self._request(method="session/list", params=params)
+            page = parse_session_list_result(response)
+            sessions.extend(page.sessions)
+            if page.nextCursor is None:
+                break
+            cursor = page.nextCursor
+
+        return sessions
 
     async def create_session(self, cwd: str) -> SessionSetupResult:
         """Создает новую сессию с указанной рабочей директорией."""
 
-        return await self._client.create_session_parsed(cwd=cwd, mcp_servers=[])
+        await self._ensure_initialized()
+        response = await self._request(
+            method="session/new",
+            params={"cwd": cwd, "mcpServers": []},
+        )
+        return parse_session_setup_result(response, method_name="session/new")
 
     async def load_session(self, session_id: str, cwd: str) -> SessionSetupResult:
         """Загружает существующую сессию и возвращает ее состояние."""
 
-        state, _updates = await self._client.load_session_setup_parsed(
-            session_id=session_id,
-            cwd=cwd,
-            mcp_servers=[],
+        await self._ensure_initialized()
+        response = await self._request(
+            method="session/load",
+            params={
+                "sessionId": session_id,
+                "cwd": cwd,
+                "mcpServers": [],
+            },
         )
-        return state
+        return parse_session_setup_result(response, method_name="session/load")
 
     async def send_prompt(
         self,
@@ -67,13 +156,19 @@ class ACPConnectionManager:
     ) -> PromptResult:
         """Отправляет текстовый prompt в активную сессию."""
 
-        return await self._client.prompt(
-            session_id=session_id,
-            prompt=[{"type": "text", "text": text}],
+        await self._ensure_initialized()
+        response = await self._request(
+            method="session/prompt",
+            params={
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": text}],
+            },
             on_update=on_update,
         )
+        return parse_prompt_result(response)
 
     async def cancel_prompt(self, session_id: str) -> None:
         """Отправляет уведомление отмены выполнения для активной сессии."""
 
-        await self._client.request("session/cancel", {"sessionId": session_id})
+        await self._ensure_initialized()
+        await self._request("session/cancel", {"sessionId": session_id})
