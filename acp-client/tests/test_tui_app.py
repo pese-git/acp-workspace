@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from acp_client.tui.app import format_footer_error, format_retry_footer_error
+from acp_client.tui.app import ACPClientApp, format_footer_error, format_retry_footer_error
 
 
 def test_format_footer_error_extracts_jsonrpc_code_and_reason() -> None:
@@ -24,6 +24,44 @@ def test_format_footer_error_handles_plain_error_message() -> None:
 def test_format_retry_footer_error_adds_retry_hint() -> None:
     error = RuntimeError("temporary network timeout")
 
-    formatted = format_retry_footer_error(error, action_label="prompt")
+    formatted = format_retry_footer_error(error, action_label="prompt", pending_count=2)
 
-    assert formatted == "Connected | Error | temporary network timeout | Ctrl+R retry prompt"
+    assert (
+        formatted
+        == "Connected | Error | temporary network timeout | Ctrl+R retry prompt | queued=2"
+    )
+
+
+def test_failed_operations_queue_deduplicates_by_label() -> None:
+    app = ACPClientApp(host="127.0.0.1", port=8765)
+
+    async def first_action() -> None:
+        return None
+
+    async def second_action() -> None:
+        return None
+
+    app._remember_failed_operation(label="prompt", action=first_action)  # noqa: SLF001
+    app._remember_failed_operation(label="prompt", action=second_action)  # noqa: SLF001
+
+    assert len(app._failed_operations) == 1  # noqa: SLF001
+    failed_operation = app._pop_failed_operation()  # noqa: SLF001
+    assert failed_operation is not None
+    assert failed_operation.label == "prompt"
+
+
+def test_failed_operations_queue_keeps_latest_five() -> None:
+    app = ACPClientApp(host="127.0.0.1", port=8765)
+
+    async def retry_action() -> None:
+        return None
+
+    for index in range(6):
+        app._remember_failed_operation(  # noqa: SLF001
+            label=f"op_{index}",
+            action=retry_action,
+        )
+
+    assert len(app._failed_operations) == 5  # noqa: SLF001
+    assert app._failed_operations[0].label == "op_1"  # noqa: SLF001
+    assert app._failed_operations[-1].label == "op_5"  # noqa: SLF001

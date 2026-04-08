@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import structlog
@@ -62,8 +63,7 @@ class ACPClientApp(App[None]):
             on_user_chunk=self._on_user_chunk,
             on_tool_update=self._on_tool_update,
         )
-        self._pending_retry_action: Callable[[], Awaitable[None]] | None = None
-        self._pending_retry_label: str | None = None
+        self._failed_operations: list[FailedOperation] = []
 
     def compose(self) -> ComposeResult:
         """Собирает базовый layout приложения."""
@@ -140,7 +140,7 @@ class ACPClientApp(App[None]):
                 self._on_permission_request,
             )
             chat.finish_agent_message()
-            self._clear_pending_retry()
+            self._clear_failed_operations()
             footer.set_status(
                 "Connected | Ready | Ctrl+B focus sessions | Ctrl+Enter send | Ctrl+J/K switch"
             )
@@ -149,11 +149,17 @@ class ACPClientApp(App[None]):
             self.query_one(HeaderBar).set_status("Degraded")
             chat.finish_agent_message()
             chat.add_system_message(f"Ошибка отправки prompt: {exc}")
-            self._set_pending_retry(
+            self._remember_failed_operation(
                 label="prompt",
                 action=lambda: self._send_prompt(text),
             )
-            footer.set_status(format_retry_footer_error(exc, action_label="prompt"))
+            footer.set_status(
+                format_retry_footer_error(
+                    exc,
+                    action_label="prompt",
+                    pending_count=len(self._failed_operations),
+                )
+            )
 
     async def action_new_session(self) -> None:
         """Создает новую сессию и обновляет sidebar состояние."""
@@ -169,13 +175,13 @@ class ACPClientApp(App[None]):
             self.query_one(PromptInput).text = ""
             tools.reset()
             chat.clear_messages()
-            self._clear_pending_retry()
+            self._clear_failed_operations()
             footer.set_status(f"Connected | New session created: {new_session_id}")
             chat.add_system_message(f"Создана новая сессия: {new_session_id}")
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
             self._app_logger.error("tui_new_session_failed", error=str(exc))
             self.query_one(HeaderBar).set_status("Degraded")
-            self._set_pending_retry(label="new_session", action=self.action_new_session)
+            self._remember_failed_operation(label="new_session", action=self.action_new_session)
             footer.set_status(format_footer_error(exc, prefix="Connected | Error creating session"))
 
     async def action_next_session(self) -> None:
@@ -206,13 +212,15 @@ class ACPClientApp(App[None]):
         """Повторяет последнюю неуспешную операцию по Ctrl+R."""
 
         footer = self.query_one(FooterBar)
-        pending_action = self._pending_retry_action
-        pending_label = self._pending_retry_label
-        if pending_action is None or pending_label is None:
+        failed_operation = self._pop_failed_operation()
+        if failed_operation is None:
             footer.set_status("Connected | Retry skipped: no failed operation")
             return
-        footer.set_status(f"Connected | Retrying failed operation: {pending_label}")
-        self.run_worker(pending_action(), exclusive=True)
+        footer.set_status(
+            "Connected | Retrying failed operation: "
+            f"{failed_operation.label} ({len(self._failed_operations)} remaining)"
+        )
+        self.run_worker(failed_operation.action(), exclusive=True)
 
     def _on_agent_chunk(self, text: str) -> None:
         """Получает agent chunk и рендерит его в ChatView."""
@@ -253,11 +261,11 @@ class ACPClientApp(App[None]):
             self.query_one(PromptInput).text = ""
             footer.set_status(f"Connected | Active session: {switched}")
             chat.add_system_message(f"Активная сессия: {switched}")
-            self._clear_pending_retry()
+            self._clear_failed_operations()
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
             self._app_logger.error("tui_switch_session_failed", error=str(exc))
             self.query_one(HeaderBar).set_status("Degraded")
-            self._set_pending_retry(
+            self._remember_failed_operation(
                 label=f"switch_session_{direction}",
                 action=lambda: self._switch_session(direction=direction),
             )
@@ -288,11 +296,11 @@ class ACPClientApp(App[None]):
             self._render_replay_updates(self._sessions.last_replay_updates)
             footer.set_status(f"Connected | Active session: {session_id}")
             chat.add_system_message(f"Выбрана сессия: {session_id}")
-            self._clear_pending_retry()
+            self._clear_failed_operations()
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
             self._app_logger.error("tui_sidebar_select_failed", error=str(exc))
             self.query_one(HeaderBar).set_status("Degraded")
-            self._set_pending_retry(
+            self._remember_failed_operation(
                 label="select_session",
                 action=lambda: self._activate_session_by_id(session_id),
             )
@@ -312,22 +320,30 @@ class ACPClientApp(App[None]):
         self.query_one(HeaderBar).set_status("Connected")
         self.query_one(FooterBar).set_status(f"Connected | Recovered after retry: {method}")
 
-    def _set_pending_retry(
+    def _remember_failed_operation(
         self,
         *,
         label: str,
         action: Callable[[], Awaitable[None]],
     ) -> None:
-        """Сохраняет неуспешную операцию для повторного запуска по Ctrl+R."""
+        """Сохраняет неуспешную операцию в очередь повторных запусков."""
 
-        self._pending_retry_label = label
-        self._pending_retry_action = action
+        self._failed_operations = [item for item in self._failed_operations if item.label != label]
+        self._failed_operations.append(FailedOperation(label=label, action=action))
+        if len(self._failed_operations) > 5:
+            self._failed_operations.pop(0)
 
-    def _clear_pending_retry(self) -> None:
-        """Очищает сохраненную неуспешную операцию после успешного выполнения."""
+    def _pop_failed_operation(self) -> FailedOperation | None:
+        """Возвращает последнюю неуспешную операцию для повторного запуска."""
 
-        self._pending_retry_label = None
-        self._pending_retry_action = None
+        if not self._failed_operations:
+            return None
+        return self._failed_operations.pop()
+
+    def _clear_failed_operations(self) -> None:
+        """Очищает накопленные неуспешные операции после успешного выполнения."""
+
+        self._failed_operations = []
 
     def _render_replay_updates(self, updates: list[SessionUpdateNotification]) -> None:
         """Отрисовывает replay updates сообщений и tool-call статусов."""
@@ -416,7 +432,23 @@ def format_footer_error(exc: Exception, *, prefix: str) -> str:
     return f"{prefix} | {compact[:96]}"
 
 
-def format_retry_footer_error(exc: Exception, *, action_label: str) -> str:
+def format_retry_footer_error(
+    exc: Exception,
+    *,
+    action_label: str,
+    pending_count: int,
+) -> str:
     """Формирует статус ошибки с подсказкой на повтор операции."""
 
-    return f"{format_footer_error(exc, prefix='Connected | Error')} | Ctrl+R retry {action_label}"
+    return (
+        f"{format_footer_error(exc, prefix='Connected | Error')}"
+        f" | Ctrl+R retry {action_label} | queued={pending_count}"
+    )
+
+
+@dataclass(slots=True)
+class FailedOperation:
+    """Описывает неуспешную операцию, которую можно повторить по Ctrl+R."""
+
+    label: str
+    action: Callable[[], Awaitable[None]]
