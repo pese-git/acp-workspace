@@ -482,6 +482,11 @@ async def test_offline_prompt_blocked_then_reconnect_then_retry_success(
         _on_permission: object,
         _on_fs_read: object,
         _on_fs_write: object,
+        _on_terminal_create: object,
+        _on_terminal_output: object,
+        _on_terminal_wait_for_exit: object,
+        _on_terminal_release: object,
+        _on_terminal_kill: object,
     ) -> None:
         sent_prompts.append(text)
 
@@ -554,6 +559,11 @@ async def test_offline_prompt_blocked_then_reconnect_retry_failure_returns_to_de
         _on_permission: object,
         _on_fs_read: object,
         _on_fs_write: object,
+        _on_terminal_create: object,
+        _on_terminal_output: object,
+        _on_terminal_wait_for_exit: object,
+        _on_terminal_release: object,
+        _on_terminal_kill: object,
     ) -> None:
         if text != "retry me":
             msg = f"Unexpected prompt: {text}"
@@ -635,6 +645,11 @@ async def test_offline_prompt_blocked_then_retry_loses_connection_returns_offlin
         _on_permission: object,
         _on_fs_read: object,
         _on_fs_write: object,
+        _on_terminal_create: object,
+        _on_terminal_output: object,
+        _on_terminal_wait_for_exit: object,
+        _on_terminal_release: object,
+        _on_terminal_kill: object,
     ) -> None:
         nonlocal connection_ready
         if text != "retry me":
@@ -719,6 +734,11 @@ async def test_multiple_offline_prompt_blocks_retry_latest_prompt_after_reconnec
         _on_permission: object,
         _on_fs_read: object,
         _on_fs_write: object,
+        _on_terminal_create: object,
+        _on_terminal_output: object,
+        _on_terminal_wait_for_exit: object,
+        _on_terminal_release: object,
+        _on_terminal_kill: object,
     ) -> None:
         sent_prompts.append(text)
 
@@ -887,3 +907,55 @@ def test_file_tree_open_request_reads_file_and_opens_viewer(
 
     assert read_calls == [("/tmp/demo.py", 1, FILE_VIEWER_LINE_LIMIT)]
     assert len(pushed_screens) == 1
+
+
+def test_terminal_create_and_output_are_reported_to_chat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = ACPClientApp(host="127.0.0.1", port=8765)
+    chat = _FakeChatView()
+
+    def _query_one(selector: object) -> _FakeChatView:
+        if selector is not ChatView:
+            msg = f"Unexpected selector: {selector}"
+            raise AssertionError(msg)
+        return chat
+
+    monkeypatch.setattr(app, "query_one", _query_one)
+    monkeypatch.setattr(app._terminal, "create_terminal", lambda _cmd: "term_1")
+    monkeypatch.setattr(app._terminal, "get_output", lambda _term_id: "line1\n")
+
+    terminal_id = app._on_terminal_create("python -V")  # noqa: SLF001
+    output = app._on_terminal_output("term_1")  # noqa: SLF001
+
+    assert terminal_id == "term_1"
+    assert output == "line1\n"
+    assert chat.system_messages == [
+        "Терминал запущен: term_1 | python -V",
+        "[terminal term_1]\nline1",
+    ]
+
+
+def test_terminal_wait_and_kill_are_reported_to_chat(monkeypatch: pytest.MonkeyPatch) -> None:
+    app = ACPClientApp(host="127.0.0.1", port=8765)
+    chat = _FakeChatView()
+
+    def _query_one(selector: object) -> _FakeChatView:
+        if selector is not ChatView:
+            msg = f"Unexpected selector: {selector}"
+            raise AssertionError(msg)
+        return chat
+
+    monkeypatch.setattr(app, "query_one", _query_one)
+    monkeypatch.setattr(app._terminal, "wait_for_exit", lambda _term_id: 0)
+    monkeypatch.setattr(app._terminal, "kill_terminal", lambda _term_id: True)
+
+    wait_result = app._on_terminal_wait_for_exit("term_1")  # noqa: SLF001
+    killed = app._on_terminal_kill("term_1")  # noqa: SLF001
+
+    assert wait_result == 0
+    assert killed is True
+    assert chat.system_messages == [
+        "Терминал завершен: term_1 (exit=0)",
+        "Терминал остановлен: term_1",
+    ]

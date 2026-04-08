@@ -40,6 +40,11 @@ class SessionConnection(Protocol):
         on_permission: Callable[[dict[str, Any]], str | None | Awaitable[str | None]] | None,
         on_fs_read: Callable[[str], str] | None,
         on_fs_write: Callable[[str, str], None] | None,
+        on_terminal_create: Callable[[str], str] | None,
+        on_terminal_output: Callable[[str], str] | None,
+        on_terminal_wait_for_exit: Callable[[str], int | tuple[int | None, str | None]] | None,
+        on_terminal_release: Callable[[str], None] | None,
+        on_terminal_kill: Callable[[str], bool] | None,
     ) -> Any:
         """Отправляет prompt в активную сессию."""
 
@@ -170,6 +175,12 @@ class SessionManager:
         on_permission: Callable[[dict[str, Any]], str | None | Awaitable[str | None]] | None,
         on_fs_read: Callable[[str], str] | None = None,
         on_fs_write: Callable[[str, str], None] | None = None,
+        on_terminal_create: Callable[[str], str] | None = None,
+        on_terminal_output: Callable[[str], str] | None = None,
+        on_terminal_wait_for_exit: Callable[[str], int | tuple[int | None, str | None]]
+        | None = None,
+        on_terminal_release: Callable[[str], None] | None = None,
+        on_terminal_kill: Callable[[str], bool] | None = None,
     ) -> None:
         """Отправляет prompt в активную сессию и прокидывает update callback."""
 
@@ -181,6 +192,11 @@ class SessionManager:
             on_permission=on_permission,
             on_fs_read=on_fs_read,
             on_fs_write=on_fs_write,
+            on_terminal_create=on_terminal_create,
+            on_terminal_output=on_terminal_output,
+            on_terminal_wait_for_exit=on_terminal_wait_for_exit,
+            on_terminal_release=on_terminal_release,
+            on_terminal_kill=on_terminal_kill,
         )
 
     async def cancel(self) -> None:

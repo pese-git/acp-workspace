@@ -25,6 +25,11 @@ from acp_client.transport import ACPClientWSSession
 type PermissionHandler = Callable[[dict[str, Any]], str | None | Awaitable[str | None]]
 type FsReadHandler = Callable[[str], str]
 type FsWriteHandler = Callable[[str, str], None]
+type TerminalCreateHandler = Callable[[str], str]
+type TerminalOutputHandler = Callable[[str], str]
+type TerminalWaitHandler = Callable[[str], int | tuple[int | None, str | None]]
+type TerminalReleaseHandler = Callable[[str], None]
+type TerminalKillHandler = Callable[[str], bool]
 type ReconnectEventHandler = Callable[[str], None]
 
 
@@ -68,6 +73,11 @@ class ACPConnectionManager:
         on_permission: PermissionHandler | None = None,
         on_fs_read: FsReadHandler | None = None,
         on_fs_write: FsWriteHandler | None = None,
+        on_terminal_create: TerminalCreateHandler | None = None,
+        on_terminal_output: TerminalOutputHandler | None = None,
+        on_terminal_wait_for_exit: TerminalWaitHandler | None = None,
+        on_terminal_release: TerminalReleaseHandler | None = None,
+        on_terminal_kill: TerminalKillHandler | None = None,
     ) -> Any:
         """Отправляет ACP-запрос через persistent WS с одним retry после reconnect."""
 
@@ -81,6 +91,11 @@ class ACPConnectionManager:
                     on_permission=on_permission,
                     on_fs_read=on_fs_read,
                     on_fs_write=on_fs_write,
+                    on_terminal_create=on_terminal_create,
+                    on_terminal_output=on_terminal_output,
+                    on_terminal_wait_for_exit=on_terminal_wait_for_exit,
+                    on_terminal_release=on_terminal_release,
+                    on_terminal_kill=on_terminal_kill,
                 )
                 if attempt > 0 and self._on_reconnect_recovered is not None:
                     self._on_reconnect_recovered(method)
@@ -135,7 +150,7 @@ class ACPConnectionManager:
                 "protocolVersion": 1,
                 "clientCapabilities": {
                     "fs": {"readTextFile": True, "writeTextFile": True},
-                    "terminal": False,
+                    "terminal": True,
                 },
                 "clientInfo": {
                     "name": "acp-client",
@@ -215,6 +230,11 @@ class ACPConnectionManager:
         on_permission: PermissionHandler | None = None,
         on_fs_read: FsReadHandler | None = None,
         on_fs_write: FsWriteHandler | None = None,
+        on_terminal_create: TerminalCreateHandler | None = None,
+        on_terminal_output: TerminalOutputHandler | None = None,
+        on_terminal_wait_for_exit: TerminalWaitHandler | None = None,
+        on_terminal_release: TerminalReleaseHandler | None = None,
+        on_terminal_kill: TerminalKillHandler | None = None,
     ) -> PromptResult:
         """Отправляет текстовый prompt в активную сессию."""
 
@@ -229,6 +249,11 @@ class ACPConnectionManager:
             on_permission=on_permission,
             on_fs_read=on_fs_read,
             on_fs_write=on_fs_write,
+            on_terminal_create=on_terminal_create,
+            on_terminal_output=on_terminal_output,
+            on_terminal_wait_for_exit=on_terminal_wait_for_exit,
+            on_terminal_release=on_terminal_release,
+            on_terminal_kill=on_terminal_kill,
         )
         return parse_prompt_result(response)
 

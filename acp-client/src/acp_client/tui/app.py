@@ -37,6 +37,7 @@ from .components import (
 from .managers import (
     ACPConnectionManager,
     LocalFileSystemManager,
+    LocalTerminalManager,
     SessionManager,
     TUIStateSnapshot,
     UIStateStore,
@@ -162,6 +163,7 @@ class ACPClientApp(App[None]):
         )
         self._sessions = SessionManager(self._connection)
         self._filesystem = LocalFileSystemManager(on_file_written=self._on_file_written)
+        self._terminal = LocalTerminalManager()
         self._updates = UpdateMessageHandler(
             on_agent_chunk=self._on_agent_chunk,
             on_user_chunk=self._on_user_chunk,
@@ -286,6 +288,11 @@ class ACPClientApp(App[None]):
                 self._on_permission_request,
                 self._on_fs_read,
                 self._on_fs_write,
+                self._on_terminal_create,
+                self._on_terminal_output,
+                self._on_terminal_wait_for_exit,
+                self._on_terminal_release,
+                self._on_terminal_kill,
             )
             chat.finish_agent_message()
             self._clear_failed_operations()
@@ -592,6 +599,46 @@ class ACPClientApp(App[None]):
         file_tree = self.query_one(FileTree)
         file_tree.mark_changed(_path)
         file_tree.refresh_tree()
+
+    def _on_terminal_create(self, command: str) -> str:
+        """Обрабатывает server-originated terminal/create через локальный менеджер."""
+
+        terminal_id = self._terminal.create_terminal(command)
+        self.query_one(ChatView).add_system_message(f"Терминал запущен: {terminal_id} | {command}")
+        return terminal_id
+
+    def _on_terminal_output(self, terminal_id: str) -> str:
+        """Обрабатывает server-originated terminal/output и возвращает chunk вывода."""
+
+        output = self._terminal.get_output(terminal_id)
+        if output:
+            self.query_one(ChatView).add_system_message(
+                f"[terminal {terminal_id}]\n{output.rstrip()}"
+            )
+        return output
+
+    def _on_terminal_wait_for_exit(self, terminal_id: str) -> int | tuple[int | None, str | None]:
+        """Обрабатывает server-originated terminal/wait_for_exit."""
+
+        wait_result = self._terminal.wait_for_exit(terminal_id)
+        if isinstance(wait_result, int):
+            self.query_one(ChatView).add_system_message(
+                f"Терминал завершен: {terminal_id} (exit={wait_result})"
+            )
+        return wait_result
+
+    def _on_terminal_release(self, terminal_id: str) -> None:
+        """Обрабатывает server-originated terminal/release."""
+
+        self._terminal.release_terminal(terminal_id)
+
+    def _on_terminal_kill(self, terminal_id: str) -> bool:
+        """Обрабатывает server-originated terminal/kill."""
+
+        killed = self._terminal.kill_terminal(terminal_id)
+        if killed:
+            self.query_one(ChatView).add_system_message(f"Терминал остановлен: {terminal_id}")
+        return killed
 
     def _remember_failed_operation(
         self,

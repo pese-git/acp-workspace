@@ -62,6 +62,11 @@ class FakeConnection:
         on_permission: Any,
         on_fs_read: Any = None,
         on_fs_write: Any = None,
+        on_terminal_create: Any = None,
+        on_terminal_output: Any = None,
+        on_terminal_wait_for_exit: Any = None,
+        on_terminal_release: Any = None,
+        on_terminal_kill: Any = None,
     ) -> None:
         self.prompt_calls.append((session_id, text))
         on_update(
@@ -124,6 +129,11 @@ class FakeConnectionWithExistingSession:
         on_permission: Any,
         on_fs_read: Any = None,
         on_fs_write: Any = None,
+        on_terminal_create: Any = None,
+        on_terminal_output: Any = None,
+        on_terminal_wait_for_exit: Any = None,
+        on_terminal_release: Any = None,
+        on_terminal_kill: Any = None,
     ) -> None:
         return None
 

@@ -65,6 +65,7 @@ uv run acp-client-tui --host 127.0.0.1 --port 8080
 В `FileViewer` доступен поиск по содержимому: `Ctrl+F` (фокус поиска), `Enter`/`F3` (следующее совпадение), `Shift+F3` (предыдущее совпадение).
 Во время `session/prompt` TUI обрабатывает `fs/read_text_file` и `fs/write_text_file` запросы сервера; после записи дерево файлов автоматически обновляется.
 Файлы и директории, затронутые `fs/write_text_file`, помечаются индикатором `*` в `FileTree` до смены active root.
+TUI также обрабатывает `terminal/create`, `terminal/output`, `terminal/wait_for_exit`, `terminal/kill`, `terminal/release`; ключевые события терминала показываются в чате как system-сообщения.
 
 При получении `session/request_permission` клиент показывает модальное окно с вариантами решения и отправляет выбранную опцию обратно агенту.
 В модальном окне разрешений работают быстрые клавиши: `A` (allow once/always), `R` (reject once/always), `Esc` (cancel).
