@@ -14,6 +14,7 @@ acp-client/src/acp_client/
 ├── cli.py                    # CLI интерфейс
 ├── logging.py                # Структурированное логирование
 ├── messages.py               # Pydantic модели сообщений
+├── tui/                       # Textual TUI подсистема
 │
 ├── transport/                # 🌐 Транспортный слой
 │   └── websocket.py          # WebSocket сессия (ACPClientWSSession)
@@ -51,6 +52,8 @@ uv sync
 uv run acp-client --host 127.0.0.1 --port 8080 --method ping
 uv run acp-client --host 127.0.0.1 --port 8080 --method echo --params '{"message":"hello"}'
 uv run acp-client --host 127.0.0.1 --port 8080 --method session/load --params '{"sessionId":"sess_1","cwd":"/tmp","mcpServers":[]}' --show-updates
+uv run acp-client --tui --host 127.0.0.1 --port 8080
+uv run acp-client-tui --host 127.0.0.1 --port 8080
 ```
 
 ## Полезные helper-методы ACPClient

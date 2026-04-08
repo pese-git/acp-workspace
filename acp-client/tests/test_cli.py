@@ -51,3 +51,28 @@ def test_run_client_show_updates_for_session_load(monkeypatch, capsys) -> None:
     assert payload["response"]["id"] == "req_1"
     assert payload["response"]["result"] is None
     assert payload["updates"][0]["method"] == "session/update"
+
+
+def test_run_client_starts_tui_mode(monkeypatch) -> None:
+    recorded: dict[str, object] = {}
+
+    def fake_run_tui_app(*, host: str, port: int) -> None:
+        recorded["host"] = host
+        recorded["port"] = port
+
+    monkeypatch.setattr("acp_client.cli.run_tui_app", fake_run_tui_app)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "acp-client",
+            "--tui",
+            "--host",
+            "127.0.0.9",
+            "--port",
+            "9900",
+        ],
+    )
+
+    run_client()
+
+    assert recorded == {"host": "127.0.0.9", "port": 9900}

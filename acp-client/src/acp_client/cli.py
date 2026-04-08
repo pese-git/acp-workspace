@@ -35,8 +35,13 @@ def run_client() -> None:
     parser = argparse.ArgumentParser(prog="acp-client")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)
-    parser.add_argument("--method", required=True)
+    parser.add_argument("--method", default=None)
     parser.add_argument("--params", default=None)
+    parser.add_argument(
+        "--tui",
+        action="store_true",
+        help="Запустить интерактивный Textual TUI клиент",
+    )
     parser.add_argument(
         "--show-updates",
         action="store_true",
@@ -58,6 +63,13 @@ def run_client() -> None:
     # Настроить логирование только если явно указаны флаги
     if args.log_level != "INFO" or args.log_json:
         setup_logging(level=args.log_level, json_format=args.log_json)
+
+    if args.tui:
+        run_tui_app(host=args.host, port=args.port)
+        return
+
+    if not isinstance(args.method, str) or not args.method:
+        parser.error("--method обязателен, если не используется --tui")
 
     params = parse_json_params(args.params)
     client = ACPClient(host=args.host, port=args.port)
@@ -97,3 +109,11 @@ def run_client() -> None:
         )
     )
     print(json.dumps(response.to_dict(), indent=2, ensure_ascii=False))
+
+
+def run_tui_app(*, host: str, port: int) -> None:
+    """Ленивая загрузка TUI, чтобы не требовать Textual для обычного CLI."""
+
+    from .tui import run_tui_app as _run_tui
+
+    _run_tui(host=host, port=port)

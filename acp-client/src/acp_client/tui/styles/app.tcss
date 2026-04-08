@@ -1,0 +1,47 @@
+Screen {
+    layout: vertical;
+    background: #f3f4f7;
+    color: #141a22;
+}
+
+#header {
+    height: 1;
+    background: #dfe6f5;
+    color: #0f2747;
+    padding: 0 1;
+}
+
+#body {
+    height: 1fr;
+}
+
+#sidebar {
+    width: 30;
+    background: #ebeff7;
+    border: round #6d7f9a;
+    padding: 1;
+}
+
+#chat-view {
+    width: 1fr;
+    border: round #6d7f9a;
+    background: #ffffff;
+    padding: 1;
+}
+
+#prompt-input {
+    height: 6;
+    border: round #6d7f9a;
+    background: #ffffff;
+}
+
+#footer {
+    height: 1;
+    background: #dfe6f5;
+    color: #0f2747;
+    padding: 0 1;
+}
+
+.message {
+    margin: 0 0 1 0;
+}

@@ -7,11 +7,14 @@ requires-python = ">=3.12"
 dependencies = [
   "aiohttp>=3.12.15",
   "pydantic>=2.11.0",
+  "rich>=13.0.0",
   "structlog>=24.1.0",
+  "textual>=0.30.0",
 ]
 
 [project.scripts]
 acp-client = "acp_client.cli:run_client"
+acp-client-tui = "acp_client.tui.__main__:main"
 
 [build-system]
 requires = ["hatchling>=1.27.0"]
