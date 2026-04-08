@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -56,6 +57,7 @@ HELP_FOOTER_DETAIL = (
     "Ctrl+L clear | Ctrl+R retry | Ctrl+T terminal | Ctrl+C cancel | Ctrl+Q quit"
 )
 FILE_VIEWER_LINE_LIMIT = 400
+PERMISSION_WAIT_TIMEOUT_SECONDS = 30
 
 
 class ConnectionState(StrEnum):
@@ -849,9 +851,18 @@ class ACPClientApp(App[None]):
             ConnectionState.CONNECTED,
             detail="Waiting permission decision",
         )
-        selected_option_id = await self.push_screen_wait(
-            self._build_permission_modal(parsed_request)
-        )
+        try:
+            selected_option_id = await asyncio.wait_for(
+                self.push_screen_wait(self._build_permission_modal(parsed_request)),
+                timeout=PERMISSION_WAIT_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            self._set_connection_state(
+                ConnectionState.CONNECTED, detail="Permission request timeout"
+            )
+            self._set_runtime_state("ready")
+            chat.add_system_message("Время ожидания разрешения истекло")
+            return None
 
         if selected_option_id is None:
             self._set_connection_state(ConnectionState.CONNECTED, detail="Permission cancelled")

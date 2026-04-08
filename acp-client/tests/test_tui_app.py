@@ -1198,3 +1198,52 @@ async def test_permission_request_saves_policy_after_always_choice(
     assert option_id == "allow_always_1"
     assert app._permission_manager.get_policy("execute") == "allow_always"  # noqa: SLF001
     assert "Сохранена policy разрешений для kind=execute" in chat.system_messages
+
+
+@pytest.mark.asyncio
+async def test_permission_request_timeout_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = ACPClientApp(host="127.0.0.1", port=8765)
+    chat = _FakeChatView()
+    transitions: list[tuple[ConnectionState, str]] = []
+
+    def _query_one(selector: object) -> _FakeChatView:
+        if selector is not ChatView:
+            msg = f"Unexpected selector: {selector}"
+            raise AssertionError(msg)
+        return chat
+
+    async def _push_screen_wait(_modal: object) -> str:
+        raise TimeoutError
+
+    def _capture_state(state: ConnectionState, *, detail: str) -> None:
+        transitions.append((state, detail))
+
+    monkeypatch.setattr(app, "query_one", _query_one)
+    monkeypatch.setattr(app, "push_screen_wait", _push_screen_wait)
+    monkeypatch.setattr(app, "_set_connection_state", _capture_state)
+    app._permission_manager.clear()  # noqa: SLF001
+
+    request_payload: dict[str, object] = {
+        "jsonrpc": "2.0",
+        "id": "perm_1",
+        "method": "session/request_permission",
+        "params": {
+            "sessionId": "sess_1",
+            "toolCall": {"toolCallId": "call_1", "title": "Run", "kind": "execute"},
+            "options": [
+                {"optionId": "allow_always_1", "name": "Allow always", "kind": "allow_always"},
+                {"optionId": "reject_once_1", "name": "Reject once", "kind": "reject_once"},
+            ],
+        },
+    }
+
+    option_id = await app._on_permission_request(request_payload)  # noqa: SLF001
+
+    assert option_id is None
+    assert chat.system_messages == [
+        "Запрошено разрешение: Run",
+        "Время ожидания разрешения истекло",
+    ]
+    assert transitions[-1] == (ConnectionState.CONNECTED, "Permission request timeout")

@@ -1031,7 +1031,7 @@ class PermissionManager:
 - [x] Обработать session/request_permission
 - [x] Показать PermissionModal
 - [x] Отправить результат на сервер
-- [ ] Обработить timeout
+- [x] Обработить timeout
 
 **Оценка сложности:** Средняя
 

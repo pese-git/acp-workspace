@@ -19,6 +19,7 @@
 - Реализована значимая часть горячих клавиш и навигации (включая `Ctrl+S/B`, `Tab`, `Ctrl+L`, `Ctrl+H`).
 - Реализованы `plan`-панель, файловая подсистема UI (`FileTree`, `fs/read_text_file`, `fs/write_text_file`, `FileViewer`) и терминальная подсистема UI (`terminal/*` lifecycle + вывод в `ToolPanel` + модальный просмотр полного terminal output).
 - Реализован persistent permission policy manager с auto-apply для `allow_always`/`reject_always`.
+- В permission-flow добавлена обработка timeout ожидания решения пользователя в модальном окне.
 - Реализован базовый локальный history cache `session/update` с fallback при пустом replay после переключения/восстановления сессии.
 - Реализован базовый менеджер конфигурации TUI (локальный `tui_config.json`) с загрузкой default host/port/theme и автосохранением runtime-значений подключения.
 - В работе остаются расширенный UX-polish терминального вывода, полная state/cache/config подсистема, e2e/perf тесты и пакет отдельной TUI-документации.
