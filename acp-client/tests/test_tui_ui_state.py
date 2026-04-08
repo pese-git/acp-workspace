@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from acp_client.tui.managers.ui_state import TUIStateSnapshot, UIStateStore
+import pytest
+
+from acp_client.tui.managers.ui_state import TUIStateSnapshot, UIStateMachine, UIStateStore
 
 
 def test_ui_state_store_save_and_load_roundtrip(tmp_path: Path) -> None:
@@ -33,3 +35,23 @@ def test_ui_state_store_returns_empty_snapshot_on_invalid_json(tmp_path: Path) -
     assert loaded.last_active_session_id is None
     assert loaded.draft_prompt_text == ""
     assert loaded.draft_session_id is None
+
+
+def test_ui_state_machine_valid_transition_flow() -> None:
+    machine = UIStateMachine()
+
+    machine.transition("reconnecting")
+    machine.transition("ready")
+    machine.transition("processing_prompt")
+    machine.transition("waiting_permission")
+    machine.transition("processing_prompt")
+    machine.transition("ready")
+
+    assert machine.state == "ready"
+
+
+def test_ui_state_machine_rejects_invalid_transition() -> None:
+    machine = UIStateMachine(initial_state="ready")
+
+    with pytest.raises(ValueError, match="Invalid UI transition"):
+        machine.transition("initializing")

@@ -41,6 +41,7 @@ from .managers import (
     PermissionManager,
     SessionManager,
     TUIStateSnapshot,
+    UIStateMachine,
     UIStateStore,
     UpdateMessageHandler,
 )
@@ -175,6 +176,7 @@ class ACPClientApp(App[None]):
         self._failed_operations: list[FailedOperation] = []
         self._focus_order: tuple[type[Sidebar] | type[PromptInput], ...] = (Sidebar, PromptInput)
         self._focus_index: int = 1
+        self._ui_state_machine = UIStateMachine()
         self._ui_state_store = UIStateStore()
         self._loaded_ui_state = self._ui_state_store.load()
 
@@ -218,6 +220,7 @@ class ACPClientApp(App[None]):
                 ConnectionState.RECONNECTING,
                 detail="Starting bootstrap",
             )
+            self._set_runtime_state("reconnecting")
             await self._connection.initialize()
             await self._sessions.refresh_sessions()
             restored = await self._restore_active_session_from_snapshot()
@@ -240,9 +243,11 @@ class ACPClientApp(App[None]):
             prompt_input.focus()
             self._focus_index = 1
             self._set_connection_state(ConnectionState.CONNECTED, detail=READY_FOOTER_DETAIL)
+            self._set_runtime_state("ready")
             chat.add_system_message("TUI ready")
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
             self._app_logger.error("tui_bootstrap_failed", error=str(exc))
+            self._set_runtime_state("error")
             self._set_connection_state(
                 ConnectionState.OFFLINE,
                 detail=format_offline_footer_detail(
@@ -276,6 +281,7 @@ class ACPClientApp(App[None]):
         prompt_input.remember_prompt(message.text)
         prompt_input.text = ""
         self._persist_ui_state()
+        self._set_runtime_state("processing_prompt")
         self._set_connection_state(ConnectionState.CONNECTED, detail="Sending prompt...")
         self.run_worker(self._send_prompt(message.text), exclusive=True)
 
@@ -299,9 +305,11 @@ class ACPClientApp(App[None]):
             chat.finish_agent_message()
             self._clear_failed_operations()
             self._persist_ui_state()
+            self._set_runtime_state("ready")
             self._set_connection_state(ConnectionState.CONNECTED, detail=READY_FOOTER_DETAIL)
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
             self._app_logger.error("tui_prompt_failed", error=str(exc))
+            self._set_runtime_state("error")
             error_state, error_detail = build_error_state_status(
                 exc,
                 connection_ready=self._connection.is_ready(),
@@ -399,8 +407,10 @@ class ACPClientApp(App[None]):
 
         chat = self.query_one(ChatView)
         try:
+            self._set_runtime_state("cancelling")
             await self._sessions.cancel()
             chat.finish_agent_message()
+            self._set_runtime_state("ready")
             if self._connection.is_ready():
                 self._set_connection_state(ConnectionState.CONNECTED, detail="Cancel requested")
             else:
@@ -410,6 +420,7 @@ class ACPClientApp(App[None]):
                 )
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
             self._app_logger.error("tui_cancel_prompt_failed", error=str(exc))
+            self._set_runtime_state("error")
             error_state, error_detail = build_error_state_status(
                 exc,
                 connection_ready=self._connection.is_ready(),
@@ -569,11 +580,13 @@ class ACPClientApp(App[None]):
     def _on_reconnect_attempt(self, method: str) -> None:
         """Отмечает состояние reconnect в UI при автоматическом retry."""
 
+        self._set_runtime_state("reconnecting")
         self._set_connection_state(ConnectionState.RECONNECTING, detail=f"retry method={method}")
 
     def _on_reconnect_recovered(self, method: str) -> None:
         """Возвращает статус connected после успешного retry-запроса."""
 
+        self._set_runtime_state("ready")
         self._set_connection_state(
             ConnectionState.CONNECTED,
             detail=f"Recovered after retry: {method}",
@@ -742,6 +755,7 @@ class ACPClientApp(App[None]):
             parsed_request.params.toolCall.title or parsed_request.params.toolCall.toolCallId
         )
         chat.add_system_message(f"Запрошено разрешение: {tool_name}")
+        self._set_runtime_state("waiting_permission")
 
         auto_option_id = self._permission_manager.resolve_option_id(parsed_request)
         if isinstance(auto_option_id, str) and auto_option_id:
@@ -749,6 +763,7 @@ class ACPClientApp(App[None]):
                 ConnectionState.CONNECTED,
                 detail=f"Permission auto-selected: {auto_option_id}",
             )
+            self._set_runtime_state("processing_prompt")
             chat.add_system_message(f"Автоприменено разрешение: {auto_option_id}")
             return auto_option_id
 
@@ -762,6 +777,7 @@ class ACPClientApp(App[None]):
 
         if selected_option_id is None:
             self._set_connection_state(ConnectionState.CONNECTED, detail="Permission cancelled")
+            self._set_runtime_state("ready")
             chat.add_system_message("Разрешение отклонено или отменено")
             return None
 
@@ -769,6 +785,7 @@ class ACPClientApp(App[None]):
             ConnectionState.CONNECTED,
             detail=f"Permission selected: {selected_option_id}",
         )
+        self._set_runtime_state("processing_prompt")
         policy_saved = self._permission_manager.remember_decision(
             parsed_request,
             selected_option_id,
@@ -786,6 +803,21 @@ class ACPClientApp(App[None]):
         tool_title = request.params.toolCall.title or request.params.toolCall.toolCallId
         title = f"Разрешить действие: {tool_title}"
         return PermissionModal(title=title, options=request.params.options)
+
+    def _set_runtime_state(self, new_state: str) -> None:
+        """Переводит UIStateMachine в новое состояние с безопасным fallback."""
+
+        if self._ui_state_machine.state == new_state:
+            return
+        try:
+            self._ui_state_machine.transition(new_state)
+        except ValueError:
+            # Не ломаем UX из-за жесткой валидации перехода, только фиксируем в лог.
+            self._app_logger.warning(
+                "tui_runtime_state_transition_rejected",
+                from_state=self._ui_state_machine.state,
+                to_state=new_state,
+            )
 
 
 def run_tui_app(*, host: str = "127.0.0.1", port: int = 8765) -> None:

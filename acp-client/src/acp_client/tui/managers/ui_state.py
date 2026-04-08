@@ -7,6 +7,24 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+type RuntimeUIState = str
+
+_ALLOWED_TRANSITIONS: dict[RuntimeUIState, set[RuntimeUIState]] = {
+    "initializing": {"ready", "error", "reconnecting"},
+    "ready": {"processing_prompt", "waiting_permission", "cancelling", "reconnecting", "error"},
+    "processing_prompt": {
+        "ready",
+        "waiting_permission",
+        "cancelling",
+        "reconnecting",
+        "error",
+    },
+    "waiting_permission": {"processing_prompt", "ready", "error", "reconnecting", "cancelling"},
+    "cancelling": {"ready", "reconnecting", "error"},
+    "reconnecting": {"ready", "error"},
+    "error": {"reconnecting", "ready"},
+}
+
 
 @dataclass(slots=True)
 class TUIStateSnapshot:
@@ -74,3 +92,37 @@ class UIStateStore:
             draft_prompt_text=draft_text if isinstance(draft_text, str) else "",
             draft_session_id=draft_session_id if isinstance(draft_session_id, str) else None,
         )
+
+
+class UIStateMachine:
+    """Управляет runtime-состояниями TUI и валидирует переходы."""
+
+    def __init__(self, initial_state: RuntimeUIState = "initializing") -> None:
+        """Инициализирует state-machine с начальным состоянием интерфейса."""
+
+        if initial_state not in _ALLOWED_TRANSITIONS:
+            msg = f"Unknown UI state: {initial_state}"
+            raise ValueError(msg)
+        self._state = initial_state
+
+    @property
+    def state(self) -> RuntimeUIState:
+        """Возвращает текущее runtime-состояние TUI."""
+
+        return self._state
+
+    def can_transition(self, new_state: RuntimeUIState) -> bool:
+        """Проверяет допустимость перехода из текущего состояния в новое."""
+
+        return new_state in _ALLOWED_TRANSITIONS.get(self._state, set())
+
+    def transition(self, new_state: RuntimeUIState) -> None:
+        """Переводит state-machine в новое состояние или бросает ValueError."""
+
+        if new_state not in _ALLOWED_TRANSITIONS:
+            msg = f"Unknown UI state: {new_state}"
+            raise ValueError(msg)
+        if not self.can_transition(new_state):
+            msg = f"Invalid UI transition: {self._state} -> {new_state}"
+            raise ValueError(msg)
+        self._state = new_state

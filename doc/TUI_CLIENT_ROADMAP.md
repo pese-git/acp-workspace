@@ -28,16 +28,14 @@
 - [x] Персистентность UI-состояния: последняя активная сессия и черновик prompt
 - [x] Hotkeys/navigation (актуальный набор): `Ctrl+S/B`, `Tab`, `Ctrl+N`, `Ctrl+J/K`, `Ctrl+L`, `Ctrl+H`, `Ctrl+C`, `Ctrl+Q`, `Ctrl+Enter`, `Ctrl+Up/Down`
 - [x] Расширенное покрытие unit-тестами для TUI-слоя
+- [x] Базовая `UIStateMachine` с валидацией переходов и интеграцией в runtime-сценарии
 
 ### Остается по roadmap
 
-- [ ] `PlanPanel` и визуализация `plan`-апдейтов
-- [ ] Интеграция файловой системы (`FileTree`, `filesystem` manager, file viewer)
-- [ ] Интеграция терминала (`terminal` manager, streaming output panel, lifecycle)
-- [ ] `PermissionManager` с persistent policy (`allow always` / auto-apply / reset)
 - [ ] Полная `UIStateMachine` + history cache + config manager
 - [ ] Отдельные TUI integration/e2e/performance тесты
 - [ ] Полный пакет пользовательской и developer-документации (`TUI.md`, `HOTKEYS.md`, `TROUBLESHOOTING.md`, `docs/TUI_API.md`)
+- [ ] Дополнительный UX-polish terminal output (отдельная детальная панель, расширенная прокрутка/форматирование)
 
 ---
 
@@ -766,10 +764,10 @@ class ToolCallPanel(Static):
 - Визуальный прогресс
 
 **Технические работы:**
-- [ ] Создать PlanPanel
-- [ ] Реализовать обновление пунктов
-- [ ] Стилизировать
-- [ ] Добавить в ChatView
+- [x] Создать PlanPanel
+- [x] Реализовать обновление пунктов
+- [x] Стилизировать
+- [x] Добавить в ChatView
 
 **Оценка сложности:** Средняя
 
@@ -782,10 +780,10 @@ class ToolCallPanel(Static):
 **Зависимости:** Этап 3, Этап 4
 
 **Критерий готовности:**
-- [ ] DirectoryTree отображается в sidebar
-- [ ] fs/read_text_file обрабатывается
-- [ ] fs/write_text_file обрабатывается
-- [ ] Файлы можно просматривать
+- [x] DirectoryTree отображается в sidebar
+- [x] fs/read_text_file обрабатывается
+- [x] fs/write_text_file обрабатывается
+- [x] Файлы можно просматривать
 
 ### Задача 7.1: FileTree компонент
 
@@ -799,10 +797,10 @@ class ToolCallPanel(Static):
 - Двойной клик для открытия файла
 
 **Технические работы:**
-- [ ] Использовать Textual DirectoryTree
-- [ ] Реализовать обработчики eventos
-- [ ] Фильтровать файлы
-- [ ] Стилизировать
+- [x] Использовать Textual DirectoryTree
+- [x] Реализовать обработчики eventos
+- [x] Фильтровать файлы
+- [x] Стилизировать
 
 **Оценка сложности:** Средняя
 
@@ -825,10 +823,10 @@ class LocalFileSystemManager:
 ```
 
 **Технические работы:**
-- [ ] Использовать существующие handlers из acp-client
-- [ ] Обернуть в менеджер
-- [ ] Обработать ошибки
-- [ ] Валидировать пути
+- [x] Использовать существующие handlers из acp-client
+- [x] Обернуть в менеджер
+- [x] Обработать ошибки
+- [x] Валидировать пути
 
 **Оценка сложности:** Низкая
 
@@ -847,10 +845,10 @@ class LocalFileSystemManager:
 - Номера строк
 
 **Технические работы:**
-- [ ] Создать FileViewerModal
-- [ ] Реализовать синтаксис-подсветку (Pygments)
-- [ ] Добавить поиск
-- [ ] Интегрировать с FileTree
+- [x] Создать FileViewerModal
+- [x] Реализовать синтаксис-подсветку (Pygments)
+- [x] Добавить поиск
+- [x] Интегрировать с FileTree
 
 **Оценка сложности:** Средняя
 
@@ -863,9 +861,9 @@ class LocalFileSystemManager:
 **Файл:** `acp_client/tui/components/file_tree.py`
 
 **Технические работы:**
-- [ ] Отслеживать fs/write события
-- [ ] Обновлять FileTree при создании файлов
-- [ ] Добавить визуальный индикатор измененных файлов
+- [x] Отслеживать fs/write события
+- [x] Обновлять FileTree при создании файлов
+- [x] Добавить визуальный индикатор измененных файлов
 
 **Оценка сложности:** Низкая
 
@@ -878,10 +876,10 @@ class LocalFileSystemManager:
 **Зависимости:** Этап 3, Этап 6
 
 **Критерий готовности:**
-- [ ] terminal/create обрабатывается
-- [ ] Вывод терминала отображается в реальном времени
-- [ ] terminal/kill работает
-- [ ] Exit code отображается
+- [x] terminal/create обрабатывается
+- [x] Вывод терминала отображается в реальном времени
+- [x] terminal/kill работает
+- [x] Exit code отображается
 
 ### Задача 8.1: TerminalManager
 
@@ -909,11 +907,11 @@ class LocalTerminalManager:
 ```
 
 **Технические работы:**
-- [ ] Использовать handlers из acp-client
-- [ ] Обернуть в менеджер
-- [ ] Обработать ошибки
+- [x] Использовать handlers из acp-client
+- [x] Обернуть в менеджер
+- [x] Обработать ошибки
 - [ ] Управление процессами (PTY на Linux/macOS)
-- [ ] Реализовать жизненный цикл terminal: create/output/wait_for_exit/release
+- [x] Реализовать жизненный цикл terminal: create/output/wait_for_exit/release
 
 **Оценка сложности:** Средняя
 
@@ -931,8 +929,8 @@ class LocalTerminalManager:
 - Прокрутка для больших выводов
 
 **Технические работы:**
-- [ ] Создать TerminalOutputPanel
-- [ ] Реализовать ANSI rendering (Rich)
+- [x] Создать TerminalOutputPanel
+- [x] Реализовать ANSI rendering (Rich)
 - [ ] Добавить прокрутку
 - [ ] Стилизировать
 
@@ -947,9 +945,9 @@ class LocalTerminalManager:
 **Файл:** `acp_client/tui/components/tool_panel.py`
 
 **Технические работы:**
-- [ ] Добавить TerminalOutputPanel в ToolCallPanel
-- [ ] Streaming обновления
-- [ ] Отображение exit code
+- [x] Добавить TerminalOutputPanel в ToolCallPanel
+- [x] Streaming обновления
+- [x] Отображение exit code
 
 **Оценка сложности:** Низкая
 
@@ -965,7 +963,7 @@ class LocalTerminalManager:
 - [x] Permission requests отображаются в модальном окне
 - [x] Пользователь может выбрать вариант
 - [x] Решение отправляется на сервер
-- [ ] Политика разрешений работает
+- [x] Политика разрешений работает
 
 ### Задача 9.1: PermissionModal компонент
 
@@ -1012,9 +1010,9 @@ class PermissionManager:
 ```
 
 **Технические работы:**
-- [ ] Реализовать modal показ
-- [ ] Сохранять политику в конфиг
-- [ ] Применять политику автоматически
+- [x] Реализовать modal показ
+- [x] Сохранять политику в конфиг
+- [x] Применять политику автоматически
 - [ ] Обработать отмену (session/cancel)
 
 **Оценка сложности:** Средняя
@@ -1073,10 +1071,10 @@ class UIStateMachine:
 ```
 
 **Технические работы:**
-- [ ] Определить все состояния
-- [ ] Реализовать transition логику
-- [ ] Валидировать переходы
-- [ ] Обновлять UI при переходе
+- [x] Определить все состояния
+- [x] Реализовать transition логику
+- [x] Валидировать переходы
+- [x] Обновлять UI при переходе
 
 **Оценка сложности:** Средняя
 
