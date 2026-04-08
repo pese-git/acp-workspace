@@ -55,21 +55,32 @@ class ACPConnectionManager:
         on_update: Callable[[dict[str, Any]], None] | None = None,
         on_permission: PermissionHandler | None = None,
     ) -> Any:
-        """Отправляет ACP-запрос через один и тот же persistent WS канал."""
+        """Отправляет ACP-запрос через persistent WS с одним retry после reconnect."""
 
-        ws_session = await self._ensure_ws_session()
-        try:
-            return await ws_session.request(
-                method=method,
-                params=params,
-                on_update=on_update,
-                on_permission=on_permission,
-            )
-        except Exception:
-            # При любой транспортной ошибке закрываем текущий сокет,
-            # чтобы следующий вызов прозрачно создал новое соединение.
-            await self.close()
-            raise
+        for attempt in range(2):
+            ws_session = await self._ensure_ws_session()
+            try:
+                return await ws_session.request(
+                    method=method,
+                    params=params,
+                    on_update=on_update,
+                    on_permission=on_permission,
+                )
+            except Exception as error:
+                # При транспортной ошибке закрываем сокет и даем один retry,
+                # чтобы клиент автоматически восстановил соединение.
+                await self.close()
+                if attempt == 0:
+                    self._logger.warning(
+                        "tui_request_retry_after_reconnect",
+                        method=method,
+                        error=str(error),
+                    )
+                    continue
+                raise
+
+        msg = "Unreachable retry state"
+        raise RuntimeError(msg)
 
     async def _ensure_initialized(self) -> None:
         """Гарантирует ACP initialize перед вызовом session/* методов."""
