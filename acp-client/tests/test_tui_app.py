@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from acp_client.tui.app import (
     ACPClientApp,
     ConnectionState,
@@ -11,6 +13,25 @@ from acp_client.tui.app import (
     format_offline_footer_detail,
     format_retry_footer_error,
 )
+from acp_client.tui.components import ChatView
+
+
+class _FakeChatView:
+    """Минимальный тестовый double для проверки сообщений и завершения стрима."""
+
+    def __init__(self) -> None:
+        self.finished = False
+        self.system_messages: list[str] = []
+
+    def finish_agent_message(self) -> None:
+        """Отмечает завершение стриминга agent-сообщения."""
+
+        self.finished = True
+
+    def add_system_message(self, text: str) -> None:
+        """Сохраняет системное сообщение для последующей проверки в тесте."""
+
+        self.system_messages.append(text)
 
 
 def test_format_footer_error_extracts_jsonrpc_code_and_reason() -> None:
@@ -150,3 +171,149 @@ def test_build_retry_started_status_returns_reconnecting_when_disconnected() -> 
 
     assert state == ConnectionState.RECONNECTING
     assert detail == "Retrying failed operation: prompt (1 remaining)"
+
+
+def test_reconnect_callbacks_emit_runtime_state_transitions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = ACPClientApp(host="127.0.0.1", port=8765)
+    transitions: list[tuple[ConnectionState, str]] = []
+
+    def _capture_state(state: ConnectionState, *, detail: str) -> None:
+        transitions.append((state, detail))
+
+    monkeypatch.setattr(app, "_set_connection_state", _capture_state)
+
+    app._on_reconnect_attempt("session/prompt")  # noqa: SLF001
+    app._on_reconnect_recovered("session/prompt")  # noqa: SLF001
+
+    assert transitions == [
+        (ConnectionState.RECONNECTING, "retry method=session/prompt"),
+        (ConnectionState.CONNECTED, "Recovered after retry: session/prompt"),
+    ]
+
+
+def test_retry_prompt_without_failed_operations_uses_offline_state_when_disconnected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = ACPClientApp(host="127.0.0.1", port=8765)
+    transitions: list[tuple[ConnectionState, str]] = []
+
+    monkeypatch.setattr(app._connection, "is_ready", lambda: False)
+
+    def _capture_state(state: ConnectionState, *, detail: str) -> None:
+        transitions.append((state, detail))
+
+    monkeypatch.setattr(app, "_set_connection_state", _capture_state)
+
+    app.action_retry_prompt()
+
+    assert transitions == [
+        (ConnectionState.OFFLINE, "Retry skipped: no failed operation | Ctrl+R retry failed op")
+    ]
+
+
+def test_retry_prompt_starts_reconnecting_when_operation_exists_but_disconnected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = ACPClientApp(host="127.0.0.1", port=8765)
+    transitions: list[tuple[ConnectionState, str]] = []
+    workers_started = 0
+
+    async def retry_action() -> None:
+        return None
+
+    def _capture_worker(work: object, *args: object, **kwargs: object) -> None:
+        nonlocal workers_started
+        workers_started += 1
+        # Закрываем coroutine, чтобы не оставлять un-awaited объекты в тесте.
+        close_callable = getattr(work, "close", None)
+        if callable(close_callable):
+            close_callable()
+
+    app._remember_failed_operation(label="prompt", action=retry_action)  # noqa: SLF001
+    monkeypatch.setattr(app._connection, "is_ready", lambda: False)
+
+    def _capture_state(state: ConnectionState, *, detail: str) -> None:
+        transitions.append((state, detail))
+
+    monkeypatch.setattr(app, "_set_connection_state", _capture_state)
+    monkeypatch.setattr(app, "run_worker", _capture_worker)
+
+    app.action_retry_prompt()
+
+    assert workers_started == 1
+    assert transitions == [
+        (ConnectionState.RECONNECTING, "Retrying failed operation: prompt (0 remaining)")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cancel_prompt_sets_reconnecting_state_when_disconnect_detected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = ACPClientApp(host="127.0.0.1", port=8765)
+    chat = _FakeChatView()
+    transitions: list[tuple[ConnectionState, str]] = []
+
+    async def _cancel_ok() -> None:
+        return None
+
+    monkeypatch.setattr(app._sessions, "cancel", _cancel_ok)
+    monkeypatch.setattr(app._connection, "is_ready", lambda: False)
+
+    def _capture_state(state: ConnectionState, *, detail: str) -> None:
+        transitions.append((state, detail))
+
+    def _query_one(selector: object) -> _FakeChatView:
+        if selector is ChatView:
+            return chat
+        msg = f"Unexpected selector: {selector}"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(app, "_set_connection_state", _capture_state)
+    monkeypatch.setattr(app, "query_one", _query_one)
+
+    await app.action_cancel_prompt()
+
+    assert chat.finished is True
+    assert transitions == [
+        (ConnectionState.RECONNECTING, "Cancel requested during reconnect"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cancel_prompt_failure_is_queued_for_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = ACPClientApp(host="127.0.0.1", port=8765)
+    chat = _FakeChatView()
+    transitions: list[tuple[ConnectionState, str]] = []
+
+    async def _cancel_fail() -> None:
+        msg = "cancel failed"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(app._sessions, "cancel", _cancel_fail)
+    monkeypatch.setattr(app._connection, "is_ready", lambda: True)
+
+    def _capture_state(state: ConnectionState, *, detail: str) -> None:
+        transitions.append((state, detail))
+
+    def _query_one(selector: object) -> _FakeChatView:
+        if selector is ChatView:
+            return chat
+        msg = f"Unexpected selector: {selector}"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(app, "_set_connection_state", _capture_state)
+    monkeypatch.setattr(app, "query_one", _query_one)
+
+    await app.action_cancel_prompt()
+
+    assert len(app._failed_operations) == 1  # noqa: SLF001
+    assert app._failed_operations[0].label == "cancel_prompt"  # noqa: SLF001
+    assert transitions == [
+        (ConnectionState.DEGRADED, "Error cancelling prompt | cancel failed"),
+    ]
+    assert chat.system_messages == ["Ошибка отмены prompt: cancel failed"]
