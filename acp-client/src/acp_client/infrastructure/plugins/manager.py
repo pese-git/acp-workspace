@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import structlog
 
@@ -27,9 +27,7 @@ from acp_client.infrastructure.plugins.base import (
 from acp_client.infrastructure.plugins.context import PluginContext
 
 if TYPE_CHECKING:
-    from acp_client.infrastructure.di_container import DIContainer
-    from acp_client.infrastructure.events.bus import EventBus
-    from acp_client.infrastructure.handler_registry import HandlerRegistry
+    pass
 
 
 class PluginManager:

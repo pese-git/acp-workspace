@@ -5,7 +5,6 @@ Comprehensive tests for plugin loading, initialization, and lifecycle management
 
 from __future__ import annotations
 
-import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -27,7 +26,6 @@ from acp_client.infrastructure.plugins.base import (
 )
 from acp_client.infrastructure.plugins.context import PluginContext
 from acp_client.infrastructure.plugins.manager import PluginManager
-
 
 # ============================================================================
 # Mock Plugin Classes for Testing

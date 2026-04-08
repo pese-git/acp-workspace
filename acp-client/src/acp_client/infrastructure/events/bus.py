@@ -7,7 +7,8 @@ EventBus обеспечивает слабую связанность между
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Awaitable, Callable, TypeVar
+from collections.abc import Awaitable, Callable
+from typing import Any, TypeVar
 
 import structlog
 
@@ -99,10 +100,10 @@ class EventBus:
                 event_type=event_type.__name__,
                 handler_name=getattr(handler, "__name__", str(handler)),
             )
-        except ValueError:
+        except ValueError as e:
             raise ValueError(
                 f"Handler {handler} not subscribed to {event_type.__name__}"
-            )
+            ) from e
 
     async def publish(self, event: T) -> None:
         """Опубликовать событие всем подписчикам.

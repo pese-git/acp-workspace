@@ -13,7 +13,6 @@ import pytest
 
 from acp_client.domain.events import (
     DomainEvent,
-    ErrorOccurredEvent,
     PermissionRequestedEvent,
     PromptCompletedEvent,
     SessionCreatedEvent,

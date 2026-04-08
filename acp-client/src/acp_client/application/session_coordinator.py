@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import structlog
-
 from acp_client.domain import SessionRepository, TransportService
 from acp_client.infrastructure.logging_config import get_logger
 
