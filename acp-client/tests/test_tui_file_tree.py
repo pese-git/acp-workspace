@@ -48,3 +48,15 @@ def test_file_tree_refresh_tree_skips_when_not_mounted(tmp_path: Path) -> None:
     tree.refresh_tree()
 
     assert tree.root_path == tmp_path
+
+
+def test_file_tree_marks_changed_file_and_parent_directory(tmp_path: Path) -> None:
+    tree = FileTree(root_path=str(tmp_path))
+    changed_file = tmp_path / "src" / "main.py"
+    changed_file.parent.mkdir(parents=True)
+    changed_file.write_text("print('ok')\n", encoding="utf-8")
+
+    tree.mark_changed(changed_file)
+
+    assert tree.is_changed(changed_file) is True
+    assert tree.is_changed(changed_file.parent) is True

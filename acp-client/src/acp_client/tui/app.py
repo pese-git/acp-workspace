@@ -589,7 +589,9 @@ class ACPClientApp(App[None]):
     def _on_file_written(self, _path: Path) -> None:
         """Обновляет FileTree после записи файла агентом."""
 
-        self.query_one(FileTree).refresh_tree()
+        file_tree = self.query_one(FileTree)
+        file_tree.mark_changed(_path)
+        file_tree.refresh_tree()
 
     def _remember_failed_operation(
         self,

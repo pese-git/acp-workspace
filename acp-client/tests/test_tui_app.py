@@ -88,6 +88,12 @@ class _FakeFileTree:
 
     def __init__(self) -> None:
         self.refreshed = False
+        self.changed_paths: list[Path] = []
+
+    def mark_changed(self, path: Path) -> None:
+        """Сохраняет путь, который app пометил как измененный."""
+
+        self.changed_paths.append(path)
 
     def refresh_tree(self) -> None:
         """Отмечает факт обновления дерева файлов."""
@@ -855,6 +861,7 @@ def test_on_file_written_refreshes_file_tree(monkeypatch: pytest.MonkeyPatch) ->
     app._on_file_written(Path("/tmp/example.txt"))  # noqa: SLF001
 
     assert tree.refreshed is True
+    assert tree.changed_paths == [Path("/tmp/example.txt")]
 
 
 def test_file_tree_open_request_reads_file_and_opens_viewer(

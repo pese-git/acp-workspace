@@ -101,6 +101,17 @@ Screen {
     margin: 0 0 1 0;
 }
 
+#file-viewer-search {
+    margin: 0 0 1 0;
+    border: round #6d7f9a;
+    background: #ffffff;
+}
+
+#file-viewer-search-status {
+    margin: 0 0 1 0;
+    color: #334155;
+}
+
 #file-viewer-content {
     height: 1fr;
     overflow: auto;

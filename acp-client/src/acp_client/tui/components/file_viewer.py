@@ -8,13 +8,16 @@ from rich.syntax import Syntax
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Static
+from textual.widgets import Input, Static
 
 
 class FileViewerModal(ModalScreen[None]):
     """Показывает содержимое выбранного файла с подсветкой синтаксиса."""
 
     BINDINGS = [
+        ("ctrl+f", "focus_search", "Search"),
+        ("f3", "next_match", "Next match"),
+        ("shift+f3", "previous_match", "Prev match"),
         ("escape", "close", "Close"),
         ("q", "close", "Close"),
     ]
@@ -25,18 +28,61 @@ class FileViewerModal(ModalScreen[None]):
         super().__init__()
         self._file_path = file_path
         self._content = content
+        self._match_lines: list[int] = []
+        self._active_match_index: int = -1
 
     def compose(self) -> ComposeResult:
         """Рендерит заголовок и подсвеченный контент файла."""
 
         with Vertical(id="file-viewer-modal"):
             yield Static(f"Файл: {self._file_path}", id="file-viewer-title")
+            yield Input(
+                placeholder="Поиск (Ctrl+F, Enter/F3 — далее, Shift+F3 — назад)",
+                id="file-viewer-search",
+            )
+            yield Static("Поиск: введите текст", id="file-viewer-search-status")
             yield Static(self._build_syntax(), id="file-viewer-content")
+
+    def on_mount(self) -> None:
+        """Оставляет фокус на контенте файла при открытии модального окна."""
+
+        self.query_one("#file-viewer-content", Static).focus()
 
     def action_close(self) -> None:
         """Закрывает окно просмотра файла по hotkey."""
 
         self.dismiss(None)
+
+    def action_focus_search(self) -> None:
+        """Переводит фокус в строку поиска по Ctrl+F."""
+
+        search_input = self.query_one("#file-viewer-search", Input)
+        search_input.focus()
+        search_input.cursor_position = len(search_input.value)
+
+    def action_next_match(self) -> None:
+        """Переходит к следующему совпадению поискового запроса."""
+
+        self._move_match(step=1)
+
+    def action_previous_match(self) -> None:
+        """Переходит к предыдущему совпадению поискового запроса."""
+
+        self._move_match(step=-1)
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        """Пересчитывает совпадения при каждом изменении строки поиска."""
+
+        if event.input.id != "file-viewer-search":
+            return
+        self._rebuild_matches(event.value)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """По Enter в поиске переключает фокус на следующее совпадение."""
+
+        if event.input.id != "file-viewer-search":
+            return
+        self._move_match(step=1)
 
     def _build_syntax(self) -> Syntax:
         """Создает Rich Syntax-блок с авто-определением языка по расширению."""
@@ -50,3 +96,60 @@ class FileViewerModal(ModalScreen[None]):
             word_wrap=False,
             indent_guides=True,
         )
+
+    def _rebuild_matches(self, query: str) -> None:
+        """Пересчитывает совпадения и обновляет статус поиска в модальном окне."""
+
+        normalized_query = query.strip().lower()
+        if not normalized_query:
+            self._match_lines = []
+            self._active_match_index = -1
+            self._update_search_status()
+            return
+
+        self._match_lines = []
+        for index, line in enumerate(self._content.splitlines(), start=1):
+            if normalized_query in line.lower():
+                self._match_lines.append(index)
+
+        self._active_match_index = 0 if self._match_lines else -1
+        self._update_search_status()
+        self._scroll_to_active_match()
+
+    def _move_match(self, *, step: int) -> None:
+        """Сдвигает активный индекс совпадения и прокручивает контент к нему."""
+
+        if not self._match_lines:
+            self._update_search_status()
+            return
+
+        self._active_match_index = (self._active_match_index + step) % len(self._match_lines)
+        self._update_search_status()
+        self._scroll_to_active_match()
+
+    def _update_search_status(self) -> None:
+        """Показывает текущее состояние поиска и позицию в списке совпадений."""
+
+        status_widget = self.query_one("#file-viewer-search-status", Static)
+        if not self._match_lines:
+            search_input = self.query_one("#file-viewer-search", Input)
+            if search_input.value.strip():
+                status_widget.update("Поиск: совпадений не найдено")
+            else:
+                status_widget.update("Поиск: введите текст")
+            return
+
+        current_position = self._active_match_index + 1
+        total_matches = len(self._match_lines)
+        current_line = self._match_lines[self._active_match_index]
+        status_widget.update(f"Поиск: {current_position}/{total_matches}, строка {current_line}")
+
+    def _scroll_to_active_match(self) -> None:
+        """Прокручивает контент к активной строке совпадения."""
+
+        if not self._match_lines:
+            return
+
+        content_widget = self.query_one("#file-viewer-content", Static)
+        line_number = self._match_lines[self._active_match_index]
+        content_widget.scroll_to(y=max(line_number - 2, 0), animate=False)
