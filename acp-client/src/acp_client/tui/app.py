@@ -35,6 +35,7 @@ from .components import (
     Sidebar,
     ToolPanel,
 )
+from .config import TUIConfig, TUIConfigStore, resolve_tui_connection
 from .managers import (
     ACPConnectionManager,
     HistoryCache,
@@ -158,6 +159,10 @@ class ACPClientApp(App[None]):
         """Инициализирует UI и менеджеры состояния приложения."""
 
         super().__init__()
+        self._host = host
+        self._port = port
+        self._config_store = TUIConfigStore()
+        self._config = self._config_store.load()
         self._app_logger = structlog.get_logger("acp_client.tui.app")
         self._connection = ACPConnectionManager(
             host=host,
@@ -208,6 +213,7 @@ class ACPClientApp(App[None]):
         """Закрывает persistent WS-соединение при завершении приложения."""
 
         self._persist_ui_state()
+        self._persist_tui_config()
         await self._connection.close()
 
     async def _bootstrap(self) -> None:
@@ -737,6 +743,17 @@ class ACPClientApp(App[None]):
             )
         )
 
+    def _persist_tui_config(self) -> None:
+        """Сохраняет host/port/theme TUI-конфига для следующих запусков приложения."""
+
+        self._config_store.save(
+            TUIConfig(
+                host=self._host,
+                port=self._port,
+                theme=self._config.theme,
+            )
+        )
+
     def _render_replay_updates(self, updates: list[SessionUpdateNotification]) -> None:
         """Отрисовывает replay updates сообщений и tool-call статусов."""
 
@@ -865,10 +882,11 @@ class ACPClientApp(App[None]):
             )
 
 
-def run_tui_app(*, host: str = "127.0.0.1", port: int = 8765) -> None:
+def run_tui_app(*, host: str | None = None, port: int | None = None) -> None:
     """Запускает TUI приложение с указанными параметрами подключения."""
 
-    app = ACPClientApp(host=host, port=port)
+    resolved_host, resolved_port = resolve_tui_connection(host=host, port=port)
+    app = ACPClientApp(host=resolved_host, port=resolved_port)
     app.run()
 
 

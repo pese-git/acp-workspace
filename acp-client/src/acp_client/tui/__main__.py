@@ -11,8 +11,8 @@ def main() -> None:
     """Запускает TUI приложение с параметрами хоста и порта."""
 
     parser = argparse.ArgumentParser(prog="acp-client-tui")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", default=8765, type=int)
+    parser.add_argument("--host", default=None)
+    parser.add_argument("--port", default=None, type=int)
     args = parser.parse_args()
     run_tui_app(host=args.host, port=args.port)
 

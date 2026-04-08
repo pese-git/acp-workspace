@@ -33,8 +33,8 @@ def run_client() -> None:
     """
 
     parser = argparse.ArgumentParser(prog="acp-client")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", default=8765, type=int)
+    parser.add_argument("--host", default=None)
+    parser.add_argument("--port", default=None, type=int)
     parser.add_argument("--method", default=None)
     parser.add_argument("--params", default=None)
     parser.add_argument(
@@ -68,11 +68,14 @@ def run_client() -> None:
         run_tui_app(host=args.host, port=args.port)
         return
 
+    resolved_host = args.host if isinstance(args.host, str) and args.host else "127.0.0.1"
+    resolved_port = args.port if isinstance(args.port, int) and args.port > 0 else 8765
+
     if not isinstance(args.method, str) or not args.method:
         parser.error("--method обязателен, если не используется --tui")
 
     params = parse_json_params(args.params)
-    client = ACPClient(host=args.host, port=args.port)
+    client = ACPClient(host=resolved_host, port=resolved_port)
 
     # Для `session/load` можно вывести replay обновления вместе с финальным ответом.
     if args.method == "session/load" and args.show_updates:
@@ -111,7 +114,7 @@ def run_client() -> None:
     print(json.dumps(response.to_dict(), indent=2, ensure_ascii=False))
 
 
-def run_tui_app(*, host: str, port: int) -> None:
+def run_tui_app(*, host: str | None, port: int | None) -> None:
     """Ленивая загрузка TUI, чтобы не требовать Textual для обычного CLI."""
 
     from .tui import run_tui_app as _run_tui

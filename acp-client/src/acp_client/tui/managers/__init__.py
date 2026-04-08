@@ -1,5 +1,6 @@
 """Менеджеры состояния и интеграции для TUI."""
 
+from ..config import TUIConfig, TUIConfigStore
 from .cache import HistoryCache
 from .connection import ACPConnectionManager
 from .filesystem import LocalFileSystemManager
@@ -12,6 +13,8 @@ from .ui_state import TUIStateSnapshot, UIStateMachine, UIStateStore
 __all__ = [
     "ACPConnectionManager",
     "HistoryCache",
+    "TUIConfig",
+    "TUIConfigStore",
     "LocalFileSystemManager",
     "LocalTerminalManager",
     "PermissionManager",
