@@ -38,6 +38,7 @@ from .managers import (
     ACPConnectionManager,
     LocalFileSystemManager,
     LocalTerminalManager,
+    PermissionManager,
     SessionManager,
     TUIStateSnapshot,
     UIStateStore,
@@ -164,6 +165,7 @@ class ACPClientApp(App[None]):
         self._sessions = SessionManager(self._connection)
         self._filesystem = LocalFileSystemManager(on_file_written=self._on_file_written)
         self._terminal = LocalTerminalManager()
+        self._permission_manager = PermissionManager()
         self._updates = UpdateMessageHandler(
             on_agent_chunk=self._on_agent_chunk,
             on_user_chunk=self._on_user_chunk,
@@ -740,6 +742,16 @@ class ACPClientApp(App[None]):
             parsed_request.params.toolCall.title or parsed_request.params.toolCall.toolCallId
         )
         chat.add_system_message(f"Запрошено разрешение: {tool_name}")
+
+        auto_option_id = self._permission_manager.resolve_option_id(parsed_request)
+        if isinstance(auto_option_id, str) and auto_option_id:
+            self._set_connection_state(
+                ConnectionState.CONNECTED,
+                detail=f"Permission auto-selected: {auto_option_id}",
+            )
+            chat.add_system_message(f"Автоприменено разрешение: {auto_option_id}")
+            return auto_option_id
+
         self._set_connection_state(
             ConnectionState.CONNECTED,
             detail="Waiting permission decision",
@@ -757,6 +769,14 @@ class ACPClientApp(App[None]):
             ConnectionState.CONNECTED,
             detail=f"Permission selected: {selected_option_id}",
         )
+        policy_saved = self._permission_manager.remember_decision(
+            parsed_request,
+            selected_option_id,
+        )
+        if policy_saved:
+            tool_kind = parsed_request.params.toolCall.kind
+            if isinstance(tool_kind, str) and tool_kind:
+                chat.add_system_message(f"Сохранена policy разрешений для kind={tool_kind}")
         chat.add_system_message(f"Выбрано разрешение: {selected_option_id}")
         return selected_option_id
 

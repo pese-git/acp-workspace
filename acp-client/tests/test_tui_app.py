@@ -959,3 +959,87 @@ def test_terminal_wait_and_kill_are_reported_to_chat(monkeypatch: pytest.MonkeyP
         "Терминал завершен: term_1 (exit=0)",
         "Терминал остановлен: term_1",
     ]
+
+
+@pytest.mark.asyncio
+async def test_permission_request_auto_applies_saved_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = ACPClientApp(host="127.0.0.1", port=8765)
+    chat = _FakeChatView()
+
+    def _query_one(selector: object) -> _FakeChatView:
+        if selector is not ChatView:
+            msg = f"Unexpected selector: {selector}"
+            raise AssertionError(msg)
+        return chat
+
+    monkeypatch.setattr(app, "query_one", _query_one)
+    monkeypatch.setattr(app, "_set_connection_state", lambda _state, detail: detail)
+
+    request_payload: dict[str, object] = {
+        "jsonrpc": "2.0",
+        "id": "perm_1",
+        "method": "session/request_permission",
+        "params": {
+            "sessionId": "sess_1",
+            "toolCall": {"toolCallId": "call_1", "title": "Run", "kind": "execute"},
+            "options": [
+                {"optionId": "allow_always_1", "name": "Allow always", "kind": "allow_always"},
+                {"optionId": "reject_once_1", "name": "Reject once", "kind": "reject_once"},
+            ],
+        },
+    }
+    app._permission_manager.clear()  # noqa: SLF001
+    app._permission_manager._snapshot.by_tool_kind["execute"] = "allow_always"  # noqa: SLF001
+    monkeypatch.setattr(
+        app,
+        "push_screen_wait",
+        lambda _modal: (_ for _ in ()).throw(AssertionError("modal should not open")),
+    )
+
+    option_id = await app._on_permission_request(request_payload)  # noqa: SLF001
+
+    assert option_id == "allow_always_1"
+    assert "Автоприменено разрешение: allow_always_1" in chat.system_messages
+
+
+@pytest.mark.asyncio
+async def test_permission_request_saves_policy_after_always_choice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = ACPClientApp(host="127.0.0.1", port=8765)
+    chat = _FakeChatView()
+
+    def _query_one(selector: object) -> _FakeChatView:
+        if selector is not ChatView:
+            msg = f"Unexpected selector: {selector}"
+            raise AssertionError(msg)
+        return chat
+
+    async def _push_screen_wait(_modal: object) -> str:
+        return "allow_always_1"
+
+    monkeypatch.setattr(app, "query_one", _query_one)
+    monkeypatch.setattr(app, "_set_connection_state", lambda _state, detail: detail)
+    monkeypatch.setattr(app, "push_screen_wait", _push_screen_wait)
+
+    request_payload: dict[str, object] = {
+        "jsonrpc": "2.0",
+        "id": "perm_1",
+        "method": "session/request_permission",
+        "params": {
+            "sessionId": "sess_1",
+            "toolCall": {"toolCallId": "call_1", "title": "Run", "kind": "execute"},
+            "options": [
+                {"optionId": "allow_always_1", "name": "Allow always", "kind": "allow_always"},
+                {"optionId": "reject_once_1", "name": "Reject once", "kind": "reject_once"},
+            ],
+        },
+    }
+
+    option_id = await app._on_permission_request(request_payload)  # noqa: SLF001
+
+    assert option_id == "allow_always_1"
+    assert app._permission_manager.get_policy("execute") == "allow_always"  # noqa: SLF001
+    assert "Сохранена policy разрешений для kind=execute" in chat.system_messages
