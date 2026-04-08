@@ -814,8 +814,12 @@ class ACPClientApp(App[None]):
             return server_updates
 
         if server_updates:
-            self._history_cache.save_updates(session_id=session_id, updates=server_updates)
-            return server_updates
+            cached_updates = self._history_cache.load_updates(session_id=session_id)
+            return self._history_cache.merge_updates(
+                session_id=session_id,
+                server_updates=server_updates,
+                cached_updates=cached_updates,
+            )
 
         return self._history_cache.load_updates(session_id=session_id)
 

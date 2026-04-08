@@ -61,6 +61,41 @@ class HistoryCache:
                 continue
         return parsed_updates
 
+    def merge_updates(
+        self,
+        *,
+        session_id: str,
+        server_updates: list[SessionUpdateNotification],
+        cached_updates: list[SessionUpdateNotification],
+    ) -> list[SessionUpdateNotification]:
+        """Разрешает конфликт server/cache и сохраняет объединенный snapshot истории."""
+
+        if not session_id:
+            return server_updates
+        if not cached_updates:
+            self.save_updates(session_id=session_id, updates=server_updates)
+            return server_updates
+
+        merged_updates: list[SessionUpdateNotification] = []
+        seen_keys: set[str] = set()
+
+        for update in server_updates:
+            update_key = self._update_key(update)
+            if update_key in seen_keys:
+                continue
+            merged_updates.append(update)
+            seen_keys.add(update_key)
+
+        for update in cached_updates:
+            update_key = self._update_key(update)
+            if update_key in seen_keys:
+                continue
+            merged_updates.append(update)
+            seen_keys.add(update_key)
+
+        self.save_updates(session_id=session_id, updates=merged_updates)
+        return merged_updates
+
     def _session_file(self, session_id: str) -> Path:
         """Возвращает путь до JSON-файла кэша выбранной сессии."""
 
@@ -94,3 +129,9 @@ class HistoryCache:
         except OSError:
             # Кэш best-effort и не должен ломать основной UX работы TUI.
             return
+
+    @staticmethod
+    def _update_key(update: SessionUpdateNotification) -> str:
+        """Возвращает стабильный ключ update для dedupe при merge конфликтов."""
+
+        return json.dumps(update.model_dump(), ensure_ascii=False, sort_keys=True)

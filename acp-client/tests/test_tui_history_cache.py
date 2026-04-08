@@ -47,3 +47,22 @@ def test_history_cache_save_updates_overwrites_snapshot(tmp_path: Path) -> None:
 
     assert len(loaded_updates) == 1
     assert loaded_updates[0].params.update.model_dump()["content"]["text"] == "new"
+
+
+def test_history_cache_merge_updates_resolves_conflict_and_dedupes(tmp_path: Path) -> None:
+    cache = HistoryCache(root_dir=tmp_path / "history")
+    server_updates = [_build_update("server-1"), _build_update("shared")]
+    cached_updates = [_build_update("shared"), _build_update("cached-2")]
+
+    merged = cache.merge_updates(
+        session_id="sess_1",
+        server_updates=server_updates,
+        cached_updates=cached_updates,
+    )
+
+    merged_texts = [update.params.update.model_dump()["content"]["text"] for update in merged]
+    assert merged_texts == ["server-1", "shared", "cached-2"]
+
+    reloaded = cache.load_updates(session_id="sess_1")
+    reloaded_texts = [update.params.update.model_dump()["content"]["text"] for update in reloaded]
+    assert reloaded_texts == ["server-1", "shared", "cached-2"]

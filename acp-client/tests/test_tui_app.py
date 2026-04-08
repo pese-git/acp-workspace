@@ -127,6 +127,7 @@ class _FakeHistoryCache:
         self.saved_updates: list[tuple[str, list[Any]]] = []
         self.loaded_session_ids: list[str] = []
         self.load_result: list[Any] = []
+        self.merge_calls: list[tuple[str, list[Any], list[Any]]] = []
 
     def save_updates(self, *, session_id: str, updates: list[Any]) -> None:
         """Сохраняет аргументы вызова save_updates для проверок."""
@@ -138,6 +139,19 @@ class _FakeHistoryCache:
 
         self.loaded_session_ids.append(session_id)
         return self.load_result
+
+    def merge_updates(
+        self,
+        *,
+        session_id: str,
+        server_updates: list[Any],
+        cached_updates: list[Any],
+    ) -> list[Any]:
+        """Сохраняет вызов merge и возвращает server snapshot для теста."""
+
+        self.merge_calls.append((session_id, server_updates, cached_updates))
+        self.saved_updates.append((session_id, server_updates))
+        return server_updates
 
 
 def test_format_footer_error_extracts_jsonrpc_code_and_reason() -> None:
@@ -508,6 +522,7 @@ def test_resolve_replay_updates_uses_server_snapshot_and_persists() -> None:
     )
 
     assert resolved == server_updates
+    assert cache.merge_calls == [("sess_1", server_updates, [])]
     assert cache.saved_updates == [("sess_1", server_updates)]
 
 
@@ -542,6 +557,50 @@ def test_resolve_replay_updates_falls_back_to_history_cache() -> None:
 
     assert resolved == cached_updates
     assert cache.loaded_session_ids == ["sess_1"]
+
+
+def test_resolve_replay_updates_passes_cached_updates_to_merge() -> None:
+    app = ACPClientApp(host="127.0.0.1", port=8765)
+    cache = _FakeHistoryCache()
+    cast(Any, app)._history_cache = cache  # noqa: SLF001
+
+    from acp_client.messages import SessionUpdateNotification
+
+    server_updates = [
+        SessionUpdateNotification.model_validate(
+            {
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": {
+                    "sessionId": "sess_1",
+                    "update": {
+                        "sessionUpdate": "agent_message_chunk",
+                        "content": {"type": "text", "text": "server"},
+                    },
+                },
+            }
+        )
+    ]
+    cached_updates = [
+        SessionUpdateNotification.model_validate(
+            {
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": {
+                    "sessionId": "sess_1",
+                    "update": {
+                        "sessionUpdate": "agent_message_chunk",
+                        "content": {"type": "text", "text": "cached"},
+                    },
+                },
+            }
+        )
+    ]
+    cache.load_result = cached_updates
+
+    app._resolve_replay_updates(session_id="sess_1", server_updates=server_updates)  # noqa: SLF001
+
+    assert cache.merge_calls == [("sess_1", server_updates, cached_updates)]
 
 
 def test_reconnect_callbacks_emit_runtime_state_transitions(

@@ -21,6 +21,7 @@
 - Реализован persistent permission policy manager с auto-apply для `allow_always`/`reject_always`.
 - В permission-flow добавлена обработка timeout ожидания решения пользователя в модальном окне.
 - Реализован базовый локальный history cache `session/update` с fallback при пустом replay после переключения/восстановления сессии.
+- Добавлено разрешение конфликтов server/cache replay (merge + dedupe update-событий) при непустом server snapshot.
 - Реализован базовый менеджер конфигурации TUI (локальный `tui_config.json`) с загрузкой default host/port/theme и автосохранением runtime-значений подключения.
 - В работе остаются расширенный UX-polish терминального вывода, полная state/cache/config подсистема, e2e/perf тесты и пакет отдельной TUI-документации.
 
