@@ -12,17 +12,29 @@ class FakeConnection:
     """Тестовый connection manager с предсказуемым поведением."""
 
     def __init__(self) -> None:
-        self.created = False
+        self.created_count = 0
         self.prompt_calls: list[tuple[str, str]] = []
+        self.loaded_sessions: list[str] = []
 
     async def list_sessions(self) -> list[SessionListItem]:
-        if self.created:
+        if self.created_count >= 2:
+            return [
+                SessionListItem(sessionId="sess_new_2", cwd="/tmp"),
+                SessionListItem(sessionId="sess_new", cwd="/tmp"),
+            ]
+        if self.created_count == 1:
             return [SessionListItem(sessionId="sess_new", cwd="/tmp")]
         return []
 
     async def create_session(self, cwd: str) -> SessionSetupResult:
-        self.created = True
-        return SessionSetupResult(sessionId="sess_new", configOptions=[])
+        self.created_count += 1
+        if self.created_count == 1:
+            return SessionSetupResult(sessionId="sess_new", configOptions=[])
+        return SessionSetupResult(sessionId="sess_new_2", configOptions=[])
+
+    async def load_session(self, session_id: str, cwd: str) -> SessionSetupResult:
+        self.loaded_sessions.append(session_id)
+        return SessionSetupResult(sessionId=session_id, configOptions=[])
 
     async def send_prompt(
         self,
@@ -71,3 +83,32 @@ async def test_session_manager_cancel_is_noop_without_active_session() -> None:
     await session_manager.cancel()
 
     assert fake_connection.prompt_calls == []
+
+
+@pytest.mark.asyncio
+async def test_session_manager_create_and_activate_replaces_active_session() -> None:
+    fake_connection = FakeConnection()
+    session_manager = SessionManager(fake_connection)
+
+    await session_manager.refresh_sessions()
+    first_session = await session_manager.ensure_active_session()
+    second_session = await session_manager.create_and_activate_session("/tmp")
+
+    assert first_session == "sess_new"
+    assert second_session == "sess_new_2"
+    assert session_manager.active_session_id == "sess_new_2"
+
+
+@pytest.mark.asyncio
+async def test_session_manager_can_cycle_sessions() -> None:
+    fake_connection = FakeConnection()
+    session_manager = SessionManager(fake_connection)
+    await session_manager.create_and_activate_session("/tmp")
+    await session_manager.create_and_activate_session("/tmp")
+
+    next_session = await session_manager.activate_next_session()
+    previous_session = await session_manager.activate_previous_session()
+
+    assert next_session == "sess_new"
+    assert previous_session == "sess_new_2"
+    assert fake_connection.loaded_sessions == ["sess_new", "sess_new_2"]

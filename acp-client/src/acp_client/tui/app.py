@@ -19,6 +19,9 @@ class ACPClientApp(App[None]):
     BINDINGS = [
         ("ctrl+q", "quit", "Quit"),
         ("ctrl+n", "new_session", "New Session"),
+        ("ctrl+b", "focus_sidebar", "Focus Sessions"),
+        ("ctrl+j", "next_session", "Next Session"),
+        ("ctrl+k", "previous_session", "Prev Session"),
         ("ctrl+c", "cancel_prompt", "Cancel"),
     ]
 
@@ -65,7 +68,9 @@ class ACPClientApp(App[None]):
             await self._sessions.refresh_sessions()
             await self._sessions.ensure_active_session()
             sidebar.set_sessions(self._sessions.sessions, self._sessions.active_session_id)
-            footer.set_status("Connected | Ready | Ctrl+Enter send | Ctrl+C cancel")
+            footer.set_status(
+                "Connected | Ready | Ctrl+B focus sessions | Ctrl+Enter send | Ctrl+J/K switch"
+            )
             chat.add_system_message("TUI ready")
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
             self._app_logger.error("tui_bootstrap_failed", error=str(exc))
@@ -93,7 +98,9 @@ class ACPClientApp(App[None]):
         try:
             await self._sessions.send_prompt(text, self._updates.handle)
             chat.finish_agent_message()
-            footer.set_status("Connected | Ready | Ctrl+Enter send | Ctrl+C cancel")
+            footer.set_status(
+                "Connected | Ready | Ctrl+B focus sessions | Ctrl+Enter send | Ctrl+J/K switch"
+            )
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
             self._app_logger.error("tui_prompt_failed", error=str(exc))
             chat.finish_agent_message()
@@ -107,15 +114,28 @@ class ACPClientApp(App[None]):
         sidebar = self.query_one(Sidebar)
         chat = self.query_one(ChatView)
         try:
-            await self._connection.create_session(str(Path.cwd()))
-            await self._sessions.refresh_sessions()
-            await self._sessions.ensure_active_session()
+            new_session_id = await self._sessions.create_and_activate_session(str(Path.cwd()))
             sidebar.set_sessions(self._sessions.sessions, self._sessions.active_session_id)
-            footer.set_status("Connected | New session created")
-            chat.add_system_message("Создана новая сессия")
+            footer.set_status(f"Connected | New session created: {new_session_id}")
+            chat.add_system_message(f"Создана новая сессия: {new_session_id}")
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
             self._app_logger.error("tui_new_session_failed", error=str(exc))
             footer.set_status(format_footer_error(exc, prefix="Connected | Error creating session"))
+
+    async def action_next_session(self) -> None:
+        """Переключает активную сессию на следующую и обновляет sidebar."""
+
+        await self._switch_session(direction="next")
+
+    async def action_previous_session(self) -> None:
+        """Переключает активную сессию на предыдущую и обновляет sidebar."""
+
+        await self._switch_session(direction="previous")
+
+    def action_focus_sidebar(self) -> None:
+        """Переводит фокус в sidebar для выбора сессии по Enter."""
+
+        self.query_one(Sidebar).focus()
 
     async def action_cancel_prompt(self) -> None:
         """Отправляет session/cancel для текущей сессии."""
@@ -135,6 +155,48 @@ class ACPClientApp(App[None]):
         """Получает user chunk из replay/update и добавляет в ChatView."""
 
         self.query_one(ChatView).add_user_message(text)
+
+    async def _switch_session(self, *, direction: str) -> None:
+        """Переключает активную сессию по направлению и отражает это в UI."""
+
+        footer = self.query_one(FooterBar)
+        sidebar = self.query_one(Sidebar)
+        chat = self.query_one(ChatView)
+        try:
+            await self._sessions.refresh_sessions()
+            if direction == "next":
+                switched = await self._sessions.activate_next_session()
+            else:
+                switched = await self._sessions.activate_previous_session()
+            sidebar.set_sessions(self._sessions.sessions, self._sessions.active_session_id)
+            if switched is None:
+                footer.set_status("Connected | No sessions")
+                return
+            footer.set_status(f"Connected | Active session: {switched}")
+            chat.add_system_message(f"Активная сессия: {switched}")
+        except Exception as exc:  # pragma: no cover - safety net for runtime UX
+            self._app_logger.error("tui_switch_session_failed", error=str(exc))
+            footer.set_status(
+                format_footer_error(exc, prefix="Connected | Error switching session")
+            )
+
+    async def on_sidebar_session_selected(self, message: Sidebar.SessionSelected) -> None:
+        """Активирует сессию, выбранную в sidebar через Enter."""
+
+        footer = self.query_one(FooterBar)
+        sidebar = self.query_one(Sidebar)
+        chat = self.query_one(ChatView)
+        try:
+            await self._sessions.activate_session(message.session_id)
+            sidebar.set_sessions(self._sessions.sessions, self._sessions.active_session_id)
+            self.query_one(PromptInput).focus()
+            footer.set_status(f"Connected | Active session: {message.session_id}")
+            chat.add_system_message(f"Выбрана сессия: {message.session_id}")
+        except Exception as exc:  # pragma: no cover - safety net for runtime UX
+            self._app_logger.error("tui_sidebar_select_failed", error=str(exc))
+            footer.set_status(
+                format_footer_error(exc, prefix="Connected | Error selecting session")
+            )
 
 
 def run_tui_app(*, host: str = "127.0.0.1", port: int = 8765) -> None:

@@ -56,6 +56,8 @@ uv run acp-client --tui --host 127.0.0.1 --port 8080
 uv run acp-client-tui --host 127.0.0.1 --port 8080
 ```
 
+Горячие клавиши TUI: `Ctrl+B` фокус сессий (дальше `Up/Down + Enter`), `Ctrl+Enter` отправить prompt, `Ctrl+N` новая сессия, `Ctrl+J/K` переключение сессий, `Ctrl+C` cancel, `Ctrl+Q` выход.
+
 ## Полезные helper-методы ACPClient
 
 - `initialize(...)` — выполняет handshake и возвращает типизированный результат согласования.

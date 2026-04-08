@@ -11,7 +11,10 @@ class FooterBar(Static):
     def __init__(self) -> None:
         """Создает footer с базовым текстом статуса."""
 
-        super().__init__("Disconnected | Ctrl+Enter send | Ctrl+N new | Ctrl+Q quit", id="footer")
+        super().__init__(
+            "Disconnected | Ctrl+B sessions | Ctrl+Enter send | Ctrl+N new | Ctrl+Q quit",
+            id="footer",
+        )
 
     def set_status(self, text: str) -> None:
         """Обновляет строку статуса в footer."""

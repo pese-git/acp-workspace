@@ -15,8 +15,17 @@ class SessionConnection(Protocol):
     async def list_sessions(self) -> list[SessionListItem]:
         """Возвращает список сессий."""
 
+        ...
+
     async def create_session(self, cwd: str) -> Any:
         """Создает сессию и возвращает объект с sessionId."""
+
+        ...
+
+    async def load_session(self, session_id: str, cwd: str) -> Any:
+        """Загружает существующую сессию."""
+
+        ...
 
     async def send_prompt(
         self,
@@ -27,8 +36,12 @@ class SessionConnection(Protocol):
     ) -> Any:
         """Отправляет prompt в активную сессию."""
 
+        ...
+
     async def cancel_prompt(self, session_id: str) -> None:
         """Отправляет отмену выполнения."""
+
+        ...
 
 
 class SessionManager:
@@ -53,6 +66,12 @@ class SessionManager:
         """Возвращает кэшированный список сессий."""
 
         return self._sessions
+
+    @property
+    def active_cwd(self) -> str:
+        """Возвращает cwd активной сессии или последнее известное значение."""
+
+        return self._active_cwd
 
     async def refresh_sessions(self) -> list[SessionListItem]:
         """Перезагружает список сессий с сервера и обновляет кэш."""
@@ -79,6 +98,53 @@ class SessionManager:
         await self.refresh_sessions()
         return created.sessionId
 
+    async def create_and_activate_session(self, cwd: str | None = None) -> str:
+        """Создает новую сессию и делает ее активной независимо от текущей."""
+
+        target_cwd = cwd if isinstance(cwd, str) and cwd else self._active_cwd
+        created = await self._connection.create_session(cwd=target_cwd)
+        if created.sessionId is None:
+            msg = "Server returned session/new without sessionId"
+            raise RuntimeError(msg)
+        self._active_session_id = created.sessionId
+        self._active_cwd = target_cwd
+        await self.refresh_sessions()
+        return created.sessionId
+
+    async def activate_session(self, session_id: str) -> str:
+        """Активирует существующую сессию и загружает ее состояние с сервера."""
+
+        session_item = self._find_session(session_id)
+        if session_item is None:
+            msg = f"Session not found: {session_id}"
+            raise ValueError(msg)
+        await self._connection.load_session(session_id=session_id, cwd=session_item.cwd)
+        self._active_session_id = session_id
+        self._active_cwd = session_item.cwd
+        return session_id
+
+    async def activate_next_session(self) -> str | None:
+        """Переключает фокус на следующую сессию в списке."""
+
+        if not self._sessions:
+            return None
+        next_index = self._active_index() + 1
+        if next_index >= len(self._sessions):
+            next_index = 0
+        target = self._sessions[next_index]
+        return await self.activate_session(target.sessionId)
+
+    async def activate_previous_session(self) -> str | None:
+        """Переключает фокус на предыдущую сессию в списке."""
+
+        if not self._sessions:
+            return None
+        prev_index = self._active_index() - 1
+        if prev_index < 0:
+            prev_index = len(self._sessions) - 1
+        target = self._sessions[prev_index]
+        return await self.activate_session(target.sessionId)
+
     async def send_prompt(self, text: str, on_update: Callable[[dict[str, Any]], None]) -> None:
         """Отправляет prompt в активную сессию и прокидывает update callback."""
 
@@ -92,3 +158,21 @@ class SessionManager:
         if session_id is None:
             return
         await self._connection.cancel_prompt(session_id)
+
+    def _active_index(self) -> int:
+        """Возвращает индекс активной сессии или 0, если активная не найдена."""
+
+        if self._active_session_id is None:
+            return 0
+        for index, item in enumerate(self._sessions):
+            if item.sessionId == self._active_session_id:
+                return index
+        return 0
+
+    def _find_session(self, session_id: str) -> SessionListItem | None:
+        """Возвращает элемент списка сессий по его идентификатору."""
+
+        for item in self._sessions:
+            if item.sessionId == session_id:
+                return item
+        return None
