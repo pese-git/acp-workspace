@@ -30,6 +30,11 @@ Screen {
     padding: 1;
 }
 
+#sidebar:focus {
+    border: round #1d4ed8;
+    background: #e3ecff;
+}
+
 #file-tree {
     height: 1fr;
     background: #f4f7fc;
@@ -62,6 +67,11 @@ Screen {
     height: 6;
     border: round #6d7f9a;
     background: #ffffff;
+}
+
+#prompt-input:focus {
+    border: round #1d4ed8;
+    background: #f8fbff;
 }
 
 #footer {

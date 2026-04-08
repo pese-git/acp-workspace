@@ -12,6 +12,8 @@ class PromptInput(TextArea):
 
     BINDINGS = [
         ("ctrl+enter", "submit", "Send"),
+        ("up", "history_previous", "Prev Prompt"),
+        ("down", "history_next", "Next Prompt"),
         ("ctrl+up", "history_previous", "Prev Prompt"),
         ("ctrl+down", "history_next", "Next Prompt"),
     ]
@@ -30,7 +32,7 @@ class PromptInput(TextArea):
 
         super().__init__(id="prompt-input")
         self.border_title = "Prompt"
-        self.tooltip = "Ctrl+Enter - отправить, Ctrl+Up/Down - история"
+        self.tooltip = "Ctrl+Enter - отправить, Up/Down - история"
         self._active_session_id: str | None = None
         self._history_by_session: dict[str, list[str]] = {}
         self._history_index: int | None = None

@@ -3,6 +3,24 @@ from __future__ import annotations
 from acp_client.tui.components.prompt_input import PromptInput
 
 
+def test_prompt_input_supports_up_down_history_bindings() -> None:
+    bindings: set[str] = set()
+    for binding in PromptInput.BINDINGS:
+        key = getattr(binding, "key", None)
+        if isinstance(key, str):
+            bindings.add(key)
+            continue
+        if isinstance(binding, tuple) and binding:
+            first = binding[0]
+            if isinstance(first, str):
+                bindings.add(first)
+                continue
+        bindings.add(str(binding))
+
+    assert "up" in bindings
+    assert "down" in bindings
+
+
 def test_prompt_input_history_navigation_restores_draft() -> None:
     prompt_input = PromptInput()
     prompt_input.set_active_session("sess_1")

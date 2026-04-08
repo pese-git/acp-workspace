@@ -26,7 +26,7 @@
 - [x] Permission-flow: модальное окно, выбор опции, отправка решения, hotkeys в модале
 - [x] Reliability-блок: reconnect callbacks, offline/degraded статусы, retry queue, `Ctrl+R` retry операций
 - [x] Персистентность UI-состояния: последняя активная сессия и черновик prompt
-- [x] Hotkeys/navigation (актуальный набор): `Ctrl+S/B`, `Tab`, `Ctrl+N`, `Ctrl+J/K`, `Ctrl+L`, `Ctrl+H`, `Ctrl+C`, `Ctrl+Q`, `Ctrl+Enter`, `Ctrl+Up/Down`
+- [x] Hotkeys/navigation (актуальный набор): `Ctrl+S/B`, `Tab`, `Ctrl+N`, `Ctrl+J/K`, `Ctrl+L`, `Ctrl+H`, `Ctrl+C`, `Ctrl+Q`, `Ctrl+Enter`, `Up/Down`, `Ctrl+Up/Down`
 - [x] Расширенное покрытие unit-тестами для TUI-слоя
 - [x] Базовая `UIStateMachine` с валидацией переходов и интеграцией в runtime-сценарии
 - [x] Базовый `HistoryCache` (локальный JSON cache `session/update`, fallback при пустом replay)
@@ -1138,7 +1138,7 @@ class HistoryCache:
 **Зависимости:** Все предыдущие этапы
 
 **Критерий готовности:**
-- [ ] Все горячие клавиши из спецификации работают
+- [x] Все горячие клавиши из спецификации работают
 - [x] Tab переключает между панелями
 - [x] Focus управление работает
 
@@ -1179,7 +1179,7 @@ class HistoryCache:
 **Технические работы:**
 - [x] Реализовать action_cycle_focus()
 - [x] Определить порядок фокуса
-- [ ] Визуализировать focus (highlight)
+- [x] Визуализировать focus (highlight)
 
 **Оценка сложности:** Низкая
 
