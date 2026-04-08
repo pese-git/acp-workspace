@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import structlog
@@ -61,7 +62,8 @@ class ACPClientApp(App[None]):
             on_user_chunk=self._on_user_chunk,
             on_tool_update=self._on_tool_update,
         )
-        self._pending_prompt_text: str | None = None
+        self._pending_retry_action: Callable[[], Awaitable[None]] | None = None
+        self._pending_retry_label: str | None = None
 
     def compose(self) -> ComposeResult:
         """Собирает базовый layout приложения."""
@@ -138,7 +140,7 @@ class ACPClientApp(App[None]):
                 self._on_permission_request,
             )
             chat.finish_agent_message()
-            self._pending_prompt_text = None
+            self._clear_pending_retry()
             footer.set_status(
                 "Connected | Ready | Ctrl+B focus sessions | Ctrl+Enter send | Ctrl+J/K switch"
             )
@@ -147,8 +149,11 @@ class ACPClientApp(App[None]):
             self.query_one(HeaderBar).set_status("Degraded")
             chat.finish_agent_message()
             chat.add_system_message(f"Ошибка отправки prompt: {exc}")
-            self._pending_prompt_text = text
-            footer.set_status(format_retry_footer_error(exc))
+            self._set_pending_retry(
+                label="prompt",
+                action=lambda: self._send_prompt(text),
+            )
+            footer.set_status(format_retry_footer_error(exc, action_label="prompt"))
 
     async def action_new_session(self) -> None:
         """Создает новую сессию и обновляет sidebar состояние."""
@@ -164,11 +169,13 @@ class ACPClientApp(App[None]):
             self.query_one(PromptInput).text = ""
             tools.reset()
             chat.clear_messages()
+            self._clear_pending_retry()
             footer.set_status(f"Connected | New session created: {new_session_id}")
             chat.add_system_message(f"Создана новая сессия: {new_session_id}")
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
             self._app_logger.error("tui_new_session_failed", error=str(exc))
             self.query_one(HeaderBar).set_status("Degraded")
+            self._set_pending_retry(label="new_session", action=self.action_new_session)
             footer.set_status(format_footer_error(exc, prefix="Connected | Error creating session"))
 
     async def action_next_session(self) -> None:
@@ -196,15 +203,16 @@ class ACPClientApp(App[None]):
         footer.set_status("Connected | Cancel requested")
 
     def action_retry_prompt(self) -> None:
-        """Повторяет последний неуспешно отправленный prompt по Ctrl+R."""
+        """Повторяет последнюю неуспешную операцию по Ctrl+R."""
 
         footer = self.query_one(FooterBar)
-        pending_text = self._pending_prompt_text
-        if pending_text is None:
-            footer.set_status("Connected | Retry skipped: no failed prompt")
+        pending_action = self._pending_retry_action
+        pending_label = self._pending_retry_label
+        if pending_action is None or pending_label is None:
+            footer.set_status("Connected | Retry skipped: no failed operation")
             return
-        footer.set_status("Connected | Retrying last prompt...")
-        self.run_worker(self._send_prompt(pending_text), exclusive=True)
+        footer.set_status(f"Connected | Retrying failed operation: {pending_label}")
+        self.run_worker(pending_action(), exclusive=True)
 
     def _on_agent_chunk(self, text: str) -> None:
         """Получает agent chunk и рендерит его в ChatView."""
@@ -245,9 +253,14 @@ class ACPClientApp(App[None]):
             self.query_one(PromptInput).text = ""
             footer.set_status(f"Connected | Active session: {switched}")
             chat.add_system_message(f"Активная сессия: {switched}")
+            self._clear_pending_retry()
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
             self._app_logger.error("tui_switch_session_failed", error=str(exc))
             self.query_one(HeaderBar).set_status("Degraded")
+            self._set_pending_retry(
+                label=f"switch_session_{direction}",
+                action=lambda: self._switch_session(direction=direction),
+            )
             footer.set_status(
                 format_footer_error(exc, prefix="Connected | Error switching session")
             )
@@ -255,12 +268,17 @@ class ACPClientApp(App[None]):
     async def on_sidebar_session_selected(self, message: Sidebar.SessionSelected) -> None:
         """Активирует сессию, выбранную в sidebar через Enter."""
 
+        await self._activate_session_by_id(message.session_id)
+
+    async def _activate_session_by_id(self, session_id: str) -> None:
+        """Активирует указанную сессию и синхронизирует все панели интерфейса."""
+
         footer = self.query_one(FooterBar)
         sidebar = self.query_one(Sidebar)
         chat = self.query_one(ChatView)
         tools = self.query_one(ToolPanel)
         try:
-            await self._sessions.activate_session(message.session_id)
+            await self._sessions.activate_session(session_id)
             sidebar.set_sessions(self._sessions.sessions, self._sessions.active_session_id)
             self.query_one(PromptInput).set_active_session(self._sessions.active_session_id)
             self.query_one(PromptInput).focus()
@@ -268,11 +286,16 @@ class ACPClientApp(App[None]):
             tools.reset()
             chat.clear_messages()
             self._render_replay_updates(self._sessions.last_replay_updates)
-            footer.set_status(f"Connected | Active session: {message.session_id}")
-            chat.add_system_message(f"Выбрана сессия: {message.session_id}")
+            footer.set_status(f"Connected | Active session: {session_id}")
+            chat.add_system_message(f"Выбрана сессия: {session_id}")
+            self._clear_pending_retry()
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
             self._app_logger.error("tui_sidebar_select_failed", error=str(exc))
             self.query_one(HeaderBar).set_status("Degraded")
+            self._set_pending_retry(
+                label="select_session",
+                action=lambda: self._activate_session_by_id(session_id),
+            )
             footer.set_status(
                 format_footer_error(exc, prefix="Connected | Error selecting session")
             )
@@ -288,6 +311,23 @@ class ACPClientApp(App[None]):
 
         self.query_one(HeaderBar).set_status("Connected")
         self.query_one(FooterBar).set_status(f"Connected | Recovered after retry: {method}")
+
+    def _set_pending_retry(
+        self,
+        *,
+        label: str,
+        action: Callable[[], Awaitable[None]],
+    ) -> None:
+        """Сохраняет неуспешную операцию для повторного запуска по Ctrl+R."""
+
+        self._pending_retry_label = label
+        self._pending_retry_action = action
+
+    def _clear_pending_retry(self) -> None:
+        """Очищает сохраненную неуспешную операцию после успешного выполнения."""
+
+        self._pending_retry_label = None
+        self._pending_retry_action = None
 
     def _render_replay_updates(self, updates: list[SessionUpdateNotification]) -> None:
         """Отрисовывает replay updates сообщений и tool-call статусов."""
@@ -376,7 +416,7 @@ def format_footer_error(exc: Exception, *, prefix: str) -> str:
     return f"{prefix} | {compact[:96]}"
 
 
-def format_retry_footer_error(exc: Exception) -> str:
-    """Формирует статус ошибки с подсказкой на повтор отправки prompt."""
+def format_retry_footer_error(exc: Exception, *, action_label: str) -> str:
+    """Формирует статус ошибки с подсказкой на повтор операции."""
 
-    return f"{format_footer_error(exc, prefix='Connected | Error')} | Ctrl+R retry"
+    return f"{format_footer_error(exc, prefix='Connected | Error')} | Ctrl+R retry {action_label}"

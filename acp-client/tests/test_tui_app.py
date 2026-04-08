@@ -24,6 +24,6 @@ def test_format_footer_error_handles_plain_error_message() -> None:
 def test_format_retry_footer_error_adds_retry_hint() -> None:
     error = RuntimeError("temporary network timeout")
 
-    formatted = format_retry_footer_error(error)
+    formatted = format_retry_footer_error(error, action_label="prompt")
 
-    assert formatted == "Connected | Error | temporary network timeout | Ctrl+R retry"
+    assert formatted == "Connected | Error | temporary network timeout | Ctrl+R retry prompt"
