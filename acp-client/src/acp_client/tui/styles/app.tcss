@@ -23,9 +23,16 @@ Screen {
 }
 
 #chat-view {
-    width: 1fr;
+    width: 3fr;
     border: round #6d7f9a;
     background: #ffffff;
+    padding: 1;
+}
+
+#tool-panel {
+    width: 2fr;
+    border: round #6d7f9a;
+    background: #f8fafc;
     padding: 1;
 }
 
@@ -43,5 +50,18 @@ Screen {
 }
 
 .message {
+    margin: 0 0 1 0;
+}
+
+#permission-modal {
+    width: 80;
+    max-width: 90%;
+    height: auto;
+    border: round #2f4a75;
+    background: #f6f9ff;
+    padding: 1 2;
+}
+
+#permission-title {
     margin: 0 0 1 0;
 }

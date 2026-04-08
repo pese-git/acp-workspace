@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import structlog
@@ -21,6 +21,8 @@ from acp_client.messages import (
     parse_session_update_notification,
 )
 from acp_client.transport import ACPClientWSSession
+
+type PermissionHandler = Callable[[dict[str, Any]], str | None | Awaitable[str | None]]
 
 
 class ACPConnectionManager:
@@ -51,12 +53,18 @@ class ACPConnectionManager:
         method: str,
         params: dict[str, Any] | None = None,
         on_update: Callable[[dict[str, Any]], None] | None = None,
+        on_permission: PermissionHandler | None = None,
     ) -> Any:
         """Отправляет ACP-запрос через один и тот же persistent WS канал."""
 
         ws_session = await self._ensure_ws_session()
         try:
-            return await ws_session.request(method=method, params=params, on_update=on_update)
+            return await ws_session.request(
+                method=method,
+                params=params,
+                on_update=on_update,
+                on_permission=on_permission,
+            )
         except Exception:
             # При любой транспортной ошибке закрываем текущий сокет,
             # чтобы следующий вызов прозрачно создал новое соединение.
@@ -167,6 +175,7 @@ class ACPConnectionManager:
         session_id: str,
         text: str,
         on_update: Callable[[dict[str, Any]], None] | None,
+        on_permission: PermissionHandler | None = None,
     ) -> PromptResult:
         """Отправляет текстовый prompt в активную сессию."""
 
@@ -178,6 +187,7 @@ class ACPConnectionManager:
                 "prompt": [{"type": "text", "text": text}],
             },
             on_update=on_update,
+            on_permission=on_permission,
         )
         return parse_prompt_result(response)
 

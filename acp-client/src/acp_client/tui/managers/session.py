@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -37,6 +37,7 @@ class SessionConnection(Protocol):
         session_id: str,
         text: str,
         on_update: Callable[[dict[str, Any]], None] | None,
+        on_permission: Callable[[dict[str, Any]], str | None | Awaitable[str | None]] | None,
     ) -> Any:
         """Отправляет prompt в активную сессию."""
 
@@ -162,11 +163,21 @@ class SessionManager:
         target = self._sessions[prev_index]
         return await self.activate_session(target.sessionId)
 
-    async def send_prompt(self, text: str, on_update: Callable[[dict[str, Any]], None]) -> None:
+    async def send_prompt(
+        self,
+        text: str,
+        on_update: Callable[[dict[str, Any]], None],
+        on_permission: Callable[[dict[str, Any]], str | None | Awaitable[str | None]] | None,
+    ) -> None:
         """Отправляет prompt в активную сессию и прокидывает update callback."""
 
         session_id = await self.ensure_active_session()
-        await self._connection.send_prompt(session_id=session_id, text=text, on_update=on_update)
+        await self._connection.send_prompt(
+            session_id=session_id,
+            text=text,
+            on_update=on_update,
+            on_permission=on_permission,
+        )
 
     async def cancel(self) -> None:
         """Отменяет текущее выполнение в активной сессии."""

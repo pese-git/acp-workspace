@@ -5,7 +5,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from acp_client.messages import parse_session_update_notification
+from acp_client.messages import (
+    ToolCallUpdate,
+    parse_session_update_notification,
+    parse_tool_call_update,
+)
 
 
 class UpdateMessageHandler:
@@ -16,11 +20,13 @@ class UpdateMessageHandler:
         *,
         on_agent_chunk: Callable[[str], None],
         on_user_chunk: Callable[[str], None],
+        on_tool_update: Callable[[ToolCallUpdate], None] | None = None,
     ) -> None:
         """Сохраняет callback-и для текстовых chunk-событий."""
 
         self._on_agent_chunk = on_agent_chunk
         self._on_user_chunk = on_user_chunk
+        self._on_tool_update = on_tool_update
 
     def handle(self, payload: dict[str, Any]) -> None:
         """Обрабатывает одно сырое session/update сообщение."""
@@ -28,6 +34,11 @@ class UpdateMessageHandler:
         parsed = parse_session_update_notification(payload)
         if parsed is None:
             return
+
+        if self._on_tool_update is not None:
+            parsed_tool_update = parse_tool_call_update(parsed)
+            if parsed_tool_update is not None:
+                self._on_tool_update(parsed_tool_update)
 
         update_payload = parsed.params.update.model_dump()
         session_update_type = update_payload.get("sessionUpdate")

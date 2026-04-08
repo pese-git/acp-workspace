@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import structlog
@@ -29,7 +29,7 @@ from ..messages import (
     parse_request_permission_request,
 )
 
-type PermissionHandler = Callable[[dict[str, Any]], str | None]
+type PermissionHandler = Callable[[dict[str, Any]], str | None | Awaitable[str | None]]
 type FsReadHandler = Callable[[str], str]
 type FsWriteHandler = Callable[[str, str], str | None]
 type TerminalCreateHandler = Callable[[str], str]
@@ -81,7 +81,7 @@ async def await_ws_response(
         # Парсим JSON payload
         payload = json.loads(message.data)
         raw_method = payload.get("method") if isinstance(payload, dict) else None
-        
+
         # Обрабатываем session/update события (промежуточные уведомления)
         if raw_method == "session/update":
             if on_update is not None:
@@ -93,7 +93,7 @@ async def await_ws_response(
         if isinstance(payload, dict):
             permission_request = parse_request_permission_request(payload)
         if permission_request is not None:
-            permission_result = build_permission_result(
+            permission_result = await build_permission_result(
                 payload=payload,
                 on_permission=on_permission,
             )
@@ -162,11 +162,11 @@ async def perform_ws_initialize(
 
         payload = json.loads(message.data)
         raw_method = payload.get("method") if isinstance(payload, dict) else None
-        
+
         # Инициализация не должна блокироваться на update-событиях
         if raw_method == "session/update":
             continue
-        
+
         response = ACPMessage.from_dict(payload)
         if response.id != init_request.id:
             continue
@@ -210,18 +210,16 @@ async def perform_ws_authenticate(
 
         payload = json.loads(message.data)
         raw_method = payload.get("method") if isinstance(payload, dict) else None
-        
+
         # Пропускаем update-события во время аутентификации
         if raw_method == "session/update":
             continue
-        
+
         response = ACPMessage.from_dict(payload)
         if response.id != auth_request.id:
             continue
         if response.error is not None:
-            msg = (
-                f"WebSocket authenticate failed: {response.error.code} {response.error.message}"
-            )
+            msg = f"WebSocket authenticate failed: {response.error.code} {response.error.message}"
             raise RuntimeError(msg)
         return parse_authenticate_result(response)
 
@@ -314,10 +312,11 @@ class ACPClientWSSession:
                 self._ws,
                 self._client._default_client_capabilities(),
             )
-            
+
             # Выполняем auto-authenticate если включен
             if self._client.auto_authenticate:
                 from ..helpers import pick_auth_method_id
+
                 selected_auth_method = pick_auth_method_id(
                     init_result,
                     self._client.preferred_auth_method_id,
@@ -333,7 +332,7 @@ class ACPClientWSSession:
         # Отправляем запрос
         request = ACPMessage.request(method=method, params=params)
         await self._ws.send_str(request.to_json())
-        
+
         # Ждем ответ (обрабатывая промежуточные события)
         response = await await_ws_response(
             ws=self._ws,
@@ -348,11 +347,11 @@ class ACPClientWSSession:
             on_terminal_release=on_terminal_release,
             on_terminal_kill=on_terminal_kill,
         )
-        
+
         # Если это initialize - отмечаем инициализацию
         if method == "initialize" and response.error is None:
             self._initialized = True
-        
+
         return response
 
     async def authenticate(

@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 from typing import Any
 
 
-def build_permission_result(
+async def build_permission_result(
     *,
     payload: dict[str, Any],
-    on_permission: Callable[[dict[str, Any]], str | None] | None,
+    on_permission: Callable[[dict[str, Any]], Any] | None,
 ) -> dict[str, Any]:
     """Формирует результат `session/request_permission` для ответа агенту.
 
@@ -34,7 +35,15 @@ def build_permission_result(
     """
 
     # Вызываем callback если он передан, иначе None
-    selected_option_id = on_permission(payload) if on_permission is not None else None
+    selected_option_id: str | None = None
+    if on_permission is not None:
+        callback_result = on_permission(payload)
+        if inspect.isawaitable(callback_result):
+            awaited_result = await callback_result
+            if isinstance(awaited_result, str) and awaited_result:
+                selected_option_id = awaited_result
+        elif isinstance(callback_result, str) and callback_result:
+            selected_option_id = callback_result
 
     # Если опция не выбрана, возвращаем отмену
     if selected_option_id is None:

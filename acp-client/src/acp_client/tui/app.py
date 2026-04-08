@@ -9,9 +9,23 @@ import structlog
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 
-from acp_client.messages import SessionUpdateNotification
+from acp_client.messages import (
+    RequestPermissionRequest,
+    SessionUpdateNotification,
+    ToolCallUpdate,
+    parse_request_permission_request,
+    parse_tool_call_update,
+)
 
-from .components import ChatView, FooterBar, HeaderBar, PromptInput, Sidebar
+from .components import (
+    ChatView,
+    FooterBar,
+    HeaderBar,
+    PermissionModal,
+    PromptInput,
+    Sidebar,
+    ToolPanel,
+)
 from .managers import ACPConnectionManager, SessionManager, UpdateMessageHandler
 
 
@@ -39,6 +53,7 @@ class ACPClientApp(App[None]):
         self._updates = UpdateMessageHandler(
             on_agent_chunk=self._on_agent_chunk,
             on_user_chunk=self._on_user_chunk,
+            on_tool_update=self._on_tool_update,
         )
 
     def compose(self) -> ComposeResult:
@@ -48,6 +63,7 @@ class ACPClientApp(App[None]):
         with Horizontal(id="body"):
             yield Sidebar()
             yield ChatView()
+            yield ToolPanel()
         with Vertical(id="bottom"):
             yield PromptInput()
             yield FooterBar()
@@ -69,6 +85,7 @@ class ACPClientApp(App[None]):
         chat = self.query_one(ChatView)
         footer = self.query_one(FooterBar)
         sidebar = self.query_one(Sidebar)
+        tools = self.query_one(ToolPanel)
         try:
             header.set_status("Connected")
             await self._connection.initialize()
@@ -76,6 +93,7 @@ class ACPClientApp(App[None]):
             await self._sessions.ensure_active_session()
             self.query_one(PromptInput).set_active_session(self._sessions.active_session_id)
             sidebar.set_sessions(self._sessions.sessions, self._sessions.active_session_id)
+            tools.reset()
             footer.set_status(
                 "Connected | Ready | Ctrl+B focus sessions | Ctrl+Enter send | Ctrl+J/K switch"
             )
@@ -105,7 +123,11 @@ class ACPClientApp(App[None]):
         chat = self.query_one(ChatView)
         footer = self.query_one(FooterBar)
         try:
-            await self._sessions.send_prompt(text, self._updates.handle)
+            await self._sessions.send_prompt(
+                text,
+                self._updates.handle,
+                self._on_permission_request,
+            )
             chat.finish_agent_message()
             footer.set_status(
                 "Connected | Ready | Ctrl+B focus sessions | Ctrl+Enter send | Ctrl+J/K switch"
@@ -122,11 +144,13 @@ class ACPClientApp(App[None]):
         footer = self.query_one(FooterBar)
         sidebar = self.query_one(Sidebar)
         chat = self.query_one(ChatView)
+        tools = self.query_one(ToolPanel)
         try:
             new_session_id = await self._sessions.create_and_activate_session(str(Path.cwd()))
             sidebar.set_sessions(self._sessions.sessions, self._sessions.active_session_id)
             self.query_one(PromptInput).set_active_session(self._sessions.active_session_id)
             self.query_one(PromptInput).text = ""
+            tools.reset()
             footer.set_status(f"Connected | New session created: {new_session_id}")
             chat.add_system_message(f"Создана новая сессия: {new_session_id}")
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
@@ -167,12 +191,18 @@ class ACPClientApp(App[None]):
 
         self.query_one(ChatView).add_user_message(text)
 
+    def _on_tool_update(self, update: ToolCallUpdate) -> None:
+        """Получает update вызова инструмента и обновляет правую панель."""
+
+        self.query_one(ToolPanel).apply_update(update)
+
     async def _switch_session(self, *, direction: str) -> None:
         """Переключает активную сессию по направлению и отражает это в UI."""
 
         footer = self.query_one(FooterBar)
         sidebar = self.query_one(Sidebar)
         chat = self.query_one(ChatView)
+        tools = self.query_one(ToolPanel)
         try:
             await self._sessions.refresh_sessions()
             if direction == "next":
@@ -183,6 +213,7 @@ class ACPClientApp(App[None]):
             if switched is None:
                 footer.set_status("Connected | No sessions")
                 return
+            tools.reset()
             self._render_replay_updates(self._sessions.last_replay_updates)
             self.query_one(PromptInput).set_active_session(self._sessions.active_session_id)
             self.query_one(PromptInput).text = ""
@@ -200,12 +231,14 @@ class ACPClientApp(App[None]):
         footer = self.query_one(FooterBar)
         sidebar = self.query_one(Sidebar)
         chat = self.query_one(ChatView)
+        tools = self.query_one(ToolPanel)
         try:
             await self._sessions.activate_session(message.session_id)
             sidebar.set_sessions(self._sessions.sessions, self._sessions.active_session_id)
             self.query_one(PromptInput).set_active_session(self._sessions.active_session_id)
             self.query_one(PromptInput).focus()
             self.query_one(PromptInput).text = ""
+            tools.reset()
             self._render_replay_updates(self._sessions.last_replay_updates)
             footer.set_status(f"Connected | Active session: {message.session_id}")
             chat.add_system_message(f"Выбрана сессия: {message.session_id}")
@@ -216,9 +249,13 @@ class ACPClientApp(App[None]):
             )
 
     def _render_replay_updates(self, updates: list[SessionUpdateNotification]) -> None:
-        """Отрисовывает текстовые replay updates после загрузки сессии."""
+        """Отрисовывает replay updates сообщений и tool-call статусов."""
 
         for update in updates:
+            tool_update = parse_tool_call_update(update)
+            if tool_update is not None:
+                self.query_one(ToolPanel).apply_update(tool_update)
+
             payload = update.params.update.model_dump()
             session_update_type = payload.get("sessionUpdate")
             content = payload.get("content")
@@ -236,6 +273,34 @@ class ACPClientApp(App[None]):
                 self.query_one(ChatView).add_user_message(text)
 
         self.query_one(ChatView).finish_agent_message()
+
+    async def _on_permission_request(self, payload: dict[str, object]) -> str | None:
+        """Показывает модальное окно и возвращает выбранный optionId."""
+
+        footer = self.query_one(FooterBar)
+        parsed_request = parse_request_permission_request(payload)
+        if parsed_request is None:
+            footer.set_status("Connected | Permission request parse error")
+            return None
+
+        footer.set_status("Connected | Waiting permission decision")
+        selected_option_id = await self.push_screen_wait(
+            self._build_permission_modal(parsed_request)
+        )
+
+        if selected_option_id is None:
+            footer.set_status("Connected | Permission cancelled")
+            return None
+
+        footer.set_status(f"Connected | Permission selected: {selected_option_id}")
+        return selected_option_id
+
+    def _build_permission_modal(self, request: RequestPermissionRequest) -> PermissionModal:
+        """Создает модальное окно выбора permission-опции."""
+
+        tool_title = request.params.toolCall.title or request.params.toolCall.toolCallId
+        title = f"Разрешить действие: {tool_title}"
+        return PermissionModal(title=title, options=request.params.options)
 
 
 def run_tui_app(*, host: str = "127.0.0.1", port: int = 8765) -> None:

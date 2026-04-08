@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import structlog
@@ -31,7 +31,7 @@ from .messages import (
 )
 from .transport import ACPClientWSSession
 
-type PermissionHandler = Callable[[dict[str, Any]], str | None]
+type PermissionHandler = Callable[[dict[str, Any]], str | None | Awaitable[str | None]]
 type FsReadHandler = Callable[[str], str]
 type FsWriteHandler = Callable[[str, str], str | None]
 type TerminalCreateHandler = Callable[[str], str]
@@ -170,7 +170,7 @@ class ACPClient:
             params=params,
         )
         result = parse_initialize_result(response)
-        
+
         self.logger.info(
             "initialize_completed",
             server_version=result.protocolVersion,
@@ -201,7 +201,7 @@ class ACPClient:
             params=auth_params,
         )
         result = parse_authenticate_result(response)
-        
+
         self.logger.info("authenticate_completed", method_id=method_id)
         return result
 
@@ -259,7 +259,7 @@ class ACPClient:
             on_terminal_kill=on_terminal_kill,
         )
         result = parse_prompt_result(response)
-        
+
         self.logger.info("prompt_completed", session_id=session_id, stop_reason=result.stopReason)
         return result
 
@@ -302,7 +302,7 @@ class ACPClient:
                 on_terminal_release=on_terminal_release,
                 on_terminal_kill=on_terminal_kill,
             )
-            
+
             self.logger.debug(
                 "ws_response_received",
                 method=method,
@@ -651,4 +651,3 @@ class ACPClient:
         parsed_updates = extract_structured_updates(raw_updates)
 
         return response, parsed_updates
-

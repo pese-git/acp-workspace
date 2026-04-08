@@ -59,6 +59,7 @@ class FakeConnection:
         session_id: str,
         text: str,
         on_update: Any,
+        on_permission: Any,
     ) -> None:
         self.prompt_calls.append((session_id, text))
         on_update(
@@ -85,7 +86,7 @@ async def test_session_manager_creates_session_before_prompt() -> None:
     session_manager = SessionManager(fake_connection)
     collected: list[dict[str, Any]] = []
 
-    await session_manager.send_prompt("hello", collected.append)
+    await session_manager.send_prompt("hello", collected.append, None)
 
     assert session_manager.active_session_id == "sess_new"
     assert fake_connection.prompt_calls == [("sess_new", "hello")]
