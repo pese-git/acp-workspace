@@ -332,6 +332,85 @@ async def test_offline_prompt_blocked_then_reconnect_then_retry_success(
 
 
 @pytest.mark.asyncio
+async def test_offline_prompt_blocked_then_reconnect_retry_failure_returns_to_degraded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = ACPClientApp(host="127.0.0.1", port=8765)
+    chat = _FakeChatView()
+    prompt_input = _FakePromptInput(text="draft text")
+    transitions: list[tuple[ConnectionState, str]] = []
+    worker_tasks: list[asyncio.Task[object]] = []
+    connection_ready = False
+
+    async def _send_prompt_fail(
+        text: str,
+        _on_update: object,
+        _on_permission: object,
+    ) -> None:
+        if text != "retry me":
+            msg = f"Unexpected prompt: {text}"
+            raise AssertionError(msg)
+        raise RuntimeError("retry still failed")
+
+    def _capture_state(state: ConnectionState, *, detail: str) -> None:
+        transitions.append((state, detail))
+
+    def _query_one(selector: object) -> object:
+        if selector is ChatView:
+            return chat
+        from acp_client.tui.components import PromptInput
+
+        if selector is PromptInput:
+            return prompt_input
+        msg = f"Unexpected selector: {selector}"
+        raise AssertionError(msg)
+
+    def _run_worker(work: object, *_args: object, **_kwargs: object) -> asyncio.Task[object]:
+        if not asyncio.iscoroutine(work):
+            msg = "Expected coroutine for retry worker"
+            raise AssertionError(msg)
+        task = asyncio.create_task(work)
+        worker_tasks.append(task)
+        return task
+
+    monkeypatch.setattr(app, "_set_connection_state", _capture_state)
+    monkeypatch.setattr(app, "query_one", _query_one)
+    monkeypatch.setattr(app, "run_worker", _run_worker)
+    monkeypatch.setattr(app._connection, "is_ready", lambda: connection_ready)
+    monkeypatch.setattr(app._sessions, "send_prompt", _send_prompt_fail)
+
+    from acp_client.tui.components import PromptInput
+
+    await app.on_prompt_input_submitted(PromptInput.Submitted("retry me"))
+
+    assert len(app._failed_operations) == 1  # noqa: SLF001
+    assert transitions[0] == (
+        ConnectionState.OFFLINE,
+        "Prompt blocked: connection unavailable | Ctrl+R retry failed op",
+    )
+
+    connection_ready = True
+    app._on_reconnect_recovered("session/prompt")  # noqa: SLF001
+    app.action_retry_prompt()
+    await asyncio.gather(*worker_tasks)
+
+    assert len(app._failed_operations) == 1  # noqa: SLF001
+    assert app._failed_operations[0].label == "prompt"  # noqa: SLF001
+    assert chat.system_messages == [
+        "Отправка prompt отложена: нет подключения к серверу",
+        "Ошибка отправки prompt: retry still failed",
+    ]
+    assert transitions[-3:] == [
+        (ConnectionState.CONNECTED, "Recovered after retry: session/prompt"),
+        (ConnectionState.CONNECTED, "Retrying failed operation: prompt (0 remaining)"),
+        (
+            ConnectionState.DEGRADED,
+            "Error | retry still failed | Ctrl+R retry prompt | queued=0",
+        ),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_cancel_prompt_sets_reconnecting_state_when_disconnect_detected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
