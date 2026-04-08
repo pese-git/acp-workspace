@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from acp_client.messages import SessionListItem, SessionSetupResult
+from acp_client.messages import SessionListItem, SessionSetupResult, SessionUpdateNotification
 from acp_client.tui.managers.session import SessionManager
 
 
@@ -32,9 +32,26 @@ class FakeConnection:
             return SessionSetupResult(sessionId="sess_new", configOptions=[])
         return SessionSetupResult(sessionId="sess_new_2", configOptions=[])
 
-    async def load_session(self, session_id: str, cwd: str) -> SessionSetupResult:
+    async def load_session(
+        self,
+        session_id: str,
+        cwd: str,
+    ) -> tuple[SessionSetupResult, list[SessionUpdateNotification]]:
         self.loaded_sessions.append(session_id)
-        return SessionSetupResult(sessionId=session_id, configOptions=[])
+        update = SessionUpdateNotification.model_validate(
+            {
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": {
+                    "sessionId": session_id,
+                    "update": {
+                        "sessionUpdate": "agent_message_chunk",
+                        "content": {"type": "text", "text": "replay-text"},
+                    },
+                },
+            }
+        )
+        return SessionSetupResult(sessionId=session_id, configOptions=[]), [update]
 
     async def send_prompt(
         self,
@@ -112,3 +129,18 @@ async def test_session_manager_can_cycle_sessions() -> None:
     assert next_session == "sess_new"
     assert previous_session == "sess_new_2"
     assert fake_connection.loaded_sessions == ["sess_new", "sess_new_2"]
+
+
+@pytest.mark.asyncio
+async def test_session_manager_stores_last_replay_updates_on_activate() -> None:
+    fake_connection = FakeConnection()
+    session_manager = SessionManager(fake_connection)
+    await session_manager.create_and_activate_session("/tmp")
+    await session_manager.create_and_activate_session("/tmp")
+
+    await session_manager.activate_session("sess_new")
+
+    assert len(session_manager.last_replay_updates) == 1
+    assert (
+        session_manager.last_replay_updates[0].params.update.sessionUpdate == "agent_message_chunk"
+    )

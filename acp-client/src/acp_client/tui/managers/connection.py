@@ -13,10 +13,12 @@ from acp_client.messages import (
     PromptResult,
     SessionListItem,
     SessionSetupResult,
+    SessionUpdateNotification,
     parse_initialize_result,
     parse_prompt_result,
     parse_session_list_result,
     parse_session_setup_result,
+    parse_session_update_notification,
 )
 from acp_client.transport import ACPClientWSSession
 
@@ -133,10 +135,15 @@ class ACPConnectionManager:
         )
         return parse_session_setup_result(response, method_name="session/new")
 
-    async def load_session(self, session_id: str, cwd: str) -> SessionSetupResult:
-        """Загружает существующую сессию и возвращает ее состояние."""
+    async def load_session(
+        self,
+        session_id: str,
+        cwd: str,
+    ) -> tuple[SessionSetupResult, list[SessionUpdateNotification]]:
+        """Загружает сессию и возвращает state вместе с replay updates."""
 
         await self._ensure_initialized()
+        raw_updates: list[dict[str, Any]] = []
         response = await self._request(
             method="session/load",
             params={
@@ -144,8 +151,15 @@ class ACPConnectionManager:
                 "cwd": cwd,
                 "mcpServers": [],
             },
+            on_update=raw_updates.append,
         )
-        return parse_session_setup_result(response, method_name="session/load")
+        parsed_response = parse_session_setup_result(response, method_name="session/load")
+        parsed_updates: list[SessionUpdateNotification] = []
+        for raw_update in raw_updates:
+            parsed = parse_session_update_notification(raw_update)
+            if parsed is not None:
+                parsed_updates.append(parsed)
+        return parsed_response, parsed_updates
 
     async def send_prompt(
         self,

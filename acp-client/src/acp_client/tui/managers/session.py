@@ -6,7 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
-from acp_client.messages import SessionListItem
+from acp_client.messages import SessionListItem, SessionSetupResult, SessionUpdateNotification
 
 
 class SessionConnection(Protocol):
@@ -22,7 +22,11 @@ class SessionConnection(Protocol):
 
         ...
 
-    async def load_session(self, session_id: str, cwd: str) -> Any:
+    async def load_session(
+        self,
+        session_id: str,
+        cwd: str,
+    ) -> tuple[SessionSetupResult, list[SessionUpdateNotification]]:
         """Загружает существующую сессию."""
 
         ...
@@ -54,6 +58,7 @@ class SessionManager:
         self._sessions: list[SessionListItem] = []
         self._active_session_id: str | None = None
         self._active_cwd: str = str(Path.cwd())
+        self._last_replay_updates: list[SessionUpdateNotification] = []
 
     @property
     def active_session_id(self) -> str | None:
@@ -72,6 +77,12 @@ class SessionManager:
         """Возвращает cwd активной сессии или последнее известное значение."""
 
         return self._active_cwd
+
+    @property
+    def last_replay_updates(self) -> list[SessionUpdateNotification]:
+        """Возвращает replay updates последней операции load session."""
+
+        return self._last_replay_updates
 
     async def refresh_sessions(self) -> list[SessionListItem]:
         """Перезагружает список сессий с сервера и обновляет кэш."""
@@ -96,6 +107,7 @@ class SessionManager:
             raise RuntimeError(msg)
         self._active_session_id = created.sessionId
         await self.refresh_sessions()
+        self._last_replay_updates = []
         return created.sessionId
 
     async def create_and_activate_session(self, cwd: str | None = None) -> str:
@@ -109,6 +121,7 @@ class SessionManager:
         self._active_session_id = created.sessionId
         self._active_cwd = target_cwd
         await self.refresh_sessions()
+        self._last_replay_updates = []
         return created.sessionId
 
     async def activate_session(self, session_id: str) -> str:
@@ -118,9 +131,13 @@ class SessionManager:
         if session_item is None:
             msg = f"Session not found: {session_id}"
             raise ValueError(msg)
-        await self._connection.load_session(session_id=session_id, cwd=session_item.cwd)
+        _state, replay_updates = await self._connection.load_session(
+            session_id=session_id,
+            cwd=session_item.cwd,
+        )
         self._active_session_id = session_id
         self._active_cwd = session_item.cwd
+        self._last_replay_updates = replay_updates
         return session_id
 
     async def activate_next_session(self) -> str | None:

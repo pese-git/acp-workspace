@@ -9,6 +9,8 @@ import structlog
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 
+from acp_client.messages import SessionUpdateNotification
+
 from .components import ChatView, FooterBar, HeaderBar, PromptInput, Sidebar
 from .managers import ACPConnectionManager, SessionManager, UpdateMessageHandler
 
@@ -177,6 +179,7 @@ class ACPClientApp(App[None]):
             if switched is None:
                 footer.set_status("Connected | No sessions")
                 return
+            self._render_replay_updates(self._sessions.last_replay_updates)
             footer.set_status(f"Connected | Active session: {switched}")
             chat.add_system_message(f"Активная сессия: {switched}")
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
@@ -195,6 +198,7 @@ class ACPClientApp(App[None]):
             await self._sessions.activate_session(message.session_id)
             sidebar.set_sessions(self._sessions.sessions, self._sessions.active_session_id)
             self.query_one(PromptInput).focus()
+            self._render_replay_updates(self._sessions.last_replay_updates)
             footer.set_status(f"Connected | Active session: {message.session_id}")
             chat.add_system_message(f"Выбрана сессия: {message.session_id}")
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
@@ -202,6 +206,28 @@ class ACPClientApp(App[None]):
             footer.set_status(
                 format_footer_error(exc, prefix="Connected | Error selecting session")
             )
+
+    def _render_replay_updates(self, updates: list[SessionUpdateNotification]) -> None:
+        """Отрисовывает текстовые replay updates после загрузки сессии."""
+
+        for update in updates:
+            payload = update.params.update.model_dump()
+            session_update_type = payload.get("sessionUpdate")
+            content = payload.get("content")
+            if not isinstance(content, dict):
+                continue
+            if content.get("type") != "text":
+                continue
+            text = content.get("text")
+            if not isinstance(text, str):
+                continue
+            if session_update_type == "agent_message_chunk":
+                self.query_one(ChatView).append_agent_chunk(text)
+                continue
+            if session_update_type == "user_message_chunk":
+                self.query_one(ChatView).add_user_message(text)
+
+        self.query_one(ChatView).finish_agent_message()
 
 
 def run_tui_app(*, host: str = "127.0.0.1", port: int = 8765) -> None:
