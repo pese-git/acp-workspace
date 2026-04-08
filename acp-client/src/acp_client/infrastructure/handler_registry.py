@@ -64,7 +64,31 @@ class HandlerRegistry:
         self._terminal_release_handler: TerminalReleaseHandler | None = None
         self._terminal_kill_handler: TerminalKillHandler | None = None
 
+        # Generic handlers для плагинов
+        self._generic_handlers: dict[str, Any] = {}
+
         logger.debug("handler_registry_initialized")
+
+    def register(self, name: str, handler: Any) -> None:
+        """Регистрирует generic обработчик по имени (для плагинов).
+
+        Args:
+            name: Уникальное имя обработчика (e.g., "my_handler", "custom_fs")
+            handler: Обработчик (Handler Protocol compatible)
+        """
+        self._generic_handlers[name] = handler
+        logger.debug("generic_handler_registered", handler_name=name)
+
+    def get(self, name: str) -> Any | None:
+        """Получает зарегистрированный обработчик по имени.
+
+        Args:
+            name: Имя обработчика
+
+        Returns:
+            Обработчик или None если не найден
+        """
+        return self._generic_handlers.get(name)
 
     # === Permission обработчики ===
 
