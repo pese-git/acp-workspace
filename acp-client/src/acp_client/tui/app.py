@@ -94,6 +94,31 @@ def build_error_state_status(
     return ConnectionState.DEGRADED, format_footer_error(exc, prefix=degraded_prefix)
 
 
+def build_retry_skipped_status(*, connection_ready: bool) -> tuple[ConnectionState, str]:
+    """Возвращает статус для случая, когда в очереди нет операций для retry."""
+
+    if connection_ready:
+        return ConnectionState.CONNECTED, "Retry skipped: no failed operation"
+    return (
+        ConnectionState.OFFLINE,
+        format_offline_footer_detail(reason="Retry skipped: no failed operation"),
+    )
+
+
+def build_retry_started_status(
+    *,
+    connection_ready: bool,
+    label: str,
+    remaining_count: int,
+) -> tuple[ConnectionState, str]:
+    """Возвращает статус для запуска retry с учетом доступности соединения."""
+
+    detail = f"Retrying failed operation: {label} ({remaining_count} remaining)"
+    if connection_ready:
+        return ConnectionState.CONNECTED, detail
+    return ConnectionState.RECONNECTING, detail
+
+
 class ACPClientApp(App[None]):
     """Главное TUI приложение с базовой ACP интеграцией."""
 
@@ -298,27 +323,43 @@ class ACPClientApp(App[None]):
         """Отправляет session/cancel для текущей сессии."""
 
         chat = self.query_one(ChatView)
-        await self._sessions.cancel()
-        chat.finish_agent_message()
-        self._set_connection_state(ConnectionState.CONNECTED, detail="Cancel requested")
+        try:
+            await self._sessions.cancel()
+            chat.finish_agent_message()
+            if self._connection.is_ready():
+                self._set_connection_state(ConnectionState.CONNECTED, detail="Cancel requested")
+            else:
+                self._set_connection_state(
+                    ConnectionState.RECONNECTING,
+                    detail="Cancel requested during reconnect",
+                )
+        except Exception as exc:  # pragma: no cover - safety net for runtime UX
+            self._app_logger.error("tui_cancel_prompt_failed", error=str(exc))
+            error_state, error_detail = build_error_state_status(
+                exc,
+                connection_ready=self._connection.is_ready(),
+                degraded_prefix="Error cancelling prompt",
+            )
+            self._set_connection_state(error_state, detail=error_detail)
+            chat.add_system_message(f"Ошибка отмены prompt: {exc}")
+            self._remember_failed_operation(label="cancel_prompt", action=self.action_cancel_prompt)
 
     def action_retry_prompt(self) -> None:
         """Повторяет последнюю неуспешную операцию по Ctrl+R."""
 
         failed_operation = self._pop_failed_operation()
         if failed_operation is None:
-            self._set_connection_state(
-                ConnectionState.CONNECTED,
-                detail="Retry skipped: no failed operation",
+            state, detail = build_retry_skipped_status(
+                connection_ready=self._connection.is_ready(),
             )
+            self._set_connection_state(state, detail=detail)
             return
-        self._set_connection_state(
-            ConnectionState.CONNECTED,
-            detail=(
-                "Retrying failed operation: "
-                f"{failed_operation.label} ({len(self._failed_operations)} remaining)"
-            ),
+        state, detail = build_retry_started_status(
+            connection_ready=self._connection.is_ready(),
+            label=failed_operation.label,
+            remaining_count=len(self._failed_operations),
         )
+        self._set_connection_state(state, detail=detail)
         self.run_worker(failed_operation.action(), exclusive=True)
 
     def _on_agent_chunk(self, text: str) -> None:

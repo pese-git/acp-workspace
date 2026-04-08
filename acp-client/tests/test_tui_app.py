@@ -4,6 +4,8 @@ from acp_client.tui.app import (
     ACPClientApp,
     ConnectionState,
     build_error_state_status,
+    build_retry_skipped_status,
+    build_retry_started_status,
     format_footer_error,
     format_footer_status,
     format_offline_footer_detail,
@@ -130,3 +132,21 @@ def test_build_error_state_status_adds_retry_hint_for_retryable_action() -> None
 
     assert state == ConnectionState.DEGRADED
     assert detail == "Error | temporary network timeout | Ctrl+R retry prompt | queued=2"
+
+
+def test_build_retry_skipped_status_returns_offline_when_disconnected() -> None:
+    state, detail = build_retry_skipped_status(connection_ready=False)
+
+    assert state == ConnectionState.OFFLINE
+    assert detail == "Retry skipped: no failed operation | Ctrl+R retry failed op"
+
+
+def test_build_retry_started_status_returns_reconnecting_when_disconnected() -> None:
+    state, detail = build_retry_started_status(
+        connection_ready=False,
+        label="prompt",
+        remaining_count=1,
+    )
+
+    assert state == ConnectionState.RECONNECTING
+    assert detail == "Retrying failed operation: prompt (1 remaining)"
