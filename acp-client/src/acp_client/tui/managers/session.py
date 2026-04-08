@@ -98,9 +98,7 @@ class SessionManager:
             return self._active_session_id
 
         if self._sessions:
-            self._active_session_id = self._sessions[0].sessionId
-            self._active_cwd = self._sessions[0].cwd
-            return self._active_session_id
+            return await self.activate_session(self._sessions[0].sessionId)
 
         created = await self._connection.create_session(cwd=self._active_cwd)
         if created.sessionId is None:

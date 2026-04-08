@@ -94,6 +94,8 @@ class ACPClientApp(App[None]):
             self.query_one(PromptInput).set_active_session(self._sessions.active_session_id)
             sidebar.set_sessions(self._sessions.sessions, self._sessions.active_session_id)
             tools.reset()
+            chat.clear_messages()
+            self._render_replay_updates(self._sessions.last_replay_updates)
             footer.set_status(
                 "Connected | Ready | Ctrl+B focus sessions | Ctrl+Enter send | Ctrl+J/K switch"
             )
@@ -151,6 +153,7 @@ class ACPClientApp(App[None]):
             self.query_one(PromptInput).set_active_session(self._sessions.active_session_id)
             self.query_one(PromptInput).text = ""
             tools.reset()
+            chat.clear_messages()
             footer.set_status(f"Connected | New session created: {new_session_id}")
             chat.add_system_message(f"Создана новая сессия: {new_session_id}")
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
@@ -214,6 +217,7 @@ class ACPClientApp(App[None]):
                 footer.set_status("Connected | No sessions")
                 return
             tools.reset()
+            chat.clear_messages()
             self._render_replay_updates(self._sessions.last_replay_updates)
             self.query_one(PromptInput).set_active_session(self._sessions.active_session_id)
             self.query_one(PromptInput).text = ""
@@ -239,6 +243,7 @@ class ACPClientApp(App[None]):
             self.query_one(PromptInput).focus()
             self.query_one(PromptInput).text = ""
             tools.reset()
+            chat.clear_messages()
             self._render_replay_updates(self._sessions.last_replay_updates)
             footer.set_status(f"Connected | Active session: {message.session_id}")
             chat.add_system_message(f"Выбрана сессия: {message.session_id}")

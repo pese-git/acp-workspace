@@ -22,6 +22,13 @@ class ChatView(VerticalScroll):
         self.mount(Static(f"[system] {text}", classes="message system"))
         self.scroll_end(animate=False)
 
+    def clear_messages(self) -> None:
+        """Очищает чат перед загрузкой истории другой сессии."""
+
+        self.remove_children(".message")
+        self._active_agent_block = None
+        self._active_agent_text = ""
+
     def add_user_message(self, text: str) -> None:
         """Добавляет сообщение пользователя в историю."""
 

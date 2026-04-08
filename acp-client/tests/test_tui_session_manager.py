@@ -80,6 +80,53 @@ class FakeConnection:
         self.prompt_calls.append((session_id, "<cancel>"))
 
 
+class FakeConnectionWithExistingSession:
+    """Тестовый connection manager c уже существующей серверной сессией."""
+
+    def __init__(self) -> None:
+        self.loaded_sessions: list[str] = []
+
+    async def list_sessions(self) -> list[SessionListItem]:
+        return [SessionListItem(sessionId="sess_existing", cwd="/tmp")]
+
+    async def create_session(self, cwd: str) -> SessionSetupResult:
+        return SessionSetupResult(sessionId="sess_new", configOptions=[])
+
+    async def load_session(
+        self,
+        session_id: str,
+        cwd: str,
+    ) -> tuple[SessionSetupResult, list[SessionUpdateNotification]]:
+        self.loaded_sessions.append(session_id)
+        update = SessionUpdateNotification.model_validate(
+            {
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": {
+                    "sessionId": session_id,
+                    "update": {
+                        "sessionUpdate": "user_message_chunk",
+                        "content": {"type": "text", "text": "restored"},
+                    },
+                },
+            }
+        )
+        return SessionSetupResult(sessionId=session_id, configOptions=[]), [update]
+
+    async def send_prompt(
+        self,
+        *,
+        session_id: str,
+        text: str,
+        on_update: Any,
+        on_permission: Any,
+    ) -> None:
+        return None
+
+    async def cancel_prompt(self, session_id: str) -> None:
+        return None
+
+
 @pytest.mark.asyncio
 async def test_session_manager_creates_session_before_prompt() -> None:
     fake_connection = FakeConnection()
@@ -144,4 +191,20 @@ async def test_session_manager_stores_last_replay_updates_on_activate() -> None:
     assert len(session_manager.last_replay_updates) == 1
     assert (
         session_manager.last_replay_updates[0].params.update.sessionUpdate == "agent_message_chunk"
+    )
+
+
+@pytest.mark.asyncio
+async def test_session_manager_ensure_active_loads_existing_session_replay() -> None:
+    fake_connection = FakeConnectionWithExistingSession()
+    session_manager = SessionManager(fake_connection)
+
+    await session_manager.refresh_sessions()
+    session_id = await session_manager.ensure_active_session()
+
+    assert session_id == "sess_existing"
+    assert fake_connection.loaded_sessions == ["sess_existing"]
+    assert len(session_manager.last_replay_updates) == 1
+    assert (
+        session_manager.last_replay_updates[0].params.update.sessionUpdate == "user_message_chunk"
     )
