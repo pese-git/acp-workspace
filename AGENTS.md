@@ -81,4 +81,4 @@ uv run --directory acp-client python -m pytest
 ## Документация
 
 - При изменении поведения обновлять соответствующие README (`README.md`, `acp-server/README.md`, `acp-client/README.md`).
-- Для сверки с протоколом использовать материалы в `doc/ACP/`.
+- Для сверки с протоколом использовать материалы в `doc/Agent Client Protocol/`.

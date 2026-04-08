@@ -351,4 +351,4 @@ elif method == "namespace/new_method":
 - **[README.md](README.md)** — обзор и быстрый старт
 - **[CHANGELOG.md](CHANGELOG.md)** — история изменений
 - **[doc/ACP_IMPLEMENTATION_STATUS.md](doc/ACP_IMPLEMENTATION_STATUS.md)** — матрица соответствия ACP
-- **[doc/ACP/](doc/ACP/)** — спецификация и рабочие материалы ACP
+- **[doc/Agent Client Protocol/](doc/Agent Client Protocol/)** — спецификация и рабочие материалы ACP

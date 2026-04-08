@@ -92,5 +92,5 @@ make check
 
 - `acp-server/` — серверная реализация ACP
 - `acp-client/` — клиентская реализация ACP
-- `doc/ACP/` — рабочие материалы и спецификация ACP
+- `doc/Agent Client Protocol/` — рабочие материалы и спецификация ACP
 - `doc/ACP_IMPLEMENTATION_STATUS.md` — матрица соответствия и приоритетный backlog
