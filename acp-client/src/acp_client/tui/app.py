@@ -233,6 +233,10 @@ class ACPClientApp(App[None]):
                 ),
             )
             chat.add_system_message("Отправка prompt отложена: нет подключения к серверу")
+            self._remember_failed_operation(
+                label="prompt",
+                action=lambda: self._send_prompt(message.text),
+            )
             return
 
         chat.add_user_message(message.text)
