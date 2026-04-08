@@ -67,6 +67,33 @@ def format_offline_footer_detail(*, reason: str) -> str:
     return f"{compact_reason} | Ctrl+R retry failed op"
 
 
+def build_error_state_status(
+    exc: Exception,
+    *,
+    connection_ready: bool,
+    degraded_prefix: str,
+    include_retry_hint: bool = False,
+    retry_action_label: str = "",
+    pending_count: int = 0,
+) -> tuple[ConnectionState, str]:
+    """Возвращает состояние и detail footer для ошибок по единой политике."""
+
+    if not connection_ready:
+        return ConnectionState.OFFLINE, format_offline_footer_detail(reason=str(exc))
+
+    if include_retry_hint:
+        return (
+            ConnectionState.DEGRADED,
+            format_retry_footer_error(
+                exc,
+                action_label=retry_action_label,
+                pending_count=pending_count,
+            ),
+        )
+
+    return ConnectionState.DEGRADED, format_footer_error(exc, prefix=degraded_prefix)
+
+
 class ACPClientApp(App[None]):
     """Главное TUI приложение с базовой ACP интеграцией."""
 
@@ -206,20 +233,15 @@ class ACPClientApp(App[None]):
             self._set_connection_state(ConnectionState.CONNECTED, detail=READY_FOOTER_DETAIL)
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
             self._app_logger.error("tui_prompt_failed", error=str(exc))
-            if self._connection.is_ready():
-                self._set_connection_state(
-                    ConnectionState.DEGRADED,
-                    detail=format_retry_footer_error(
-                        exc,
-                        action_label="prompt",
-                        pending_count=len(self._failed_operations),
-                    ),
-                )
-            else:
-                self._set_connection_state(
-                    ConnectionState.OFFLINE,
-                    detail=format_offline_footer_detail(reason=str(exc)),
-                )
+            error_state, error_detail = build_error_state_status(
+                exc,
+                connection_ready=self._connection.is_ready(),
+                degraded_prefix="Error",
+                include_retry_hint=True,
+                retry_action_label="prompt",
+                pending_count=len(self._failed_operations),
+            )
+            self._set_connection_state(error_state, detail=error_detail)
             chat.finish_agent_message()
             chat.add_system_message(f"Ошибка отправки prompt: {exc}")
             self._remember_failed_operation(
@@ -249,16 +271,12 @@ class ACPClientApp(App[None]):
             chat.add_system_message(f"Создана новая сессия: {new_session_id}")
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
             self._app_logger.error("tui_new_session_failed", error=str(exc))
-            if self._connection.is_ready():
-                self._set_connection_state(
-                    ConnectionState.DEGRADED,
-                    detail=format_footer_error(exc, prefix="Error creating session"),
-                )
-            else:
-                self._set_connection_state(
-                    ConnectionState.OFFLINE,
-                    detail=format_offline_footer_detail(reason=str(exc)),
-                )
+            error_state, error_detail = build_error_state_status(
+                exc,
+                connection_ready=self._connection.is_ready(),
+                degraded_prefix="Error creating session",
+            )
+            self._set_connection_state(error_state, detail=error_detail)
             self._remember_failed_operation(label="new_session", action=self.action_new_session)
 
     async def action_next_session(self) -> None:
@@ -348,16 +366,12 @@ class ACPClientApp(App[None]):
             self._persist_ui_state()
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
             self._app_logger.error("tui_switch_session_failed", error=str(exc))
-            if self._connection.is_ready():
-                self._set_connection_state(
-                    ConnectionState.DEGRADED,
-                    detail=format_footer_error(exc, prefix="Error switching session"),
-                )
-            else:
-                self._set_connection_state(
-                    ConnectionState.OFFLINE,
-                    detail=format_offline_footer_detail(reason=str(exc)),
-                )
+            error_state, error_detail = build_error_state_status(
+                exc,
+                connection_ready=self._connection.is_ready(),
+                degraded_prefix="Error switching session",
+            )
+            self._set_connection_state(error_state, detail=error_detail)
             self._remember_failed_operation(
                 label=f"switch_session_{direction}",
                 action=lambda: self._switch_session(direction=direction),
@@ -392,16 +406,12 @@ class ACPClientApp(App[None]):
             self._persist_ui_state()
         except Exception as exc:  # pragma: no cover - safety net for runtime UX
             self._app_logger.error("tui_sidebar_select_failed", error=str(exc))
-            if self._connection.is_ready():
-                self._set_connection_state(
-                    ConnectionState.DEGRADED,
-                    detail=format_footer_error(exc, prefix="Error selecting session"),
-                )
-            else:
-                self._set_connection_state(
-                    ConnectionState.OFFLINE,
-                    detail=format_offline_footer_detail(reason=str(exc)),
-                )
+            error_state, error_detail = build_error_state_status(
+                exc,
+                connection_ready=self._connection.is_ready(),
+                degraded_prefix="Error selecting session",
+            )
+            self._set_connection_state(error_state, detail=error_detail)
             self._remember_failed_operation(
                 label="select_session",
                 action=lambda: self._activate_session_by_id(session_id),

@@ -3,6 +3,7 @@ from __future__ import annotations
 from acp_client.tui.app import (
     ACPClientApp,
     ConnectionState,
+    build_error_state_status,
     format_footer_error,
     format_footer_status,
     format_offline_footer_detail,
@@ -87,3 +88,45 @@ def test_format_footer_status_builds_state_prefixed_line() -> None:
     formatted = format_footer_status(state=ConnectionState.OFFLINE, detail="connection unavailable")
 
     assert formatted == "Offline | connection unavailable"
+
+
+def test_build_error_state_status_returns_offline_when_not_ready() -> None:
+    error = RuntimeError("network timeout")
+
+    state, detail = build_error_state_status(
+        error,
+        connection_ready=False,
+        degraded_prefix="Error creating session",
+    )
+
+    assert state == ConnectionState.OFFLINE
+    assert detail == "network timeout | Ctrl+R retry failed op"
+
+
+def test_build_error_state_status_returns_degraded_with_prefix() -> None:
+    error = RuntimeError("method failed")
+
+    state, detail = build_error_state_status(
+        error,
+        connection_ready=True,
+        degraded_prefix="Error switching session",
+    )
+
+    assert state == ConnectionState.DEGRADED
+    assert detail == "Error switching session | method failed"
+
+
+def test_build_error_state_status_adds_retry_hint_for_retryable_action() -> None:
+    error = RuntimeError("temporary network timeout")
+
+    state, detail = build_error_state_status(
+        error,
+        connection_ready=True,
+        degraded_prefix="Error",
+        include_retry_hint=True,
+        retry_action_label="prompt",
+        pending_count=2,
+    )
+
+    assert state == ConnectionState.DEGRADED
+    assert detail == "Error | temporary network timeout | Ctrl+R retry prompt | queued=2"
