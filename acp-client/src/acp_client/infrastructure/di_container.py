@@ -134,6 +134,44 @@ class DIContainer:
         self._singletons.pop(interface, None)
         
         self._logger.debug("service_unregistered", interface=interface.__name__)
+    
+    def dispose(self) -> None:
+        """Освобождает ресурсы и очищает все singleton экземпляры.
+        
+        Вызывает cleanup() или close() методы у всех синглтонов, если они существуют.
+        Используйте этот метод при завершении приложения для корректной очистки.
+        
+        Пример:
+            >>> container = DIContainer()
+            >>> # ... использовать контейнер ...
+            >>> container.dispose()  # Очистить перед выходом
+        """
+        # Пытаемся вызвать cleanup/close методы у синглтонов
+        for interface, instance in list(self._singletons.items()):
+            try:
+                # Пытаемся вызвать cleanup() или __exit__() методы
+                if hasattr(instance, "cleanup") and callable(instance.cleanup):
+                    self._logger.debug(
+                        "calling_cleanup_on_singleton",
+                        interface=interface.__name__,
+                    )
+                    instance.cleanup()
+                elif hasattr(instance, "close") and callable(instance.close):
+                    self._logger.debug(
+                        "calling_close_on_singleton",
+                        interface=interface.__name__,
+                    )
+                    instance.close()
+            except Exception as e:
+                self._logger.exception(
+                    "error_disposing_singleton",
+                    interface=interface.__name__,
+                    error=str(e),
+                )
+        
+        # Очищаем все синглтоны
+        self._singletons.clear()
+        self._logger.info("container_disposed")
 
 
 class Registration(Generic[T]):  # noqa: UP046
@@ -159,21 +197,24 @@ class Registration(Generic[T]):  # noqa: UP046
     def create(self) -> T:
         """Создает экземпляр сервиса.
         
-        Возвращает:
-            Новый экземпляр сервиса
-        """
-        # Если это уже готовый экземпляр, возвращаем его
-        if not isinstance(self.implementation, type) and not callable(
-            self.implementation
-        ):
-            return cast(T, self.implementation)
+        Логика:
+        1. Если это класс/тип - создаем новый экземпляр без аргументов
+        2. Если это callable (factory функция) - вызываем её
+        3. Иначе - это готовый экземпляр, возвращаем как есть
         
-        # Если это класс, создаем экземпляр
+        Возвращает:
+            Новый экземпляр сервиса или готовый экземпляр
+        """
+        # Если это класс, создаем новый экземпляр без аргументов
         if isinstance(self.implementation, type):
             return cast(T, self.implementation())
         
-        # Если это callable (factory), вызываем её
-        return cast(T, self.implementation())  # type: ignore[misc]
+        # Если это callable функция/factory, вызываем её
+        if callable(self.implementation):
+            return cast(T, self.implementation())  # type: ignore[misc]
+        
+        # Иначе это готовый экземпляр - возвращаем как есть
+        return cast(T, self.implementation)
 
 
 class DIError(Exception):

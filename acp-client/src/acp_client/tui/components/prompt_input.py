@@ -1,14 +1,38 @@
-"""Поле ввода пользовательского промпта."""
+"""Поле ввода пользовательского промпта с MVVM интеграцией.
+
+Отвечает за:
+- Ввод текста пользователя для отправки к модели
+- Отправку prompt через ChatViewModel
+- Управление историей промптов по сессиям
+- Отключение/включение при streaming
+"""
 
 from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 from textual import events
 from textual.message import Message
 from textual.widgets import TextArea
 
+if TYPE_CHECKING:
+    from acp_client.presentation.chat_view_model import ChatViewModel
+
 
 class PromptInput(TextArea):
-    """Многострочное поле ввода с отправкой по Ctrl+Enter."""
+    """Многострочное поле ввода с MVVM интеграцией.
+    
+    Обязательно требует ChatViewModel для работы. Подписывается на Observable свойства:
+    - is_streaming: флаг для disable/enable поля при streaming
+    
+    Примеры использования:
+        >>> from acp_client.presentation.chat_view_model import ChatViewModel
+        >>> chat_vm = ChatViewModel(coordinator, event_bus)
+        >>> prompt_input = PromptInput(chat_vm)
+        >>> 
+        >>> # При streaming, поле ввода будет отключено
+        >>> chat_vm.is_streaming.value = True
+    """
 
     BINDINGS = [
         ("ctrl+enter", "submit", "Send"),
@@ -23,20 +47,26 @@ class PromptInput(TextArea):
 
         def __init__(self, text: str) -> None:
             """Сохраняет текст отправленного сообщения."""
-
             super().__init__()
             self.text = text
 
-    def __init__(self) -> None:
-        """Создает поле ввода с placeholder подсказкой."""
-
+    def __init__(self, chat_vm: ChatViewModel) -> None:
+        """Инициализирует PromptInput с обязательным ChatViewModel.
+        
+        Args:
+            chat_vm: ChatViewModel для управления состоянием
+        """
         super().__init__(id="prompt-input")
+        self.chat_vm = chat_vm
         self.border_title = "Prompt"
         self.tooltip = "Ctrl+Enter - отправить, Up/Down - история"
         self._active_session_id: str | None = None
         self._history_by_session: dict[str, list[str]] = {}
         self._history_index: int | None = None
         self._draft_text: str = ""
+        
+        # Подписываемся на изменения в ChatViewModel
+        self.chat_vm.is_streaming.subscribe(self._on_streaming_changed)
 
     def set_active_session(self, session_id: str | None) -> None:
         """Переключает активный контекст истории промптов для текущей сессии."""
@@ -102,9 +132,16 @@ class PromptInput(TextArea):
         if event.key == "enter":
             return
 
+    def _on_streaming_changed(self, is_streaming: bool) -> None:
+        """Обновить статус поля при изменении streaming.
+        
+        Args:
+            is_streaming: True если идет streaming, False иначе
+        """
+        self.disabled = is_streaming
+
     def _active_history(self) -> list[str]:
         """Возвращает список истории для активной сессии."""
-
         history_key = self._active_session_id or "__default__"
         if history_key not in self._history_by_session:
             self._history_by_session[history_key] = []

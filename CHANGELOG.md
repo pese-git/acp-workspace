@@ -6,7 +6,30 @@
 
 ## [Unreleased]
 
-### Added
+### Added (Phase 4.6: DIContainer Integration)
+
+- ✅ **ViewModelFactory для DIContainer** (Phase 4.6)
+  - Централизованная регистрация всех ViewModels в DIContainer
+  - Singleton scope для UIViewModel, SessionViewModel, ChatViewModel
+  - Поддержка опциональных EventBus и Logger
+  - 17 новых тестов (100% покрытие)
+
+- ✅ **DIContainer интеграция в ACPClientApp** (Phase 4.6)
+  - Инициализация DIContainer в `__init__()`
+  - Инъекция ViewModels в компоненты через `compose()`
+  - Опциональные параметры ViewModel для backward compatibility
+  - Fallback режим для компонентов без ViewModel
+
+- ✅ **MVVM рефакторинг 6 TUI компонентов** (Phase 4.5)
+  - HeaderBar: подписка на UIViewModel (connection_status, is_loading)
+  - Sidebar: подписка на SessionViewModel (sessions, selected_session_id)
+  - ChatView: подписка на ChatViewModel (messages, tool_calls, streaming)
+  - PromptInput: подписка на ChatViewModel (is_streaming)
+  - FooterBar: подписка на UIViewModel (error/info/warning messages)
+  - ToolPanel: подписка на ChatViewModel (tool_calls)
+  - 58 новых тестов для Phase 4.5 (все пройдены)
+
+### Added (Previous)
 
 - ✅ **Структурированное логирование** с использованием structlog
   - JSON и консольные форматы

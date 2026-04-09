@@ -58,11 +58,20 @@ def run_client() -> None:
         action="store_true",
         help="Использовать JSON формат для логов",
     )
+    parser.add_argument(
+        "--log-file",
+        default=None,
+        help="Путь к файлу логов. 'default' для ~/.acp-client/logs/acp-client.log",
+    )
     args = parser.parse_args()
 
     # Настроить логирование только если явно указаны флаги
-    if args.log_level != "INFO" or args.log_json:
-        setup_logging(level=args.log_level, json_format=args.log_json)
+    if args.log_level != "INFO" or args.log_json or args.log_file:
+        setup_logging(
+            level=args.log_level,
+            json_format=args.log_json,
+            log_file=args.log_file,
+        )
 
     if args.tui:
         run_tui_app(host=args.host, port=args.port)

@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from acp_client.messages import ToolCallCreatedUpdate, ToolCallStateUpdate, ToolCallTerminalContent
 from acp_client.tui.components.tool_panel import ToolPanel
 
+if TYPE_CHECKING:
+    from acp_client.presentation.chat_view_model import ChatViewModel
 
-def test_tool_panel_applies_created_and_state_updates() -> None:
-    panel = ToolPanel()
+
+def test_tool_panel_applies_created_and_state_updates(
+    mock_chat_view_model: ChatViewModel,
+) -> None:
+    panel = ToolPanel(mock_chat_view_model)
     panel.apply_update(
         ToolCallCreatedUpdate(
             sessionUpdate="tool_call",
@@ -27,8 +34,10 @@ def test_tool_panel_applies_created_and_state_updates() -> None:
     assert "Read file [completed] (call_1)" in rendered
 
 
-def test_tool_panel_reset_clears_view() -> None:
-    panel = ToolPanel()
+def test_tool_panel_reset_clears_view(
+    mock_chat_view_model: ChatViewModel,
+) -> None:
+    panel = ToolPanel(mock_chat_view_model)
     panel.apply_update(
         ToolCallCreatedUpdate(
             sessionUpdate="tool_call",
@@ -43,8 +52,10 @@ def test_tool_panel_reset_clears_view() -> None:
     assert panel._render_text() == "Инструменты: нет активных вызовов"  # noqa: SLF001
 
 
-def test_tool_panel_renders_terminal_id_and_output_excerpt() -> None:
-    panel = ToolPanel()
+def test_tool_panel_renders_terminal_id_and_output_excerpt(
+    mock_chat_view_model: ChatViewModel,
+) -> None:
+    panel = ToolPanel(mock_chat_view_model)
     panel.apply_update(
         ToolCallCreatedUpdate(
             sessionUpdate="tool_call",
@@ -69,8 +80,10 @@ def test_tool_panel_renders_terminal_id_and_output_excerpt() -> None:
     assert "output: line1 line2 Exit code: 0" in rendered
 
 
-def test_tool_panel_returns_latest_terminal_snapshot() -> None:
-    panel = ToolPanel()
+def test_tool_panel_returns_latest_terminal_snapshot(
+    mock_chat_view_model: ChatViewModel,
+) -> None:
+    panel = ToolPanel(mock_chat_view_model)
     panel.apply_update(
         ToolCallCreatedUpdate(
             sessionUpdate="tool_call",

@@ -49,6 +49,12 @@ Screen {
     padding: 1;
 }
 
+#chat_content {
+    width: 1fr;
+    height: auto;
+    layout: vertical;
+}
+
 #plan-panel {
     height: 8;
     border: round #6d7f9a;

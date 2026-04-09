@@ -2,6 +2,8 @@
 
 from unittest.mock import Mock
 
+import pytest
+
 from acp_client.presentation.base_view_model import BaseViewModel
 
 
@@ -36,8 +38,9 @@ class TestBaseViewModel:
         vm = TestViewModel()
         handler = Mock()
         
-        # Не должно выбросить исключение
-        vm.on_event(Mock, handler)
+        # Должно выбросить RuntimeError если EventBus не инициализирован
+        with pytest.raises(RuntimeError, match="Cannot subscribe to events"):
+            vm.on_event(Mock, handler)
         
         # Handler не должен быть вызван
         handler.assert_not_called()
@@ -59,8 +62,9 @@ class TestBaseViewModel:
         vm = TestViewModel()
         event = Mock()
         
-        # Не должно выбросить исключение
-        vm.publish_event(event)
+        # Должно выбросить RuntimeError если EventBus не инициализирован
+        with pytest.raises(RuntimeError, match="Cannot publish events"):
+            vm.publish_event(event)
 
     def test_viewmodel_publish_event_with_bus(self) -> None:
         """Проверить публикацию события с event_bus."""

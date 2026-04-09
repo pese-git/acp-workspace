@@ -64,29 +64,37 @@ class BaseViewModel:
         Args:
             event_type: Тип события для подписки
             handler: Функция-обработчик события
+        
+        Raises:
+            RuntimeError: Если EventBus не инициализирован
             
         Пример:
             >>> self.on_event(SessionCreatedEvent, self._on_session_created)
         """
         if not self.event_bus:
-            self.logger.warning("EventBus not available, event subscription ignored")
-            return
+            msg = (
+                f"Cannot subscribe to events in {self.__class__.__name__}: "
+                "EventBus is not initialized. "
+                "Make sure EventBus is passed to the ViewModel during initialization."
+            )
+            self.logger.error("event_bus_not_initialized", vm_class=self.__class__.__name__)
+            raise RuntimeError(msg)
 
         try:
-            # EventBus.subscribe возвращает unsubscribe функцию или ничего не возвращает
-            # В зависимости от реализации EventBus из Phase 3
+            # EventBus.subscribe регистрирует обработчик события
             self.event_bus.subscribe(event_type, handler)
             self.logger.debug(
-                "Subscribed to event",
+                "subscribed_to_event",
                 event_type=event_type.__name__,
-                handler=handler.__name__,
+                handler=getattr(handler, "__name__", str(handler)),
             )
         except Exception as e:
             self.logger.exception(
-                "Error subscribing to event",
+                "error_subscribing_to_event",
                 event_type=event_type.__name__,
                 error=str(e),
             )
+            raise
 
     def publish_event(self, event: DomainEvent) -> None:
         """Опубликовать доменное событие.
@@ -95,28 +103,37 @@ class BaseViewModel:
         
         Args:
             event: Событие для публикации
+        
+        Raises:
+            RuntimeError: Если EventBus не инициализирован
             
         Пример:
             >>> event = SessionCreatedEvent(...)
             >>> self.publish_event(event)
         """
         if not self.event_bus:
-            self.logger.warning("EventBus not available, event publication ignored")
-            return
+            msg = (
+                f"Cannot publish events from {self.__class__.__name__}: "
+                "EventBus is not initialized. "
+                "Make sure EventBus is passed to the ViewModel during initialization."
+            )
+            self.logger.error("event_bus_not_initialized", vm_class=self.__class__.__name__)
+            raise RuntimeError(msg)
 
         try:
             self.event_bus.publish(event)
             self.logger.debug(
-                "Event published",
+                "event_published",
                 event_type=event.__class__.__name__,
-                aggregate_id=getattr(event, 'aggregate_id', 'unknown'),
+                aggregate_id=getattr(event, "aggregate_id", "unknown"),
             )
         except Exception as e:
             self.logger.exception(
-                "Error publishing event",
+                "error_publishing_event",
                 event_type=event.__class__.__name__,
                 error=str(e),
             )
+            raise
 
     def cleanup(self) -> None:
         """Очистить ресурсы при уничтожении ViewModel.

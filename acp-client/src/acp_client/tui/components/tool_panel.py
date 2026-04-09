@@ -1,8 +1,14 @@
-"""Панель отображения вызовов инструментов в активной сессии."""
+"""Панель отображения вызовов инструментов с MVVM интеграцией.
+
+Отвечает за:
+- Отображение статуса выполнения tool calls
+- Показ результатов выполнения инструментов
+- Интеграция с ChatViewModel для синхронизации tool calls
+"""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from rich.text import Text
 from textual.widgets import Static
@@ -11,15 +17,56 @@ from acp_client.messages import ToolCallUpdate
 
 from .terminal_output import TerminalOutputPanel
 
+if TYPE_CHECKING:
+    from acp_client.presentation.chat_view_model import ChatViewModel
+
 
 class ToolPanel(Static):
-    """Показывает последние статусы вызовов инструментов."""
+    """Панель tool calls с MVVM интеграцией.
+    
+    Обязательно требует ChatViewModel для работы. Подписывается на Observable свойства:
+    - tool_calls: список активных tool calls
+    
+    Примеры использования:
+        >>> from acp_client.presentation.chat_view_model import ChatViewModel
+        >>> chat_vm = ChatViewModel(coordinator, event_bus)
+        >>> tool_panel = ToolPanel(chat_vm)
+        >>> 
+        >>> # Когда ChatViewModel обновляется, панель обновляется автоматически
+        >>> chat_vm.tool_calls.value = [tool_call1, tool_call2]
+    """
 
-    def __init__(self) -> None:
-        """Создает панель с пустым состоянием до первых tool updates."""
-
+    def __init__(self, chat_vm: ChatViewModel) -> None:
+        """Инициализирует ToolPanel с обязательным ChatViewModel.
+        
+        Args:
+            chat_vm: ChatViewModel для управления tool calls
+        """
         super().__init__("Инструменты: нет активных вызовов", id="tool-panel")
+        self.chat_vm = chat_vm
         self._tool_calls: dict[str, dict[str, Any]] = {}
+        
+        # Подписываемся на изменения в ChatViewModel
+        self.chat_vm.tool_calls.subscribe(self._on_tool_calls_changed)
+
+    def _on_tool_calls_changed(self, tool_calls: list) -> None:
+        """Обновить панель при изменении tool calls.
+        
+        Args:
+            tool_calls: Новый список tool calls
+        """
+        # Обновляем отображение на основе новых tool calls
+        if not tool_calls:
+            self.update("Инструменты: нет активных вызовов")
+        else:
+            # Формируем текст отображения из tool calls
+            lines: list[str] = ["Инструменты:"]
+            for tool_call in tool_calls[-8:]:  # Показываем последние 8
+                # tool_call может быть разными типами, обрабатываем безопасно
+                tool_id = getattr(tool_call, "id", str(tool_call)[:20])
+                status = getattr(tool_call, "status", "pending")
+                lines.append(f"- {tool_id} [{status}]")
+            self.update("\n".join(lines))
 
     def reset(self) -> None:
         """Сбрасывает локальный список вызовов инструментов."""

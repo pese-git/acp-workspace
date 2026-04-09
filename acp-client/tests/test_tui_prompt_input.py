@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from acp_client.tui.components.prompt_input import PromptInput
+
+if TYPE_CHECKING:
+    from acp_client.presentation.chat_view_model import ChatViewModel
 
 
 def test_prompt_input_supports_up_down_history_bindings() -> None:
@@ -21,8 +26,10 @@ def test_prompt_input_supports_up_down_history_bindings() -> None:
     assert "down" in bindings
 
 
-def test_prompt_input_history_navigation_restores_draft() -> None:
-    prompt_input = PromptInput()
+def test_prompt_input_history_navigation_restores_draft(
+    mock_chat_view_model: ChatViewModel,
+) -> None:
+    prompt_input = PromptInput(mock_chat_view_model)
     prompt_input.set_active_session("sess_1")
     prompt_input.remember_prompt("first")
     prompt_input.remember_prompt("second")
@@ -41,8 +48,10 @@ def test_prompt_input_history_navigation_restores_draft() -> None:
     assert prompt_input.text == "draft"
 
 
-def test_prompt_input_history_is_isolated_by_session() -> None:
-    prompt_input = PromptInput()
+def test_prompt_input_history_is_isolated_by_session(
+    mock_chat_view_model: ChatViewModel,
+) -> None:
+    prompt_input = PromptInput(mock_chat_view_model)
     prompt_input.set_active_session("sess_1")
     prompt_input.remember_prompt("one")
 
@@ -56,8 +65,10 @@ def test_prompt_input_history_is_isolated_by_session() -> None:
     assert prompt_input.text == "one"
 
 
-def test_prompt_input_skips_consecutive_duplicates() -> None:
-    prompt_input = PromptInput()
+def test_prompt_input_skips_consecutive_duplicates(
+    mock_chat_view_model: ChatViewModel,
+) -> None:
+    prompt_input = PromptInput(mock_chat_view_model)
     prompt_input.set_active_session("sess_1")
     prompt_input.remember_prompt("same")
     prompt_input.remember_prompt("same")
