@@ -42,7 +42,7 @@ def test_plan_panel_requires_plan_vm() -> None:
     """Проверить что PlanPanel требует PlanViewModel в конструкторе."""
     # Попытаемся создать PlanPanel без параметра - должна быть ошибка типа
     with pytest.raises(TypeError):
-        PlanPanel()  # type: ignore[attr-defined]
+        PlanPanel()  # type: ignore[missing-argument]
 
 
 # ===== Отображение =====
@@ -55,7 +55,7 @@ def test_plan_panel_displays_empty_state_initially(
     # Начальное состояние - план не установлен
     assert plan_view_model.has_plan.value is False
     
-    rendered = plan_panel.render().plain  # type: ignore[attr-defined]
+    rendered = plan_panel.render().plain  # type: ignore[unresolved-attribute]
     assert "План: не получен" in rendered
 
 
@@ -73,7 +73,7 @@ def test_plan_panel_updates_on_plan_change(
     assert plan_view_model.has_plan.value is True
     
     # Проверяем что план отображается в UI
-    rendered = plan_panel.render().plain  # type: ignore[attr-defined]
+    rendered = plan_panel.render().plain  # type: ignore[unresolved-attribute]
     assert test_plan in rendered
     assert "План: не получен" not in rendered
 
@@ -88,7 +88,7 @@ def test_plan_panel_handles_whitespace_only_plan(
     # has_plan должен быть False для плана только из пробелов
     assert plan_view_model.has_plan.value is False
     
-    rendered = plan_panel.render().plain  # type: ignore[attr-defined]
+    rendered = plan_panel.render().plain  # type: ignore[unresolved-attribute]
     assert "План: не получен" in rendered
 
 
@@ -100,7 +100,7 @@ def test_plan_panel_displays_multiline_plan(
     multiline_plan = "1. Первая задача\n2. Вторая задача\n3. Третья задача"
     plan_view_model.set_plan(multiline_plan)
     
-    rendered = plan_panel.render().plain  # type: ignore[attr-defined]
+    rendered = plan_panel.render().plain  # type: ignore[unresolved-attribute]
     assert "1. Первая задача" in rendered
     assert "2. Вторая задача" in rendered
     assert "3. Третья задача" in rendered
@@ -122,7 +122,7 @@ def test_plan_panel_clears_on_plan_clear(
     assert plan_view_model.has_plan.value is False
     
     # Проверяем что UI вернулась к пустому состоянию
-    rendered = plan_panel.render().plain  # type: ignore[attr-defined]
+    rendered = plan_panel.render().plain  # type: ignore[unresolved-attribute]
     assert "План: не получен" in rendered
 
 
@@ -149,7 +149,7 @@ def test_plan_panel_clears_entries_on_reset(
     assert plan_view_model.has_plan.value is False
     assert plan_panel._entries == []
     
-    rendered = plan_panel.render().plain  # type: ignore[attr-defined]
+    rendered = plan_panel.render().plain  # type: ignore[unresolved-attribute]
     assert "План: не получен" in rendered
 
 
@@ -168,7 +168,7 @@ def test_plan_panel_backward_compatibility_set_plan(
     assert plan_view_model.has_plan.value is True
     
     # Проверяем что UI обновилось
-    rendered = plan_panel.render().plain  # type: ignore[attr-defined]
+    rendered = plan_panel.render().plain  # type: ignore[unresolved-attribute]
     assert test_plan in rendered
 
 
@@ -217,7 +217,7 @@ def test_plan_panel_backward_compatibility_apply_update(
     
     # Проверяем что план обновился в ViewModel
     assert plan_view_model.has_plan.value is True
-    rendered = plan_panel.render().plain  # type: ignore[attr-defined]
+    rendered = plan_panel.render().plain  # type: ignore[unresolved-attribute]
     assert "Задача 1" in rendered
     assert "Задача 2" in rendered
 
@@ -238,7 +238,7 @@ def test_plan_panel_reacts_to_multiple_plan_changes(
     
     for plan in plans:
         plan_view_model.set_plan(plan)
-        rendered = plan_panel.render().plain  # type: ignore[attr-defined]
+        rendered = plan_panel.render().plain  # type: ignore[unresolved-attribute]
         
         if plan.strip():
             assert plan_view_model.has_plan.value is True
@@ -259,7 +259,7 @@ def test_plan_panel_subscription_works_correctly(
     plan_view_model.set_plan("Новый план")
     
     # Проверяем что UI обновился
-    rendered = plan_panel.render().plain  # type: ignore[attr-defined]
+    rendered = plan_panel.render().plain  # type: ignore[unresolved-attribute]
     assert "Новый план" in rendered
     assert plan_view_model.has_plan.value is True
 

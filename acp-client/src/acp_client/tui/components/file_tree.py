@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from rich.style import Style
 from rich.text import Text
 from textual.message import Message
+from textual.widget import AwaitRemove
 from textual.widgets import DirectoryTree
 from textual.widgets.directory_tree import DirEntry
 from textual.widgets.tree import TreeNode
@@ -251,10 +252,10 @@ class FileTree(DirectoryTree):
             return False
         return any(changed_path.is_relative_to(path) for changed_path in self._changed_paths)
     
-    def remove(self) -> None:
+    def remove(self) -> AwaitRemove:
         """Удалить компонент и очистить ресурсы.
         
         Отписываемся от всех observers ViewModel при удалении компонента.
         """
         self._unsubscribe_from_view_model()
-        super().remove()
+        return super().remove()

@@ -22,7 +22,7 @@ async def test_terminal_output_panel_renders_empty_state(
 ) -> None:
     # Создаем app контекст для Textual компонентов
     app = _TestApp()
-    async with app.run_test() as pilot:
+    async with app.run_test() as _:
         # Создаем панель с ViewModel
         panel = TerminalOutputPanel(mock_terminal_view_model)
 
@@ -37,7 +37,7 @@ async def test_terminal_output_panel_renders_output_and_exit_code(
 ) -> None:
     # Создаем app контекст для Textual компонентов
     app = _TestApp()
-    async with app.run_test() as pilot:
+    async with app.run_test() as _:
         # Создаем панель с ViewModel
         panel = TerminalOutputPanel(mock_terminal_view_model)
         
@@ -49,4 +49,4 @@ async def test_terminal_output_panel_renders_output_and_exit_code(
         rendered = panel.render_text()
 
         # Проверяем что exit code корректно отображается
-        assert "Exit code: 0" in rendered.plain  # type: ignore[attr-defined]
+        assert "Exit code: 0" in rendered.plain  # type: ignore[unresolved-attribute]

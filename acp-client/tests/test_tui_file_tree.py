@@ -23,7 +23,7 @@ class _TestApp(App):
 async def test_file_tree_updates_root_for_valid_directory(tmp_path: Path) -> None:
     # Создаем app контекст для Textual компонентов
     app = _TestApp()
-    async with app.run_test() as pilot:
+    async with app.run_test() as _:
         mock_vm = MagicMock(spec=FileSystemViewModel)
         tree = FileTree(filesystem_vm=mock_vm, root_path=str(tmp_path))
         target = tmp_path / "workspace"
@@ -39,7 +39,7 @@ async def test_file_tree_updates_root_for_valid_directory(tmp_path: Path) -> Non
 async def test_file_tree_ignores_relative_root_path(tmp_path: Path) -> None:
     # Создаем app контекст для Textual компонентов
     app = _TestApp()
-    async with app.run_test() as pilot:
+    async with app.run_test() as _:
         mock_vm = MagicMock(spec=FileSystemViewModel)
         tree = FileTree(filesystem_vm=mock_vm, root_path=str(tmp_path))
         initial_path = tree.root_path
@@ -53,7 +53,7 @@ async def test_file_tree_ignores_relative_root_path(tmp_path: Path) -> None:
 async def test_file_tree_filters_hidden_paths() -> None:
     # Создаем app контекст для Textual компонентов
     app = _TestApp()
-    async with app.run_test() as pilot:
+    async with app.run_test() as _:
         mock_vm = MagicMock(spec=FileSystemViewModel)
         tree = FileTree(filesystem_vm=mock_vm, root_path=str(Path.cwd()))
         visible = Path("src")
@@ -68,7 +68,7 @@ async def test_file_tree_filters_hidden_paths() -> None:
 async def test_file_tree_refresh_tree_skips_when_not_mounted(tmp_path: Path) -> None:
     # Создаем app контекст для Textual компонентов
     app = _TestApp()
-    async with app.run_test() as pilot:
+    async with app.run_test() as _:
         mock_vm = MagicMock(spec=FileSystemViewModel)
         tree = FileTree(filesystem_vm=mock_vm, root_path=str(tmp_path))
 
@@ -81,7 +81,7 @@ async def test_file_tree_refresh_tree_skips_when_not_mounted(tmp_path: Path) -> 
 async def test_file_tree_marks_changed_file_and_parent_directory(tmp_path: Path) -> None:
     # Создаем app контекст для Textual компонентов
     app = _TestApp()
-    async with app.run_test() as pilot:
+    async with app.run_test() as _:
         mock_vm = MagicMock(spec=FileSystemViewModel)
         tree = FileTree(filesystem_vm=mock_vm, root_path=str(tmp_path))
         changed_file = tmp_path / "src" / "main.py"

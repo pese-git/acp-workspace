@@ -70,7 +70,7 @@ async def test_tool_panel_renders_terminal_id_and_output_excerpt(
 ) -> None:
     # Создаем app контекст для Textual компонентов
     app = _TestApp()
-    async with app.run_test() as pilot:
+    async with app.run_test() as _:
         panel = ToolPanel(mock_chat_view_model, mock_terminal_view_model)
         panel.apply_update(
             ToolCallCreatedUpdate(
@@ -105,7 +105,7 @@ async def test_tool_panel_returns_latest_terminal_snapshot(
 ) -> None:
     # Создаем app контекст для Textual компонентов
     app = _TestApp()
-    async with app.run_test() as pilot:
+    async with app.run_test() as _:
         panel = ToolPanel(mock_chat_view_model, mock_terminal_view_model)
         panel.apply_update(
             ToolCallCreatedUpdate(
@@ -132,4 +132,4 @@ async def test_tool_panel_returns_latest_terminal_snapshot(
         assert title == "Run command"
         assert terminal_id == "term_9"
         # Проверяем что snapshot содержит информацию об exit code
-        assert "Exit code: 0" in output.plain  # type: ignore[attr-defined]
+        assert "Exit code: 0" in output.plain  # type: ignore[unresolved-attribute]

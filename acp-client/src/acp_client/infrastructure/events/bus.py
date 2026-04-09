@@ -18,7 +18,9 @@ from acp_client.domain.events import DomainEvent
 T = TypeVar("T", bound=DomainEvent)
 
 # Тип обработчика - может быть синхронной или асинхронной функцией
-EventHandler = Callable[[DomainEvent], Any]
+# Используем более гибкое определение без позиционного параметра
+# чтобы type checker принимал функции с конкретными типами событий
+EventHandler = Callable[..., Any]
 
 
 class EventBus:

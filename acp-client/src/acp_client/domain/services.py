@@ -79,6 +79,44 @@ class TransportService(ABC):
             True если соединение активно
         """
         ...
+    
+    @abstractmethod
+    async def request_with_callbacks(
+        self,
+        method: str,
+        params: dict[str, Any] | None = None,
+        on_update: Any = None,
+        on_permission: Any = None,
+        on_fs_read: Any = None,
+        on_fs_write: Any = None,
+        on_terminal_create: Any = None,
+        on_terminal_output: Any = None,
+        on_terminal_wait: Any = None,
+        on_terminal_release: Any = None,
+        on_terminal_kill: Any = None,
+    ) -> dict[str, Any]:
+        """Выполняет request с обработкой callbacks.
+        
+        Аргументы:
+            method: Метод для вызова
+            params: Параметры метода
+            on_update: Callback для session/update
+            on_permission: Callback для session/request_permission
+            on_fs_read: Callback для fs/read
+            on_fs_write: Callback для fs/write
+            on_terminal_create: Callback для terminal/create
+            on_terminal_output: Callback для terminal/output
+            on_terminal_wait: Callback для terminal/wait_for_exit
+            on_terminal_release: Callback для terminal/release
+            on_terminal_kill: Callback для terminal/kill
+        
+        Возвращает:
+            Финальный ответ на request
+        
+        Raises:
+            TransportError: При ошибке выполнения
+        """
+        ...
 
 
 class SessionService(ABC):

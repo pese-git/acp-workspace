@@ -23,7 +23,7 @@ async def test_sidebar_select_next_and_previous_wraps(
 ) -> None:
     # Создаем app контекст для Textual компонентов
     app = _TestApp()
-    async with app.run_test() as pilot:
+    async with app.run_test() as _:
         sidebar = Sidebar(mock_session_view_model)
         sidebar.set_sessions(
             [

@@ -61,12 +61,15 @@ class UIViewModel(BaseViewModel):
         super().__init__(event_bus, logger)
 
         # Observable свойства
-        self.connection_status: Observable[ConnectionStatus] = Observable(ConnectionStatus.DISCONNECTED)
+        self.connection_status: Observable[ConnectionStatus] = Observable(
+            ConnectionStatus.DISCONNECTED
+        )
         self.is_loading: Observable[bool] = Observable(False)
         self.error_message: Observable[str | None] = Observable(None)
         self.info_message: Observable[str | None] = Observable(None)
         self.warning_message: Observable[str | None] = Observable(None)
-        self.active_modal: Observable[str | None] = Observable(None)  # Тип активного модала или None
+        # Тип активного модала или None
+        self.active_modal: Observable[str | None] = Observable(None)
         self.modal_data: Observable[dict[str, Any]] = Observable({})  # Данные для модального окна
 
         # Флаги для offline режима

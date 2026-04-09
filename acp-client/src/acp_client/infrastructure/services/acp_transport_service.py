@@ -150,7 +150,7 @@ class ACPTransportService(TransportService):
             msg = f"Failed to receive message: {e}"
             raise RuntimeError(msg) from e
     
-    async def listen(self) -> AsyncIterator[dict[str, Any]]:  # type: ignore[override]
+    async def listen(self) -> AsyncIterator[dict[str, Any]]:  # type: ignore[invalid-method-override]
         """Слушает входящие сообщения с сервера.
         
         Возвращает асинхронный итератор, который выдает

@@ -115,8 +115,10 @@ class OperationQueue:
 
             # Выполнить операцию вне lock-а чтобы не блокировать добавление
             try:
+                if self._executor is None:
+                    raise OperationQueueError("Executor not set")
                 result = await asyncio.wait_for(
-                    self._executor(operation),  # type: ignore[misc]
+                    self._executor(operation),
                     timeout=operation.timeout_seconds,
                 )
 

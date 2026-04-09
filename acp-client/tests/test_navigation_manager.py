@@ -622,7 +622,7 @@ class TestNavigationManager:
             pass
         
         modal = CustomModalScreen()
-        modal.dismiss = Mock()
+        modal.dismiss = Mock()  # type: ignore[invalid-assignment]
         
         # Имитируем registration через metadata
         modal_type = type(modal).__name__

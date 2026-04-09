@@ -306,7 +306,7 @@ async def test_permission_modal_unsubscribes_on_unmount(
     """
     # Создаем app контекст для Textual компонентов
     app = _TestApp()
-    async with app.run_test() as pilot:
+    async with app.run_test() as _:
         modal = PermissionModal(
             permission_vm=permission_view_model,
             title="Test",

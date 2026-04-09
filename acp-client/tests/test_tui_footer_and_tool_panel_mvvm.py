@@ -65,7 +65,7 @@ def test_footer_bar_displays_connection_status(
     """Проверить что FooterBar отображает статус соединения."""
     ui_view_model.connection_status.value = ConnectionStatus.CONNECTED
     
-    rendered = footer_bar.render().plain  # type: ignore[attr-defined]
+    rendered = footer_bar.render().plain  # type: ignore[unresolved-attribute]
     assert "connected" in rendered
 
 
@@ -76,7 +76,7 @@ def test_footer_bar_displays_error_message(
     """Проверить что FooterBar отображает ошибку с приоритетом."""
     ui_view_model.error_message.value = "Connection failed"
     
-    rendered = footer_bar.render().plain  # type: ignore[attr-defined]
+    rendered = footer_bar.render().plain  # type: ignore[unresolved-attribute]
     assert "Error" in rendered
     assert "Connection failed" in rendered
 
@@ -88,7 +88,7 @@ def test_footer_bar_displays_warning_message(
     """Проверить что FooterBar отображает предупреждение."""
     ui_view_model.warning_message.value = "Low memory"
     
-    rendered = footer_bar.render().plain  # type: ignore[attr-defined]
+    rendered = footer_bar.render().plain  # type: ignore[unresolved-attribute]
     assert "Warning" in rendered
     assert "Low memory" in rendered
 
@@ -100,7 +100,7 @@ def test_footer_bar_displays_info_message(
     """Проверить что FooterBar отображает информационное сообщение."""
     ui_view_model.info_message.value = "Loading data..."
     
-    rendered = footer_bar.render().plain  # type: ignore[attr-defined]
+    rendered = footer_bar.render().plain  # type: ignore[unresolved-attribute]
     assert "Loading data..." in rendered
 
 
@@ -112,7 +112,7 @@ def test_footer_bar_error_has_priority_over_warning(
     ui_view_model.error_message.value = "Critical error"
     ui_view_model.warning_message.value = "Low memory"
     
-    rendered = footer_bar.render().plain  # type: ignore[attr-defined]
+    rendered = footer_bar.render().plain  # type: ignore[unresolved-attribute]
     assert "Error" in rendered
     assert "Critical error" in rendered
     assert "Low memory" not in rendered
@@ -126,7 +126,7 @@ def test_footer_bar_warning_has_priority_over_info(
     ui_view_model.warning_message.value = "Low memory"
     ui_view_model.info_message.value = "Loading..."
     
-    rendered = footer_bar.render().plain  # type: ignore[attr-defined]
+    rendered = footer_bar.render().plain  # type: ignore[unresolved-attribute]
     assert "Warning" in rendered
     assert "Low memory" in rendered
     assert "Loading..." not in rendered
@@ -135,11 +135,13 @@ def test_footer_bar_warning_has_priority_over_info(
 # ===== ToolPanel Tests =====
 
 @pytest.mark.asyncio
-async def test_tool_panel_initializes_with_chat_view_model(chat_view_model: ChatViewModel, mock_terminal_view_model) -> None:
+async def test_tool_panel_initializes_with_chat_view_model(
+    chat_view_model: ChatViewModel, mock_terminal_view_model
+) -> None:
     """Проверить что ToolPanel инициализируется с ChatViewModel."""
     # Создаем app контекст для Textual компонентов
     app = _TestApp()
-    async with app.run_test() as pilot:
+    async with app.run_test() as _:
         tool_panel = ToolPanel(chat_view_model, mock_terminal_view_model)
         
         assert tool_panel.chat_vm is chat_view_model
@@ -148,7 +150,7 @@ async def test_tool_panel_initializes_with_chat_view_model(chat_view_model: Chat
 
 def test_tool_panel_displays_empty_message_by_default(tool_panel: ToolPanel) -> None:
     """Проверить что ToolPanel показывает "нет активных вызовов" по умолчанию."""
-    rendered = tool_panel.render().plain  # type: ignore[attr-defined]
+    rendered = tool_panel.render().plain  # type: ignore[unresolved-attribute]
     assert "нет активных вызовов" in rendered
 
 
@@ -159,7 +161,7 @@ def test_tool_panel_updates_on_tool_calls_empty(
     """Проверить что ToolPanel обновляется когда tool_calls пусто."""
     chat_view_model.tool_calls.value = []
     
-    rendered = tool_panel.render().plain  # type: ignore[attr-defined]
+    rendered = tool_panel.render().plain  # type: ignore[unresolved-attribute]
     assert "нет активных вызовов" in rendered
 
 
@@ -175,7 +177,7 @@ def test_tool_panel_updates_on_tool_calls_added(
     
     chat_view_model.tool_calls.value = tool_calls
     
-    rendered = tool_panel.render().plain  # type: ignore[attr-defined]
+    rendered = tool_panel.render().plain  # type: ignore[unresolved-attribute]
     assert "Инструменты:" in rendered
 
 
@@ -183,7 +185,7 @@ def test_tool_panel_reset_clears_calls(tool_panel: ToolPanel) -> None:
     """Проверить что reset() очищает tool calls."""
     tool_panel.reset()
     
-    rendered = tool_panel.render().plain  # type: ignore[attr-defined]
+    rendered = tool_panel.render().plain  # type: ignore[unresolved-attribute]
     assert "нет активных вызовов" in rendered
 
 

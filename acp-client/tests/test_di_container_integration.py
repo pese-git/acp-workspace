@@ -48,7 +48,7 @@ class TestViewModelFactory:
         
         # Без параметра координатора тоже ошибка
         with pytest.raises(TypeError):
-            ViewModelFactory.register_view_models(container)  # type: ignore[call-arg]
+            ViewModelFactory.register_view_models(container)  # type: ignore[missing-argument]
 
     def test_register_view_models_with_coordinator(self) -> None:
         """ViewModelFactory регистрирует все три VM с coordinator и event_bus."""
