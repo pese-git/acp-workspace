@@ -60,6 +60,9 @@ class InitializeUseCase(UseCase):
     async def execute(self) -> InitializeResponse:
         """Инициализирует соединение с сервером.
         
+        ВАЖНО: Соединение остается открытым после выполнения для последующих операций.
+        Закрытие соединения должно происходить явно через disconnect().
+        
         Отправляет метод 'initialize' и получает информацию о сервере.
         
         Возвращает:
@@ -68,17 +71,29 @@ class InitializeUseCase(UseCase):
         Raises:
             RuntimeError: При ошибке подключения или инициализации
         """
+        self._logger.info("initialize_started")
+        
         try:
-            # Подключаемся к серверу
+            # Открываем соединение БЕЗ context manager - оно остается открытым
             await self._transport.connect()
             self._logger.info("connected_to_server")
             
-            # Отправляем initialize запрос к серверу
+            # Отправляем initialize запрос к серверу согласно протоколу ACP
             from acp_client.messages import ACPMessage
             
+            # Формируем параметры инициализации согласно требованиям протокола ACP
+            # protocolVersion - обязательный параметр
+            # clientCapabilities и clientInfo - рекомендуемые параметры
             init_request = ACPMessage.request(
                 method="initialize",
-                params={},
+                params={
+                    "protocolVersion": 1,  # Обязательный параметр протокола ACP
+                    "clientCapabilities": {},  # Возможности клиента (пока пусто)
+                    "clientInfo": {
+                        "name": "acp-client",  # Идентификатор клиента
+                        "version": "1.0.0"  # Версия клиента
+                    }
+                },
             )
             await self._transport.send(init_request.to_dict())
             self._logger.debug("initialize_request_sent", request_id=init_request.id)
@@ -95,6 +110,8 @@ class InitializeUseCase(UseCase):
                     error_code=response.error.code,
                     error_message=response.error.message,
                 )
+                # При ошибке инициализации закрываем соединение
+                await self._transport.disconnect()
                 raise RuntimeError(error_msg)
             
             # Извлекаем capabilities и методы аутентификации из результата
@@ -102,6 +119,9 @@ class InitializeUseCase(UseCase):
             server_capabilities = result.get("serverCapabilities", {})
             available_auth_methods = result.get("authMethods", [])
             protocol_version = result.get("protocolVersion", "1.0")
+            
+            # Сохраняем capabilities в transport service для последующего использования
+            self._transport.set_server_capabilities(server_capabilities)
             
             self._logger.info(
                 "initialize_success",
@@ -122,6 +142,8 @@ class InitializeUseCase(UseCase):
             # Обработка неожиданных ошибок подключения/сети
             error_msg = f"Failed to initialize: {e}"
             self._logger.error("initialize_unexpected_error", error=str(e))
+            # При ошибке подключения закрываем соединение
+            await self._transport.disconnect()
             raise RuntimeError(error_msg) from e
 
 
@@ -149,12 +171,12 @@ class CreateSessionUseCase(UseCase):
     async def execute(self, request: CreateSessionRequest) -> CreateSessionResponse:
         """Создает новую сессию.
         
+        Использует результаты инициализации, выполненной в InitializeUseCase.
         Полный жизненный цикл:
-        1. Подключение к серверу (если еще не подключены)
-        2. Отправка initialize запроса для получения capabilities
-        3. Аутентификация (если требуется)
-        4. Создание сессии через session/new
-        5. Сохранение в repository
+        1. Проверка инициализации сервера
+        2. Аутентификация (если требуется)
+        3. Создание сессии через session/new
+        4. Сохранение в repository
         
         Аргументы:
             request: CreateSessionRequest с параметрами подключения и credentials
@@ -174,24 +196,20 @@ class CreateSessionUseCase(UseCase):
         try:
             from acp_client.messages import ACPMessage
             
-            # Подключение к серверу
-            if not self._transport.is_connected():
-                await self._transport.connect()
-                self._logger.info("connected_to_server")
-            
-            # Шаг 1: Инициализация для получения capabilities
-            init_request = ACPMessage.request("initialize", {})
-            await self._transport.send(init_request.to_dict())
-            
-            init_response_data = await self._transport.receive()
-            init_response = ACPMessage.from_dict(init_response_data)
-            
-            if init_response.error is not None:
-                error_msg = f"Initialize failed: {init_response.error.message}"
-                self._logger.error("initialize_failed_during_session_create", error=error_msg)
+            # Проверка инициализации транспорта
+            if not self._transport.is_initialized():
+                error_msg = "Transport not initialized. Call InitializeUseCase first."
+                self._logger.error("transport_not_initialized")
                 raise RuntimeError(error_msg)
             
-            server_capabilities = (init_response.result or {}).get("serverCapabilities", {})
+            # Проверка соединения
+            if not self._transport.is_connected():
+                error_msg = "Transport not connected."
+                self._logger.error("transport_not_connected")
+                raise RuntimeError(error_msg)
+            
+            # Получить сохраненные capabilities из transport service
+            server_capabilities = self._transport.get_server_capabilities()
             self._logger.debug("server_capabilities_received")
             
             # Шаг 2: Аутентификация (если требуется)
