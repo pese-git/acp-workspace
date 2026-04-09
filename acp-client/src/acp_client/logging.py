@@ -14,6 +14,28 @@ from typing import Any
 import structlog
 
 
+def get_acp_client_dir() -> Path:
+    """Получить директорию ~/.acp-client с автоматическим созданием.
+    
+    Returns:
+        Path: Путь к директории ~/.acp-client
+    """
+    acp_dir = Path.home() / ".acp-client"
+    acp_dir.mkdir(parents=True, exist_ok=True)
+    return acp_dir
+
+
+def get_logs_dir() -> Path:
+    """Получить директорию ~/.acp-client/logs с автоматическим созданием.
+    
+    Returns:
+        Path: Путь к директории ~/.acp-client/logs
+    """
+    logs_dir = get_acp_client_dir() / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    return logs_dir
+
+
 def setup_logging(
     level: str = "INFO",
     json_format: bool = False,
@@ -53,9 +75,7 @@ def setup_logging(
     if log_file:
         if log_file == "default":
             # Используем стандартный путь ~/.acp-client/logs/acp-client.log
-            home = Path.home()
-            log_dir = home / ".acp-client" / "logs"
-            log_dir.mkdir(parents=True, exist_ok=True)
+            log_dir = get_logs_dir()
             file_path = log_dir / "acp-client.log"
         else:
             # Используем указанный путь

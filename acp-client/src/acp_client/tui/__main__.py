@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 
+from ..logging import setup_logging
 from .app import run_tui_app
 
 
@@ -30,12 +31,17 @@ def main() -> None:
         help="Путь к файлу логов. 'default' для ~/.acp-client/logs/acp-client.log",
     )
     args = parser.parse_args()
+    
+    # Инициализировать логирование с сохранением в ~/.acp-client/logs/acp-client.log по умолчанию
+    setup_logging(
+        level=args.log_level,
+        json_format=args.log_json,
+        log_file=args.log_file or "default",
+    )
+    
     run_tui_app(
         host=args.host,
         port=args.port,
-        log_level=args.log_level,
-        log_json=args.log_json,
-        log_file=args.log_file,
     )
 
 

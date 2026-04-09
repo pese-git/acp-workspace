@@ -1,51 +1,40 @@
-"""CLI-обертка над ACPClient.
+"""CLI-обертка для запуска TUI приложения.
 
-Команда читает параметры из аргументов, выполняет ACP-запрос и печатает JSON.
-Для `session/load` поддержан режим показа replay/update-событий.
+Команда:
+    acp-client --tui [--host HOST] [--port PORT]
 
-Пример использования:
-    acp-client --method session/load --show-updates --params '{...}'
+Примечание: Legacy HTTP/WS CLI интерфейс был заменен на TUI приложение.
+Для использования Clean Architecture API, используйте DIBootstrapper напрямую.
+
+Пример использования с новым API:
+    from acp_client.infrastructure.di_bootstrapper import DIBootstrapper
+    from acp_client.application.use_cases import InitializeUseCase
+    
+    container = DIBootstrapper.build(host="localhost", port=8000)
+    use_case = container.resolve(InitializeUseCase)
+    result = await use_case.execute()
 """
 
 from __future__ import annotations
 
 import argparse
-import asyncio
-import json
-from typing import Any
 
-from .client import ACPClient
 from .logging import setup_logging
-from .messages import parse_json_params
 
 
 def run_client() -> None:
     """Точка входа CLI-клиента.
 
-    Метод:
-    - парсит аргументы,
-    - валидирует JSON-параметры,
-    - вызывает ACP-клиент,
-    - печатает результат в человеко-читаемом JSON.
-
-    Пример использования:
-        run_client()
+    Запускает TUI приложение.
     """
 
     parser = argparse.ArgumentParser(prog="acp-client")
-    parser.add_argument("--host", default=None)
-    parser.add_argument("--port", default=None, type=int)
-    parser.add_argument("--method", default=None)
-    parser.add_argument("--params", default=None)
+    parser.add_argument("--host", default=None, help="Хост сервера (default: localhost)")
+    parser.add_argument("--port", default=None, type=int, help="Порт сервера (default: 8765)")
     parser.add_argument(
         "--tui",
         action="store_true",
-        help="Запустить интерактивный Textual TUI клиент",
-    )
-    parser.add_argument(
-        "--show-updates",
-        action="store_true",
-        help="Показать replay/update события для session/load (полезно для WS)",
+        help="Запустить интерактивный Textual TUI клиент (default)",
     )
     parser.add_argument(
         "--log-level",
@@ -65,62 +54,15 @@ def run_client() -> None:
     )
     args = parser.parse_args()
 
-    # Настроить логирование только если явно указаны флаги
-    if args.log_level != "INFO" or args.log_json or args.log_file:
-        setup_logging(
-            level=args.log_level,
-            json_format=args.log_json,
-            log_file=args.log_file,
-        )
-
-    if args.tui:
-        run_tui_app(host=args.host, port=args.port)
-        return
-
-    resolved_host = args.host if isinstance(args.host, str) and args.host else "127.0.0.1"
-    resolved_port = args.port if isinstance(args.port, int) and args.port > 0 else 8765
-
-    if not isinstance(args.method, str) or not args.method:
-        parser.error("--method обязателен, если не используется --tui")
-
-    params = parse_json_params(args.params)
-    client = ACPClient(host=resolved_host, port=resolved_port)
-
-    # Для `session/load` можно вывести replay обновления вместе с финальным ответом.
-    if args.method == "session/load" and args.show_updates:
-        session_id = params.get("sessionId")
-        cwd = params.get("cwd")
-        mcp_servers = params.get("mcpServers", [])
-
-        if not isinstance(session_id, str):
-            parser.error("--params для session/load должен содержать строковое поле sessionId")
-        if not isinstance(cwd, str):
-            parser.error("--params для session/load должен содержать строковое поле cwd")
-        if not isinstance(mcp_servers, list):
-            parser.error("--params для session/load должен содержать массив mcpServers")
-
-        response, updates = asyncio.run(
-            client.load_session_parsed(
-                session_id=session_id,
-                cwd=cwd,
-                mcp_servers=[item for item in mcp_servers if isinstance(item, dict)],
-            )
-        )
-        payload: dict[str, Any] = {
-            "response": response.to_dict(),
-            # Для CLI выводим типизированные updates в JSON-совместимом формате.
-            "updates": [update.model_dump() for update in updates],
-        }
-        print(json.dumps(payload, indent=2, ensure_ascii=False))
-        return
-
-    response = asyncio.run(
-        client.request(
-            method=args.method,
-            params=params,
-        )
+    # Настроить логирование с сохранением в ~/.acp-client/logs/acp-client.log по умолчанию
+    setup_logging(
+        level=args.log_level,
+        json_format=args.log_json,
+        log_file=args.log_file or "default",
     )
-    print(json.dumps(response.to_dict(), indent=2, ensure_ascii=False))
+
+    # Запустить TUI по умолчанию
+    run_tui_app(host=args.host, port=args.port)
 
 
 def run_tui_app(*, host: str | None, port: int | None) -> None:
