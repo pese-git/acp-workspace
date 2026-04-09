@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import pytest
+from textual.app import App
 
 from acp_client.infrastructure.events.bus import EventBus
 from acp_client.presentation.chat_view_model import ChatViewModel
 from acp_client.presentation.ui_view_model import ConnectionStatus, UIViewModel
 from acp_client.tui.components.footer import FooterBar
 from acp_client.tui.components.tool_panel import ToolPanel
+
+
+class _TestApp(App):
+    """Минимальный app для создания Textual контекста в тестах."""
+    pass
 
 
 @pytest.fixture
@@ -37,9 +43,9 @@ def footer_bar(ui_view_model: UIViewModel) -> FooterBar:
 
 
 @pytest.fixture
-def tool_panel(chat_view_model: ChatViewModel) -> ToolPanel:
-    """Создать ToolPanel с ChatViewModel."""
-    return ToolPanel(chat_view_model)
+def tool_panel(chat_view_model: ChatViewModel, mock_terminal_view_model) -> ToolPanel:
+    """Создать ToolPanel с ChatViewModel и TerminalViewModel."""
+    return ToolPanel(chat_view_model, mock_terminal_view_model)
 
 
 # ===== FooterBar Tests =====
@@ -128,12 +134,16 @@ def test_footer_bar_warning_has_priority_over_info(
 
 # ===== ToolPanel Tests =====
 
-def test_tool_panel_initializes_with_chat_view_model(chat_view_model: ChatViewModel) -> None:
+@pytest.mark.asyncio
+async def test_tool_panel_initializes_with_chat_view_model(chat_view_model: ChatViewModel, mock_terminal_view_model) -> None:
     """Проверить что ToolPanel инициализируется с ChatViewModel."""
-    tool_panel = ToolPanel(chat_view_model)
-    
-    assert tool_panel.chat_vm is chat_view_model
-    assert tool_panel.id == "tool-panel"
+    # Создаем app контекст для Textual компонентов
+    app = _TestApp()
+    async with app.run_test() as pilot:
+        tool_panel = ToolPanel(chat_view_model, mock_terminal_view_model)
+        
+        assert tool_panel.chat_vm is chat_view_model
+        assert tool_panel.id == "tool-panel"
 
 
 def test_tool_panel_displays_empty_message_by_default(tool_panel: ToolPanel) -> None:

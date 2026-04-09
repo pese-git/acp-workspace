@@ -53,13 +53,13 @@ class FileViewerViewModel(BaseViewModel):
         """
         super().__init__(event_bus, logger)
         # Путь к просматриваемому файлу
-        self._file_path = Observable(None)
+        self._file_path: Observable[Path | None] = Observable(None)
         # Содержимое файла
-        self._content = Observable("")
+        self._content: Observable[str] = Observable("")
         # Видимо ли модальное окно
-        self._is_visible = Observable(False)
+        self._is_visible: Observable[bool] = Observable(False)
         # Загружается ли файл
-        self._is_loading = Observable(False)
+        self._is_loading: Observable[bool] = Observable(False)
     
     @property
     def file_path(self) -> Observable:

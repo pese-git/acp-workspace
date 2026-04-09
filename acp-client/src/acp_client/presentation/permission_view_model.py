@@ -50,13 +50,13 @@ class PermissionViewModel(BaseViewModel):
         """
         super().__init__(event_bus, logger)
         # Тип запрашиваемого разрешения
-        self._permission_type = Observable("")
+        self._permission_type: Observable[str] = Observable("")
         # Ресурс для которого запрашивается разрешение
-        self._resource = Observable("")
+        self._resource: Observable[str] = Observable("")
         # Сообщение с описанием запроса
-        self._message = Observable("")
+        self._message: Observable[str] = Observable("")
         # Видимо ли модальное окно
-        self._is_visible = Observable(False)
+        self._is_visible: Observable[bool] = Observable(False)
     
     @property
     def permission_type(self) -> Observable:

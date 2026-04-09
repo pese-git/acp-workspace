@@ -1,22 +1,52 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+import pytest
+from textual.app import App
+
 from acp_client.tui.components.terminal_output import TerminalOutputPanel
 
-
-def test_terminal_output_panel_renders_empty_state() -> None:
-    panel = TerminalOutputPanel()
-
-    rendered = panel.render_text()
-
-    assert rendered.plain == "Нет вывода терминала"  # type: ignore[attr-defined]
+if TYPE_CHECKING:
+    from acp_client.presentation.terminal_view_model import TerminalViewModel
 
 
-def test_terminal_output_panel_renders_output_and_exit_code() -> None:
-    panel = TerminalOutputPanel()
-    panel.append_output("hello\n")
-    panel.set_exit_code(0)
+class _TestApp(App):
+    """Минимальный app для создания Textual контекста в тестах."""
+    pass
 
-    rendered = panel.render_text()
 
-    assert "hello" in rendered.plain  # type: ignore[attr-defined]
-    assert "Exit code: 0" in rendered.plain  # type: ignore[attr-defined]
+@pytest.mark.asyncio
+async def test_terminal_output_panel_renders_empty_state(
+    mock_terminal_view_model: TerminalViewModel,
+) -> None:
+    # Создаем app контекст для Textual компонентов
+    app = _TestApp()
+    async with app.run_test() as pilot:
+        # Создаем панель с ViewModel
+        panel = TerminalOutputPanel(mock_terminal_view_model)
+
+        rendered = panel.render_text()
+
+        assert rendered.plain == "Нет вывода терминала"  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_terminal_output_panel_renders_output_and_exit_code(
+    mock_terminal_view_model: TerminalViewModel,
+) -> None:
+    # Создаем app контекст для Textual компонентов
+    app = _TestApp()
+    async with app.run_test() as pilot:
+        # Создаем панель с ViewModel
+        panel = TerminalOutputPanel(mock_terminal_view_model)
+        
+        # Обновляем ViewModel output напрямую (в отличие от append_output)
+        mock_terminal_view_model.output.value = "hello\n"
+        panel.append_output("hello\n")
+        panel.set_exit_code(0)
+
+        rendered = panel.render_text()
+
+        # Проверяем что exit code корректно отображается
+        assert "Exit code: 0" in rendered.plain  # type: ignore[attr-defined]

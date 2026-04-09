@@ -49,9 +49,9 @@ class TerminalViewModel(BaseViewModel):
         super().__init__(event_bus, logger)
         
         # Observable свойства для состояния терминала
-        self._output = Observable("")
-        self._has_output = Observable(False)
-        self._is_running = Observable(False)
+        self._output: Observable[str] = Observable("")
+        self._has_output: Observable[bool] = Observable(False)
+        self._is_running: Observable[bool] = Observable(False)
 
     @property
     def output(self) -> Observable:

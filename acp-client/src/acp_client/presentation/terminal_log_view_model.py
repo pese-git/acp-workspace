@@ -51,9 +51,9 @@ class TerminalLogViewModel(BaseViewModel):
         """
         super().__init__(event_bus, logger)
         # Список записей лога терминала
-        self._log_entries = Observable([])
+        self._log_entries: Observable[list[str]] = Observable([])
         # Видимо ли модальное окно
-        self._is_visible = Observable(False)
+        self._is_visible: Observable[bool] = Observable(False)
     
     @property
     def log_entries(self) -> Observable:

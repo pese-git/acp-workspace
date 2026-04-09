@@ -46,8 +46,8 @@ class PlanViewModel(BaseViewModel):
         super().__init__(event_bus, logger)
         
         # Observable свойства
-        self._plan_text = Observable("")
-        self._has_plan = Observable(False)
+        self._plan_text: Observable[str] = Observable("")
+        self._has_plan: Observable[bool] = Observable(False)
 
     @property
     def plan_text(self) -> Observable:

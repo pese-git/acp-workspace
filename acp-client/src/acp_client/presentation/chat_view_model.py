@@ -68,12 +68,12 @@ class ChatViewModel(BaseViewModel):
         self.coordinator = coordinator
 
         # Observable свойства
-        self.messages = Observable([])
-        self.tool_calls = Observable([])
-        self.is_streaming = Observable(False)
-        self.pending_permissions = Observable([])
-        self.streaming_text = Observable("")
-        self.last_stop_reason = Observable(None)
+        self.messages: Observable[list[Any]] = Observable([])
+        self.tool_calls: Observable[list[Any]] = Observable([])
+        self.is_streaming: Observable[bool] = Observable(False)
+        self.pending_permissions: Observable[list[Any]] = Observable([])
+        self.streaming_text: Observable[str] = Observable("")
+        self.last_stop_reason: Observable[str | None] = Observable(None)
 
         # Observable команды
         self.send_prompt_cmd = ObservableCommand(self._send_prompt)

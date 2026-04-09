@@ -61,18 +61,18 @@ class UIViewModel(BaseViewModel):
         super().__init__(event_bus, logger)
 
         # Observable свойства
-        self.connection_status = Observable(ConnectionStatus.DISCONNECTED)
-        self.is_loading = Observable(False)
-        self.error_message = Observable(None)
-        self.info_message = Observable(None)
-        self.warning_message = Observable(None)
-        self.active_modal = Observable(None)  # Тип активного модала или None
-        self.modal_data = Observable({})  # Данные для модального окна
+        self.connection_status: Observable[ConnectionStatus] = Observable(ConnectionStatus.DISCONNECTED)
+        self.is_loading: Observable[bool] = Observable(False)
+        self.error_message: Observable[str | None] = Observable(None)
+        self.info_message: Observable[str | None] = Observable(None)
+        self.warning_message: Observable[str | None] = Observable(None)
+        self.active_modal: Observable[str | None] = Observable(None)  # Тип активного модала или None
+        self.modal_data: Observable[dict[str, Any]] = Observable({})  # Данные для модального окна
 
         # Флаги для offline режима
-        self.is_offline = Observable(False)
-        self.retry_count = Observable(0)
-        self.auto_reconnect_enabled = Observable(True)
+        self.is_offline: Observable[bool] = Observable(False)
+        self.retry_count: Observable[int] = Observable(0)
+        self.auto_reconnect_enabled: Observable[bool] = Observable(True)
 
         # Подписываемся на события (если EventBus доступен)
         try:

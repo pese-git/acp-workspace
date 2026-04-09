@@ -44,11 +44,11 @@ class FileSystemViewModel(BaseViewModel):
         """
         super().__init__(event_bus, logger)
         # Корневой путь файлового дерева
-        self._root_path = Observable(None)
+        self._root_path: Observable[Path | None] = Observable(None)
         # Выбранный путь в дереве
-        self._selected_path = Observable(None)
+        self._selected_path: Observable[Path | None] = Observable(None)
         # Статус загрузки дерева
-        self._is_loading = Observable(False)
+        self._is_loading: Observable[bool] = Observable(False)
     
     @property
     def root_path(self) -> Observable:
