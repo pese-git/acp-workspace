@@ -97,9 +97,23 @@ class ChatView(VerticalScroll):
         Args:
             text: Новый streaming текст
         """
+        # Trace логи в начале метода
+        self._logger.info(
+            "ChatView._on_streaming_text_changed CALLED",
+            text_length=len(text),
+            text_preview=text[:50] if text else "",
+        )
+        
         self._logger.debug("on_streaming_text_changed", text=text[:50] if text else "", 
                           text_length=len(text))
         self._update_display()
+        
+        # Trace лог в конце метода для подтверждения завершения
+        self._logger.info(
+            "ChatView._on_streaming_text_changed COMPLETED",
+            text_length=len(text),
+            method_finished=True,
+        )
 
     def _update_display(self) -> None:
         """Обновить отображение чата на основе текущего состояния."""
@@ -130,29 +144,35 @@ class ChatView(VerticalScroll):
         """Отобразить одно сообщение.
         
         Args:
-            message: Объект сообщения (dict с ключами type и content)
+            message: Объект сообщения (dict с ключами role и content)
         """
         if self._content_container is None:
             return
             
-        # Извлекаем тип и содержимое из сообщения
+        # Извлекаем роль и содержимое из сообщения
         if isinstance(message, dict):
-            msg_type: str = str(message.get("type", "unknown"))  # type: ignore[arg-type]
-            content: str = str(message.get("content", ""))  # type: ignore[arg-type]
+            # Поддерживаем оба варианта: "role" (предпочтительно) и "type" (для совместимости)
+            # Кастируем как Dict[str, Any] для правильной типизации
+            msg_dict = dict(message)  # type: ignore[arg-type]
+            msg_role_value = msg_dict.get("role")
+            if msg_role_value is None:
+                msg_role_value = msg_dict.get("type", "unknown")
+            msg_role: str = str(msg_role_value)
+            content: str = str(msg_dict.get("content", ""))
             
-            # Форматируем сообщение в зависимости от типа
-            if msg_type == "user":
+            # Форматируем сообщение в зависимости от роли с использованием Rich разметки
+            if msg_role == "user":
                 formatted = f"[bold blue]Ты:[/bold blue] {content}"
-            elif msg_type == "assistant":
+            elif msg_role == "assistant":
                 formatted = f"[bold green]Агент:[/bold green] {content}"
-            elif msg_type == "system":
+            elif msg_role == "system":
                 formatted = f"[bold yellow]Система:[/bold yellow] {content}"
             else:
                 formatted = content
         else:
             formatted = str(message)
         
-        # Монтируем виджет с сообщением в контейнер, используя timestamp для уникальности
+        # Монтируем виджет с сообщением в контейнер, используя timestamp для уникальности ID
         message_widget = Static(formatted, id=f"msg_{time.time_ns()}", classes="message")
         self._content_container.mount(message_widget)
 
@@ -198,7 +218,8 @@ class ChatView(VerticalScroll):
         """
         if self.chat_vm is not None:
             messages = self.chat_vm.messages.value.copy()
-            messages.append({"type": "assistant", "content": message})
+            # Используем "role" вместо "type" для унификации структуры
+            messages.append({"role": "assistant", "content": message})
             self.chat_vm.messages.value = messages
         else:
             # Fallback для случаев без ViewModel
@@ -222,7 +243,8 @@ class ChatView(VerticalScroll):
         """
         if self.chat_vm is not None:
             messages = self.chat_vm.messages.value.copy()
-            messages.append({"type": "user", "content": message})
+            # Используем "role" для унификации со структурой ChatViewModel.add_message()
+            messages.append({"role": "user", "content": message})
             self.chat_vm.messages.value = messages
 
     def add_system_message(self, message: str) -> None:
@@ -233,7 +255,8 @@ class ChatView(VerticalScroll):
         """
         if self.chat_vm is not None:
             messages = self.chat_vm.messages.value.copy()
-            messages.append({"type": "system", "content": message})
+            # Используем "role" для унификации со структурой ChatViewModel.add_message()
+            messages.append({"role": "system", "content": message})
             self.chat_vm.messages.value = messages
 
     def append_agent_chunk(self, text: str) -> None:
@@ -258,7 +281,8 @@ class ChatView(VerticalScroll):
     def finish_agent_message(self) -> None:
         """Обозначить окончание агентского сообщения.
         
-        Используется для маркировки конца streaming сообщения от агента.
+        Используется для маркировки конца streaming сообщения от агента и добавления
+        его в историю сообщений.
         """
         if self.chat_vm is not None:
             # Сохраняем streaming текст в messages перед сбросом
@@ -268,8 +292,9 @@ class ChatView(VerticalScroll):
             
             if streaming_text:
                 # Добавляем накопленный streaming текст в историю сообщений
+                # Используем "role" для унификации со структурой ChatViewModel.add_message()
                 messages = self.chat_vm.messages.value.copy()
-                messages.append({"type": "assistant", "content": streaming_text})
+                messages.append({"role": "assistant", "content": streaming_text})
                 self.chat_vm.messages.value = messages
                 self._logger.debug("streaming_text_saved_to_messages", 
                                  text_length=len(streaming_text))
