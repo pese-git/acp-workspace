@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
@@ -17,7 +18,8 @@ import structlog
 
 from acp_client.domain import TransportService
 from acp_client.infrastructure.message_parser import MessageParser
-from acp_client.transport import ACPClientWSSession
+from acp_client.infrastructure.transport import WebSocketTransport
+from acp_client.messages import ACPMessage
 
 
 class ACPTransportService(TransportService):
@@ -44,36 +46,51 @@ class ACPTransportService(TransportService):
         self.host = host
         self.port = port
         self.parser = parser or MessageParser()
-        self._session: ACPClientWSSession | None = None
+        # Инициализируем транспорт для соединения
+        self._transport: WebSocketTransport | None = None
         self._logger = structlog.get_logger("acp_transport_service")
     
     async def connect(self) -> None:
         """Устанавливает соединение с сервером.
         
-        Создает WebSocket сессию и инициализирует её.
+        Создает WebSocket транспорт и открывает соединение.
         
         Raises:
-            TransportError: При ошибке подключения
+            RuntimeError: При ошибке подключения
         """
-        if self._session is not None:
-            self._logger.warning("already_connected")
+        if self.is_connected():
+            self._logger.warning("connection_already_exists", host=self.host, port=self.port)
             return
         
-        # TODO: Создать сессию с адресом сервера
-        # Пока это заглушка для того, чтобы не ломать существующий код
-        self._logger.info("connected_to_server", host=self.host, port=self.port)
+        try:
+            # Создаем новый транспорт с заданными параметрами
+            self._transport = WebSocketTransport(host=self.host, port=self.port)
+            # Открываем соединение через context manager
+            self._transport = await self._transport.__aenter__()
+            self._logger.info("connected_to_server", host=self.host, port=self.port)
+        except Exception as e:
+            self._transport = None
+            self._logger.error("connection_failed", host=self.host, port=self.port, error=str(e))
+            msg = f"Failed to connect to {self.host}:{self.port}: {e}"
+            raise RuntimeError(msg) from e
     
     async def disconnect(self) -> None:
         """Разрывает соединение с сервером.
         
-        Закрывает WebSocket сессию и освобождает ресурсы.
+        Закрывает WebSocket транспорт и освобождает ресурсы.
         """
-        if self._session is None:
+        if not self.is_connected():
             return
         
-        # TODO: Закрыть сессию
-        self._session = None
-        self._logger.info("disconnected_from_server")
+        try:
+            # Закрываем транспорт через __aexit__
+            if self._transport is not None:
+                await self._transport.__aexit__(None, None, None)
+        except Exception as e:
+            self._logger.warning("disconnect_error", error=str(e))
+        finally:
+            self._transport = None
+            self._logger.info("disconnected_from_server")
     
     async def send(self, message: dict[str, Any]) -> None:
         """Отправляет сообщение на сервер.
@@ -82,16 +99,26 @@ class ACPTransportService(TransportService):
             message: JSON-RPC сообщение для отправки
         
         Raises:
-            TransportError: При ошибке отправки
+            RuntimeError: При ошибке отправки
         """
         if not self.is_connected():
             msg = "Not connected to server"
             self._logger.error("not_connected")
             raise RuntimeError(msg)
         
-        self._logger.debug("sending_message", message_id=message.get("id"))
+        message_id = message.get("id")
+        self._logger.debug("sending_message", message_id=message_id)
         
-        # TODO: Отправить через session
+        try:
+            # Преобразуем сообщение в JSON и отправляем через транспорт
+            json_message = json.dumps(message)
+            assert self._transport is not None
+            await self._transport.send_str(json_message)
+            self._logger.debug("message_sent", message_id=message_id)
+        except Exception as e:
+            self._logger.error("send_failed", message_id=message_id, error=str(e))
+            msg = f"Failed to send message: {e}"
+            raise RuntimeError(msg) from e
     
     async def receive(self) -> dict[str, Any]:
         """Получает одно сообщение с сервера.
@@ -102,7 +129,7 @@ class ACPTransportService(TransportService):
             JSON-RPC сообщение из сервера
         
         Raises:
-            TransportError: При ошибке получения
+            RuntimeError: При ошибке получения
         """
         if not self.is_connected():
             msg = "Not connected to server"
@@ -111,8 +138,17 @@ class ACPTransportService(TransportService):
         
         self._logger.debug("waiting_for_message")
         
-        # TODO: Получить через session
-        return {}
+        try:
+            # Получаем текстовое сообщение из транспорта и парсим JSON
+            assert self._transport is not None
+            json_message = await self._transport.receive_text()
+            message = json.loads(json_message)
+            self._logger.debug("message_received", message_id=message.get("id"))
+            return message
+        except Exception as e:
+            self._logger.error("receive_failed", error=str(e))
+            msg = f"Failed to receive message: {e}"
+            raise RuntimeError(msg) from e
     
     async def listen(self) -> AsyncIterator[dict[str, Any]]:  # type: ignore[override]
         """Слушает входящие сообщения с сервера.
@@ -130,10 +166,22 @@ class ACPTransportService(TransportService):
         
         self._logger.info("listening_for_messages")
         
-        # TODO: Реализовать слушание уведомлений
-        # Пока возвращаем пустой итератор
-        return
-        yield  # type: ignore[unreachable]
+        try:
+            # Бесконечный цикл получения сообщений
+            while self.is_connected():
+                try:
+                    message = await self.receive()
+                    # Пропускаем пустые сообщения
+                    if message:
+                        yield message
+                except RuntimeError as e:
+                    self._logger.warning("receive_error_in_listen", error=str(e))
+                    break
+        except Exception as e:
+            self._logger.error("listen_error", error=str(e))
+            raise
+        finally:
+            self._logger.info("stopped_listening")
     
     def is_connected(self) -> bool:
         """Проверяет наличие активного соединения.
@@ -141,7 +189,7 @@ class ACPTransportService(TransportService):
         Возвращает:
             True если соединение активно и готово к использованию
         """
-        return self._session is not None
+        return self._transport is not None and self._transport.is_connected()
     
     async def request_with_callbacks(
         self,
@@ -178,11 +226,58 @@ class ACPTransportService(TransportService):
         Возвращает:
             Финальный ответ на request
         """
-        # TODO: Реализовать полный цикл с обработкой callbacks
+        if not self.is_connected():
+            msg = "Not connected to server"
+            self._logger.error("not_connected")
+            raise RuntimeError(msg)
+        
         self._logger.info(
-            "request_with_callbacks",
+            "request_with_callbacks_start",
             method=method,
             has_callbacks=any([on_update, on_permission, on_fs_read, on_fs_write]),
         )
         
-        return {}
+        try:
+            # Создаем JSON-RPC запрос
+            request = ACPMessage.request(method=method, params=params)
+            request_data = request.to_dict()
+            
+            # Отправляем запрос
+            await self.send(request_data)
+            
+            # Получаем ответы, обрабатывая промежуточные события
+            while True:
+                response_data = await self.receive()
+                response = ACPMessage.from_dict(response_data)
+                
+                # Если это session/update - обрабатываем callback
+                if response.method == "session/update" and on_update is not None:
+                    on_update(response_data)
+                    continue
+                
+                # Если это session/request_permission - обрабатываем callback
+                if response.method == "session/request_permission" and on_permission is not None:
+                    permission_response = on_permission(response_data)
+                    # Отправляем ответ на permission запрос
+                    permission_reply = ACPMessage.response(
+                        response.id,
+                        {"permission": permission_response} if permission_response else {},
+                    )
+                    await self.send(permission_reply.to_dict())
+                    continue
+                
+                # Если это ответ на наш запрос - возвращаем результат
+                if response.id == request.id:
+                    if response.error is not None:
+                        self._logger.error(
+                            "request_error",
+                            method=method,
+                            error_code=response.error.code,
+                            error_message=response.error.message,
+                        )
+                    self._logger.info("request_completed", method=method)
+                    return response_data
+                
+        except Exception as e:
+            self._logger.error("request_failed", method=method, error=str(e))
+            raise
