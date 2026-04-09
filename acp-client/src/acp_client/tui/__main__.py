@@ -9,11 +9,17 @@ from .app import run_tui_app
 
 
 def main() -> None:
-    """Запускает TUI приложение с параметрами хоста, порта и логирования."""
+    """Запускает TUI приложение с параметрами хоста, порта, рабочей директории и логирования."""
 
     parser = argparse.ArgumentParser(prog="acp-client-tui")
     parser.add_argument("--host", default=None)
     parser.add_argument("--port", default=None, type=int)
+    parser.add_argument(
+        "-cwd",
+        "--cwd",
+        default=None,
+        help="Путь к проекту (default: текущая рабочая директория)",
+    )
     parser.add_argument(
         "--log-level",
         default="INFO",
@@ -42,6 +48,7 @@ def main() -> None:
     run_tui_app(
         host=args.host,
         port=args.port,
+        cwd=args.cwd,
     )
 
 

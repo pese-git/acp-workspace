@@ -4,10 +4,11 @@
 repositories и ViewModels приложения.
 
 Пример использования:
-    >>> container = DIBootstrapper.build(host="localhost", port=8000)
-    >>> app = ACPClientApp(host="localhost", port=8000, container=container)
+    >>> container = DIBootstrapper.build(host="localhost", port=8000, cwd="/path/to/project")
+    >>> app = ACPClientApp(host="localhost", port=8000, cwd="/path/to/project", container=container)
 """
 
+import os
 from typing import Any
 
 import structlog
@@ -35,6 +36,7 @@ class DIBootstrapper:
     def build(
         host: str,
         port: int,
+        cwd: str | None = None,
         logger: Any | None = None,
     ) -> Any:
         """Собирает и конфигурирует DIContainer.
@@ -44,6 +46,7 @@ class DIBootstrapper:
         Args:
             host: Адрес сервера ACP
             port: Порт сервера ACP
+            cwd: Абсолютный путь к рабочей директории проекта (если None, используется текущая)
             logger: Logger для структурированного логирования (опционально)
 
         Returns:
@@ -55,7 +58,11 @@ class DIBootstrapper:
         if logger is None:
             logger = structlog.get_logger("di_bootstrapper")
 
-        logger.info("building_di_container", host=host, port=port)
+        # Если cwd не передан, используем текущую рабочую директорию
+        if cwd is None:
+            cwd = os.getcwd()
+
+        logger.info("building_di_container", host=host, port=port, cwd=cwd)
 
         try:
             builder = ContainerBuilder()

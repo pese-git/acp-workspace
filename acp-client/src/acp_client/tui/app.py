@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import structlog
@@ -64,14 +65,32 @@ class ACPClientApp(App[None]):
 
     CSS_PATH = str(Path(__file__).with_name("styles") / "app.tcss")
 
-    def __init__(self, *, host: str, port: int) -> None:
+    def __init__(self, *, host: str, port: int, cwd: str | None = None) -> None:
         """Инициализирует приложение с Clean Architecture.
         
         Все компоненты инициализируются через DI контейнер.
+        
+        Args:
+            host: Адрес сервера ACP
+            port: Порт сервера ACP
+            cwd: Путь к проекту (если None, используется текущая рабочая директория)
         """
         super().__init__()
         self._host = host
         self._port = port
+        # Если cwd не передан, используем текущую директорию
+        # Преобразуем в абсолютный путь и проверяем существование
+        cwd = (
+            os.getcwd()
+            if cwd is None
+            else os.path.abspath(os.path.expanduser(cwd))
+        )
+        
+        # Проверяем что директория существует
+        if not os.path.exists(cwd) or not os.path.isdir(cwd):
+            raise ValueError(f"Путь {cwd} не является доступной директорией")
+        
+        self._cwd = cwd
         self._config_store = TUIConfigStore()
         self._app_logger = structlog.get_logger("acp_client.tui.app")
         
@@ -83,9 +102,10 @@ class ACPClientApp(App[None]):
             self._container = DIBootstrapper.build(
                 host=host,
                 port=port,
+                cwd=cwd,
                 logger=self._app_logger,
             )
-            self._app_logger.info("di_container_built_successfully")
+            self._app_logger.info("di_container_built_successfully", cwd=cwd)
         except Exception as e:
             self._app_logger.error(
                 "failed_to_build_di_container",
@@ -123,9 +143,10 @@ class ACPClientApp(App[None]):
         with Horizontal(id="body"):
             with Vertical(id="sidebar-column"):
                 yield Sidebar(self._session_vm)
+                # Передаем cwd в FileTree для отображения структуры проекта
                 yield FileTree(
                     filesystem_vm=self._filesystem_vm,
-                    root_path="/",
+                    root_path=self._cwd,
                 )
             with Vertical(id="main-column"):
                 yield ChatView(self._chat_vm)
@@ -189,9 +210,14 @@ class ACPClientApp(App[None]):
 
     def action_new_session(self) -> None:
         """Создает новую сессию по горячей клавише Ctrl+N."""
-        self._app_logger.info("new_session_requested")
+        self._app_logger.info("new_session_requested", cwd=self._cwd)
+        # Передаем cwd при создании новой сессии для инициализации рабочей директории
         self.run_worker(
-            self._session_vm.create_session_cmd.execute(self._host, self._port),
+            self._session_vm.create_session_cmd.execute(
+                self._host,
+                self._port,
+                cwd=self._cwd,
+            ),
             exclusive=False
         )
 
@@ -250,8 +276,19 @@ class ACPClientApp(App[None]):
         self._app_logger.info("app_unmounted")
 
 
-def run_tui_app(*, host: str | None = None, port: int | None = None) -> None:
-    """Запускает TUI приложение с параметрами подключения."""
+def run_tui_app(
+    *,
+    host: str | None = None,
+    port: int | None = None,
+    cwd: str | None = None,
+) -> None:
+    """Запускает TUI приложение с параметрами подключения и рабочей директории.
+    
+    Args:
+        host: Адрес сервера ACP (если None, используется значение по умолчанию)
+        port: Порт сервера ACP (если None, используется значение по умолчанию)
+        cwd: Путь к проекту (если None, используется текущая рабочая директория)
+    """
     resolved_host, resolved_port = resolve_tui_connection(host=host, port=port)
-    app = ACPClientApp(host=resolved_host, port=resolved_port)
+    app = ACPClientApp(host=resolved_host, port=resolved_port, cwd=cwd)
     app.run()
