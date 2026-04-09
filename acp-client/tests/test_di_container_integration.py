@@ -297,12 +297,10 @@ class TestDIContainerViewModelIntegration:
 class TestACPClientAppViewModelIntegration:
     """Тесты для интеграции ViewModels с ACPClientApp (мок тесты)."""
 
-    @patch('acp_client.tui.app.ACPConnectionManager')
     @patch('acp_client.tui.app.TUIConfigStore')
     def test_app_initializes_container(
         self,
         mock_config_store: MagicMock,
-        mock_connection: MagicMock,
     ) -> None:
         """ACPClientApp инициализирует DIContainer в __init__."""
         from acp_client.tui.app import ACPClientApp
@@ -316,12 +314,10 @@ class TestACPClientAppViewModelIntegration:
         assert hasattr(app, '_container')
         assert isinstance(app._container, DIContainer)
 
-    @patch('acp_client.tui.app.ACPConnectionManager')
     @patch('acp_client.tui.app.TUIConfigStore')
     def test_app_registers_all_viewmodels(
         self,
         mock_config_store: MagicMock,
-        mock_connection: MagicMock,
     ) -> None:
         """ACPClientApp регистрирует все ViewModels в контейнере."""
         from acp_client.tui.app import ACPClientApp
@@ -339,12 +335,10 @@ class TestACPClientAppViewModelIntegration:
         assert isinstance(session_vm, SessionViewModel)
         assert isinstance(chat_vm, ChatViewModel)
 
-    @patch('acp_client.tui.app.ACPConnectionManager')
     @patch('acp_client.tui.app.TUIConfigStore')
     def test_app_stores_ui_viewmodel(
         self,
         mock_config_store: MagicMock,
-        mock_connection: MagicMock,
     ) -> None:
         """ACPClientApp сохраняет ссылку на UIViewModel в __init__."""
         from acp_client.tui.app import ACPClientApp
@@ -357,12 +351,10 @@ class TestACPClientAppViewModelIntegration:
         assert hasattr(app, '_ui_vm')
         assert isinstance(app._ui_vm, UIViewModel)
 
-    @patch('acp_client.tui.app.ACPConnectionManager')
     @patch('acp_client.tui.app.TUIConfigStore')
     def test_app_viewmodels_are_singletons(
         self,
         mock_config_store: MagicMock,
-        mock_connection: MagicMock,
     ) -> None:
         """ViewModels в ACPClientApp остаются одинаковыми при повторном запросе."""
         from acp_client.tui.app import ACPClientApp

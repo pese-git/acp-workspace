@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from typing import Any, Protocol
 
 import structlog
@@ -110,6 +111,9 @@ class WebSocketTransport:
     async def __aenter__(self) -> WebSocketTransport:
         """Открывает WebSocket соединение и возвращает сам транспорт.
 
+        ВАЖНО: Если вызывается повторно на том же объекте (для переподключения),
+        закрывает старую сессию перед созданием новой.
+
         Returns:
             Текущий экземпляр транспорта (self)
 
@@ -118,14 +122,36 @@ class WebSocketTransport:
         """
         url = f"ws://{self.host}:{self.port}{self.path}"
         try:
+            # КРИТИЧНАЯ ЗАЩИТА: Закрываем старую сессию перед переподключением
+            # Это предотвращает утечку ресурсов при повторном вызове __aenter__()
+            if self._http_session is not None:
+                try:
+                    await self._http_session.close()
+                    self.logger.debug("old_http_session_closed")
+                except Exception as e:
+                    self.logger.warning("error_closing_old_session", error=str(e))
+                self._http_session = None
+            
+            # Если есть открытое WebSocket - закрываем его
+            if self._ws is not None:
+                try:
+                    await self._ws.close()
+                    self.logger.debug("old_websocket_closed")
+                except Exception as e:
+                    self.logger.warning("error_closing_old_websocket", error=str(e))
+                self._ws = None
+            
+            # Создаем новую сессию и подключаемся
             self._http_session = ClientSession()
             self._ws = await self._http_session.ws_connect(url)
             self.logger.debug("websocket_connected", url=url)
         except Exception as e:
             # Очищаем ресурсы в случае ошибки
             if self._http_session is not None:
-                await self._http_session.close()
+                with suppress(Exception):
+                    await self._http_session.close()
                 self._http_session = None
+            self._ws = None
             msg = f"Failed to connect to WebSocket at {url}: {e}"
             self.logger.error("websocket_connection_failed", error=str(e), url=url)
             raise RuntimeError(msg) from e
@@ -218,4 +244,12 @@ class WebSocketTransport:
         Returns:
             True если соединение активно, False иначе
         """
-        return self._ws is not None and not self._ws.is_closed()
+        connected = self._ws is not None and not self._ws.closed
+        # Логируем только при обнаружении закрытого соединения для отладки disconnect проблем
+        if not connected and self._ws is not None:
+            self.logger.debug(
+                "connection_check_failed",
+                ws_exists=self._ws is not None,
+                ws_closed=self._ws.closed if self._ws else None
+            )
+        return connected

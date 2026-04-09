@@ -16,6 +16,8 @@
 from __future__ import annotations
 
 import logging
+import logging.handlers
+from pathlib import Path
 from typing import Any, Literal, Protocol
 
 import structlog
@@ -43,6 +45,7 @@ class Logger(Protocol):
 
 def setup_logging(
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO",
+    log_file: str | None = None,
 ) -> None:
     """Инициализирует структурированное логирование для клиента.
 
@@ -51,25 +54,45 @@ def setup_logging(
     - Форматирование времени в ISO 8601
     - Вывод только в стандартный logging Python (без stdout)
     - Стандартное логирование Python как fallback
+    - Опциональное логирование в файл для отладки
 
     Args:
         level: Уровень логирования (по умолчанию INFO)
+        log_file: Путь к файлу логов (по умолчанию ./acp_client.log)
 
     Пример:
-        setup_logging(level="DEBUG")
+        setup_logging(level="DEBUG", log_file="/tmp/acp_client.log")
         logger = structlog.get_logger(__name__)
         logger.debug("test_message", key="value")
     """
-    # Стандартное логирование Python как fallback (без вывода в stdout)
-    # handlers=[] означает, что логи не выводятся в консоль
+    # Создаем список обработчиков для логирования
+    handlers_list: list[logging.Handler] = []
+    
+    # Добавляем файловый логер если указан путь
+    if log_file is not None:
+        # Создаем директорию для логов если её нет
+        log_path = Path(log_file)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Файловый логер сротацией (максимум 5 файлов по 10MB каждый)
+        file_handler = logging.handlers.RotatingFileHandler(
+            filename=str(log_path),
+            maxBytes=10 * 1024 * 1024,  # 10MB
+            backupCount=5,  # Хранить 5 файлов (текущий + 4 архива)
+        )
+        file_handler.setFormatter(logging.Formatter("%(message)s"))
+        handlers_list.append(file_handler)
+    
+    # Стандартное логирование Python как fallback
+    # Если нет файлового логера - логи сбрасываются в никуда
     logging.basicConfig(
         format="%(message)s",
-        handlers=[],
+        handlers=handlers_list,
         level=getattr(logging, level),
     )
 
     # Structlog конфигурация с использованием stdlib logger factory
-    # для интеграции с стандартным logging без вывода в консоль
+    # для интеграции с стандартным logging
     structlog.configure(
         processors=[
             # Добавляем текущее время
@@ -85,8 +108,7 @@ def setup_logging(
             ),
         ],
         context_class=dict,
-        # Используем StandardLibLoggerFactory вместо PrintLoggerFactory
-        # для записи логов через стандартный logging, а не в stdout
+        # Используем StandardLibLoggerFactory для записи логов через стандартный logging
         logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=True,
     )

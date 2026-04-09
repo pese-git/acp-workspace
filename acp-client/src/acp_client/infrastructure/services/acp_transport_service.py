@@ -28,6 +28,11 @@ class ACPTransportService(TransportService):
     Оборачивает WebSocket транспорт и предоставляет чистый interface
     для отправки/получения сообщений. Используется Application слоем
     через Use Cases.
+    
+    Поддерживает async context manager для правильного управления жизненным циклом:
+        async with ACPTransportService(host, port) as service:
+            await service.connect()
+            await service.send(message)
     """
     
     def __init__(
@@ -48,27 +53,65 @@ class ACPTransportService(TransportService):
         self.parser = parser or MessageParser()
         # Инициализируем транспорт для соединения
         self._transport: WebSocketTransport | None = None
+        # Сохраняем server capabilities после инициализации
+        self._server_capabilities: dict[str, Any] | None = None
         self._logger = structlog.get_logger("acp_transport_service")
+    
+    async def __aenter__(self) -> ACPTransportService:
+        """Входит в контекст manager для управления жизненным циклом.
+        
+        Возвращает:
+            Текущий экземпляр ACPTransportService (self)
+        """
+        self._logger.debug("service_context_entering")
+        return self
+    
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """Выходит из контекста manager и закрывает соединение.
+        
+        Гарантирует очистку ресурсов при выходе из контекста,
+        даже если произошло исключение.
+        
+        Args:
+            exc_type: Тип исключения (если оно возникло)
+            exc_val: Значение исключения
+            exc_tb: Traceback исключения
+        """
+        self._logger.debug("service_context_exiting")
+        try:
+            await self.disconnect()
+        except Exception as e:
+            self._logger.warning("error_in_context_exit", error=str(e))
     
     async def connect(self) -> None:
         """Устанавливает соединение с сервером.
         
-        Создает WebSocket транспорт и открывает соединение.
+        Создает WebSocket транспорт (если его еще нет) и открывает соединение.
+        Переиспользует существующий транспорт для переподключения.
+        Соединение остается открытым и должно быть закрыто явно через disconnect().
         
         Raises:
             RuntimeError: При ошибке подключения
         """
         if self.is_connected():
-            self._logger.warning("connection_already_exists", host=self.host, port=self.port)
+            self._logger.debug("already_connected", host=self.host, port=self.port)
             return
         
         try:
-            # Создаем новый транспорт с заданными параметрами
-            self._transport = WebSocketTransport(host=self.host, port=self.port)
-            # Открываем соединение через context manager
-            self._transport = await self._transport.__aenter__()
+            # Создаем транспорт ТОЛЬКО если его еще нет
+            # Это позволяет переиспользовать транспорт при переподключении
+            # и избежать утечек ресурсов
+            if self._transport is None:
+                self._logger.debug("creating_new_transport", host=self.host, port=self.port)
+                self._transport = WebSocketTransport(host=self.host, port=self.port)
+            
+            # Входим в context manager для открытия соединения
+            # Вызов __aenter__() устанавливает _ws и _http_session
+            # При переподключении это переиспользует существующий объект
+            await self._transport.__aenter__()
             self._logger.info("connected_to_server", host=self.host, port=self.port)
         except Exception as e:
+            # При ошибке очищаем ссылку на транспорт чтобы создать новый при следующей попытке
             self._transport = None
             self._logger.error("connection_failed", host=self.host, port=self.port, error=str(e))
             msg = f"Failed to connect to {self.host}:{self.port}: {e}"
@@ -80,31 +123,41 @@ class ACPTransportService(TransportService):
         Закрывает WebSocket транспорт и освобождает ресурсы.
         """
         if not self.is_connected():
+            self._logger.debug("not_connected", host=self.host, port=self.port)
             return
         
         try:
-            # Закрываем транспорт через __aexit__
+            self._logger.debug("closing_connection", host=self.host, port=self.port)
+            # Правильно вызываем __aexit__ для корректного закрытия соединения
+            # Это завершает context manager и освобождает все ресурсы
             if self._transport is not None:
                 await self._transport.__aexit__(None, None, None)
+            self._logger.info("connection_closed", host=self.host, port=self.port)
         except Exception as e:
-            self._logger.warning("disconnect_error", error=str(e))
+            self._logger.warning("disconnect_error", error=str(e), host=self.host, port=self.port)
         finally:
             self._transport = None
-            self._logger.info("disconnected_from_server")
     
     async def send(self, message: dict[str, Any]) -> None:
         """Отправляет сообщение на сервер.
+        
+        Если соединение потеряно, автоматически переподключается.
         
         Аргументы:
             message: JSON-RPC сообщение для отправки
         
         Raises:
-            RuntimeError: При ошибке отправки
+            RuntimeError: При ошибке отправки или переподключения
         """
+        # Проверяем и восстанавливаем соединение если оно потеряно
         if not self.is_connected():
-            msg = "Not connected to server"
-            self._logger.error("not_connected")
-            raise RuntimeError(msg)
+            self._logger.warning("send_connection_lost_reconnecting")
+            try:
+                await self.connect()
+            except Exception as e:
+                msg = f"Failed to reconnect to server: {e}"
+                self._logger.error("send_reconnect_failed", error=str(e))
+                raise RuntimeError(msg) from e
         
         message_id = message.get("id")
         self._logger.debug("sending_message", message_id=message_id)
@@ -124,12 +177,14 @@ class ACPTransportService(TransportService):
         """Получает одно сообщение с сервера.
         
         Это блокирующая операция, ожидающая сообщение.
+        Если соединение потеряно, генерирует ошибку (переподключение должно
+        происходить на более высоком уровне через send()).
         
         Возвращает:
             JSON-RPC сообщение из сервера
         
         Raises:
-            RuntimeError: При ошибке получения
+            RuntimeError: При ошибке получения или потере соединения
         """
         if not self.is_connected():
             msg = "Not connected to server"
@@ -147,6 +202,8 @@ class ACPTransportService(TransportService):
             return message
         except Exception as e:
             self._logger.error("receive_failed", error=str(e))
+            # Отмечаем что соединение потеряно при ошибке приема
+            self._transport = None
             msg = f"Failed to receive message: {e}"
             raise RuntimeError(msg) from e
     
@@ -186,10 +243,60 @@ class ACPTransportService(TransportService):
     def is_connected(self) -> bool:
         """Проверяет наличие активного соединения.
         
+        Проверяет:
+        1. Существует ли ссылка на транспорт
+        2. Открыто ли WebSocket соединение (не закрыто и имеет валидный _ws объект)
+        
         Возвращает:
             True если соединение активно и готово к использованию
         """
-        return self._transport is not None and self._transport.is_connected()
+        if self._transport is None:
+            return False
+        
+        # Проверяем реальное состояние WebSocket
+        connected = self._transport.is_connected()
+        
+        # Логируем состояние для отладки
+        if not connected and self._transport is not None:
+            self._logger.debug(
+                "websocket_connection_lost",
+                host=self.host,
+                port=self.port,
+                has_transport=self._transport is not None,
+            )
+        
+        return connected
+    
+    def set_server_capabilities(self, capabilities: dict[str, Any]) -> None:
+        """Сохраняет capabilities сервера после инициализации.
+        
+        Аргументы:
+            capabilities: Словарь с возможностями сервера
+        """
+        self._server_capabilities = capabilities
+        self._logger.info("server_capabilities_saved", capabilities=capabilities)
+    
+    def get_server_capabilities(self) -> dict[str, Any]:
+        """Возвращает сохраненные capabilities сервера.
+        
+        Возвращает:
+            Словарь с возможностями сервера
+        
+        Raises:
+            RuntimeError: Если сервер не инициализирован
+        """
+        if self._server_capabilities is None:
+            msg = "Server not initialized. Call InitializeUseCase first."
+            raise RuntimeError(msg)
+        return self._server_capabilities
+    
+    def is_initialized(self) -> bool:
+        """Проверяет, была ли выполнена инициализация.
+        
+        Возвращает:
+            True если сервер инициализирован и capabilities сохранены
+        """
+        return self._server_capabilities is not None
     
     async def request_with_callbacks(
         self,
@@ -226,10 +333,15 @@ class ACPTransportService(TransportService):
         Возвращает:
             Финальный ответ на request
         """
+        # Проверяем и восстанавливаем соединение если оно потеряно
         if not self.is_connected():
-            msg = "Not connected to server"
-            self._logger.error("not_connected")
-            raise RuntimeError(msg)
+            self._logger.warning("request_with_callbacks_connection_lost_reconnecting")
+            try:
+                await self.connect()
+            except Exception as e:
+                msg = f"Failed to reconnect to server: {e}"
+                self._logger.error("request_with_callbacks_reconnect_failed", error=str(e))
+                raise RuntimeError(msg) from e
         
         self._logger.info(
             "request_with_callbacks_start",
@@ -242,7 +354,7 @@ class ACPTransportService(TransportService):
             request = ACPMessage.request(method=method, params=params)
             request_data = request.to_dict()
             
-            # Отправляем запрос
+            # Отправляем запрос (через send который имеет собственную защиту переподключения)
             await self.send(request_data)
             
             # Получаем ответы, обрабатывая промежуточные события
@@ -281,3 +393,23 @@ class ACPTransportService(TransportService):
         except Exception as e:
             self._logger.error("request_failed", method=method, error=str(e))
             raise
+    
+    def cleanup(self) -> None:
+        """Очищает ресурсы синхронно (вызывается DI контейнером).
+        
+        Это вспомогательный метод для синхронной очистки.
+        Для асинхронной очистки используйте disconnect().
+        """
+        self._logger.debug("cleanup_called")
+        # Синхронная очистка - просто отмечаем что ресурсы больше не используются
+        # Асинхронное закрытие соединения должно происходить через disconnect()
+    
+    def close(self) -> None:
+        """Закрывает ресурсы синхронно (вызывается DI контейнером).
+        
+        Это вспомогательный метод для синхронного закрытия.
+        Для асинхронного закрытия используйте disconnect().
+        """
+        self._logger.debug("close_called")
+        # Синхронное закрытие - просто отмечаем что ресурсы больше не используются
+        # Асинхронное закрытие соединения должно происходить через disconnect()

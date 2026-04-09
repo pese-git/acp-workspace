@@ -77,6 +77,8 @@ async def await_ws_response(
         # Получаем сообщение из WebSocket
         message = await ws.receive()
         if message.type != WSMsgType.TEXT:
+            # Логируем неожиданный тип сообщения для отладки disconnect проблем
+            logger.error("unexpected_ws_message_type", type=str(message.type), expected="TEXT")
             msg = f"Unexpected WebSocket response type: {message.type}"
             raise RuntimeError(msg)
 
@@ -160,6 +162,13 @@ async def perform_ws_initialize(
     while True:
         message = await ws.receive()
         if message.type != WSMsgType.TEXT:
+            # Логируем неожиданный тип сообщения при инициализации
+            logger = structlog.get_logger("acp_client.ws_initialize")
+            logger.error(
+                "unexpected_ws_message_type_in_initialize",
+                type=str(message.type),
+                expected="TEXT",
+            )
             msg = f"Unexpected WebSocket response type during initialize: {message.type}"
             raise RuntimeError(msg)
 
@@ -208,6 +217,13 @@ async def perform_ws_authenticate(
     while True:
         message = await ws.receive()
         if message.type != WSMsgType.TEXT:
+            # Логируем неожиданный тип сообщения при аутентификации
+            logger = structlog.get_logger("acp_client.ws_authenticate")
+            logger.error(
+                "unexpected_ws_message_type_in_authenticate",
+                type=str(message.type),
+                expected="TEXT",
+            )
             msg = f"Unexpected WebSocket response type during authenticate: {message.type}"
             raise RuntimeError(msg)
 
@@ -305,6 +321,8 @@ class ACPClientWSSession:
         """
 
         if self._ws is None:
+            # Логируем попытку отправки запроса при закрытой сессии
+            self.logger.error("websocket_session_not_opened", method=method)
             raise RuntimeError("WebSocket session is not opened")
 
         # Для session/* методов требуется handshake (инициализация и аутентификация)

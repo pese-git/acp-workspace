@@ -81,6 +81,36 @@ class TransportService(ABC):
         ...
     
     @abstractmethod
+    def set_server_capabilities(self, capabilities: dict[str, Any]) -> None:
+        """Сохраняет capabilities сервера после инициализации.
+        
+        Аргументы:
+            capabilities: Словарь с возможностями сервера
+        """
+        ...
+    
+    @abstractmethod
+    def get_server_capabilities(self) -> dict[str, Any]:
+        """Возвращает сохраненные capabilities сервера.
+        
+        Возвращает:
+            Словарь с возможностями сервера
+        
+        Raises:
+            RuntimeError: Если сервер не инициализирован
+        """
+        ...
+    
+    @abstractmethod
+    def is_initialized(self) -> bool:
+        """Проверяет, была ли выполнена инициализация.
+        
+        Возвращает:
+            True если сервер инициализирован и capabilities сохранены
+        """
+        ...
+    
+    @abstractmethod
     async def request_with_callbacks(
         self,
         method: str,
