@@ -55,12 +55,12 @@ class SessionViewModel(BaseViewModel):
         super().__init__(event_bus, logger)
         self.coordinator = coordinator
 
-        # Observable свойства
-        self.sessions = Observable([])
-        self.selected_session_id = Observable(None)
-        self.is_loading_sessions = Observable(False)
-        self.error_message = Observable(None)
-        self.session_count = Observable(0)
+        # Observable свойства - с явной типизацией для type checker
+        self.sessions: Observable[list[Any]] = Observable([])
+        self.selected_session_id: Observable[str | None] = Observable(None)
+        self.is_loading_sessions: Observable[bool] = Observable(False)
+        self.error_message: Observable[str | None] = Observable(None)
+        self.session_count: Observable[int] = Observable(0)
 
         # Observable команды
         self.load_sessions_cmd = ObservableCommand(self._load_sessions)

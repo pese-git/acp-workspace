@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 from acp_client.messages import PermissionOption
+from acp_client.presentation.permission_view_model import PermissionViewModel
 from acp_client.tui.components.permission_modal import PermissionModal
 
 
 def test_permission_modal_prefers_reject_once_for_default_focus() -> None:
+    mock_vm = MagicMock(spec=PermissionViewModel)
     modal = PermissionModal(
+        permission_vm=mock_vm,
         title="Permission",
         options=[
             PermissionOption(optionId="allow_1", name="Allow", kind="allow_once"),
@@ -19,7 +24,9 @@ def test_permission_modal_prefers_reject_once_for_default_focus() -> None:
 
 
 def test_permission_modal_allow_action_uses_allow_fallback() -> None:
+    mock_vm = MagicMock(spec=PermissionViewModel)
     modal = PermissionModal(
+        permission_vm=mock_vm,
         title="Permission",
         options=[PermissionOption(optionId="allow_always_1", name="Allow", kind="allow_always")],
     )
@@ -29,7 +36,9 @@ def test_permission_modal_allow_action_uses_allow_fallback() -> None:
 
 
 def test_permission_modal_reject_action_uses_reject_fallback() -> None:
+    mock_vm = MagicMock(spec=PermissionViewModel)
     modal = PermissionModal(
+        permission_vm=mock_vm,
         title="Permission",
         options=[PermissionOption(optionId="reject_always_1", name="Reject", kind="reject_always")],
     )

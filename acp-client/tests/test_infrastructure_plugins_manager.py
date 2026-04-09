@@ -186,7 +186,7 @@ class TestPluginBasics:
             di_container=DIContainer(),
             event_bus=EventBus(),
             handler_registry=HandlerRegistry(),
-            logger=None,  # type: ignore
+            logger=None,
         )
 
         await plugin.initialize(context)
@@ -205,7 +205,7 @@ class TestPluginManagerBasics:
             di_container=DIContainer(),
             event_bus=EventBus(),
             handler_registry=HandlerRegistry(),
-            logger=None,  # type: ignore
+            logger=None,
         )
         manager = PluginManager(context)
 
@@ -217,7 +217,7 @@ class TestPluginManagerBasics:
             di_container=DIContainer(),
             event_bus=EventBus(),
             handler_registry=HandlerRegistry(),
-            logger=None,  # type: ignore
+            logger=None,
         )
         manager = PluginManager(context)
         plugin = SimplePlugin()
@@ -232,7 +232,7 @@ class TestPluginManagerBasics:
             di_container=DIContainer(),
             event_bus=EventBus(),
             handler_registry=HandlerRegistry(),
-            logger=None,  # type: ignore
+            logger=None,
         )
         manager = PluginManager(context)
         plugin1 = SimplePlugin()
@@ -249,7 +249,7 @@ class TestPluginManagerBasics:
             di_container=DIContainer(),
             event_bus=EventBus(),
             handler_registry=HandlerRegistry(),
-            logger=None,  # type: ignore
+            logger=None,
         )
         manager = PluginManager(context)
 
@@ -276,7 +276,7 @@ class TestPluginInitialization:
             di_container=DIContainer(),
             event_bus=EventBus(),
             handler_registry=HandlerRegistry(),
-            logger=None,  # type: ignore
+            logger=None,
         )
         manager = PluginManager(context)
         plugin = SimplePlugin()
@@ -294,7 +294,7 @@ class TestPluginInitialization:
             di_container=DIContainer(),
             event_bus=EventBus(),
             handler_registry=HandlerRegistry(),
-            logger=None,  # type: ignore
+            logger=None,
         )
         manager = PluginManager(context)
 
@@ -318,7 +318,7 @@ class TestPluginInitialization:
             di_container=DIContainer(),
             event_bus=EventBus(),
             handler_registry=HandlerRegistry(),
-            logger=None,  # type: ignore
+            logger=None,
         )
         manager = PluginManager(context)
 
@@ -332,7 +332,7 @@ class TestPluginInitialization:
             di_container=DIContainer(),
             event_bus=EventBus(),
             handler_registry=HandlerRegistry(),
-            logger=None,  # type: ignore
+            logger=None,
         )
         manager = PluginManager(context)
         plugin = FailingPlugin()
@@ -354,7 +354,7 @@ class TestHandlerPluginIntegration:
             di_container=DIContainer(),
             event_bus=EventBus(),
             handler_registry=handler_registry,
-            logger=None,  # type: ignore
+            logger=None,
         )
         manager = PluginManager(context)
         plugin = MockHandlerPlugin()
@@ -379,7 +379,7 @@ class TestEventPluginIntegration:
             di_container=DIContainer(),
             event_bus=event_bus,
             handler_registry=HandlerRegistry(),
-            logger=None,  # type: ignore
+            logger=None,
         )
         manager = PluginManager(context)
         plugin = MockEventPlugin()
@@ -413,7 +413,7 @@ class TestPluginShutdown:
             di_container=DIContainer(),
             event_bus=EventBus(),
             handler_registry=HandlerRegistry(),
-            logger=None,  # type: ignore
+            logger=None,
         )
         manager = PluginManager(context)
         plugin = SimplePlugin()
@@ -435,7 +435,7 @@ class TestPluginShutdown:
             di_container=DIContainer(),
             event_bus=EventBus(),
             handler_registry=HandlerRegistry(),
-            logger=None,  # type: ignore
+            logger=None,
         )
         manager = PluginManager(context)
 
@@ -463,7 +463,7 @@ class TestPluginShutdown:
             di_container=DIContainer(),
             event_bus=EventBus(),
             handler_registry=HandlerRegistry(),
-            logger=None,  # type: ignore
+            logger=None,
         )
         manager = PluginManager(context)
 
@@ -509,7 +509,7 @@ class MyPlugin(Plugin):
                 di_container=DIContainer(),
                 event_bus=EventBus(),
                 handler_registry=HandlerRegistry(),
-                logger=None,  # type: ignore
+                logger=None,
             )
             manager = PluginManager(context)
 
@@ -524,7 +524,7 @@ class MyPlugin(Plugin):
             di_container=DIContainer(),
             event_bus=EventBus(),
             handler_registry=HandlerRegistry(),
-            logger=None,  # type: ignore
+            logger=None,
         )
         manager = PluginManager(context)
 
@@ -541,7 +541,7 @@ class MyPlugin(Plugin):
                 di_container=DIContainer(),
                 event_bus=EventBus(),
                 handler_registry=HandlerRegistry(),
-                logger=None,  # type: ignore
+                logger=None,
             )
             manager = PluginManager(context)
 
@@ -603,7 +603,7 @@ class SecondPlugin(Plugin):
                 di_container=DIContainer(),
                 event_bus=EventBus(),
                 handler_registry=HandlerRegistry(),
-                logger=None,  # type: ignore
+                logger=None,
             )
             manager = PluginManager(context)
 

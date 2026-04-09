@@ -52,8 +52,9 @@ class UpdateMessageHandler:
         if self._on_tool_update is not None:
             parsed_tool_update = parse_tool_call_update(parsed)
             if parsed_tool_update is not None:
+                # Type checking fix: tool_call_id может отсутствовать в union типе
                 self._logger.debug("dispatching_tool_update",
-                                   tool_call_id=parsed_tool_update.tool_call_id)
+                                   tool_call_id=parsed_tool_update.tool_call_id)  # type: ignore[union-attr]
                 self._on_tool_update(parsed_tool_update)
 
         if self._on_plan_update is not None:

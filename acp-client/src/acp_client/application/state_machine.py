@@ -220,7 +220,7 @@ class UIStateMachine:
                 self._logger.error(
                     "listener_error",
                     error=str(e),
-                    listener=listener.__name__,
+                    listener=getattr(listener, "__name__", "<unknown>"),
                 )
     
     def reset(self, initial_state: UIState = UIState.INITIALIZING) -> None:

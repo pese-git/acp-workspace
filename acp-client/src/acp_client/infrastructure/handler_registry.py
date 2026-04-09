@@ -33,6 +33,18 @@ TerminalWaitHandler = Callable[[str], int | tuple[int | None, str | None]]
 TerminalReleaseHandler = Callable[[str], None]
 TerminalKillHandler = Callable[[str], bool]
 
+# Union тип для всех обработчиков
+Handler = (
+    PermissionHandler
+    | FsReadHandler
+    | FsWriteHandler
+    | TerminalCreateHandler
+    | TerminalOutputHandler
+    | TerminalWaitHandler
+    | TerminalReleaseHandler
+    | TerminalKillHandler
+)
+
 
 class HandlerRegistry:
     """Реестр обработчиков для RPC-запросов от сервера.

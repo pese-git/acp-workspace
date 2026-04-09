@@ -138,7 +138,7 @@ class EventBus:
 
                 # Проверить, асинхронный ли это обработчик
                 if hasattr(result, "__await__"):
-                    tasks.append(result)  # type: ignore
+                    tasks.append(result)
             except Exception as e:
                 self._logger.error(
                     "handler_sync_error",

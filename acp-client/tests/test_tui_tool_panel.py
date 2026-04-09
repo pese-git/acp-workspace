@@ -108,4 +108,4 @@ def test_tool_panel_returns_latest_terminal_snapshot(
     title, terminal_id, output = snapshot
     assert title == "Run command"
     assert terminal_id == "term_9"
-    assert "done" in output.plain
+    assert "done" in output.plain  # type: ignore[attr-defined]

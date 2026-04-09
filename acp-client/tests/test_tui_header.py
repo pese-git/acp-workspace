@@ -35,7 +35,7 @@ def test_header_bar_initializes_with_ui_view_model(ui_view_model: UIViewModel) -
 def test_header_bar_displays_initial_status(header_bar: HeaderBar) -> None:
     """Проверить что HeaderBar отображает начальный статус (DISCONNECTED)."""
     # Начальный статус — DISCONNECTED, не загружается
-    assert "ACP-Client TUI | disconnected" in header_bar.render().plain
+    assert "ACP-Client TUI | disconnected" in header_bar.render().plain  # type: ignore[attr-defined]
 
 
 def test_header_bar_updates_on_connection_status_change(
@@ -46,7 +46,7 @@ def test_header_bar_updates_on_connection_status_change(
     # Изменить статус на CONNECTING
     ui_view_model.connection_status.value = ConnectionStatus.CONNECTING
     
-    rendered = header_bar.render().plain
+    rendered = header_bar.render().plain  # type: ignore[attr-defined]
     assert "connecting" in rendered
     assert "ACP-Client TUI" in rendered
 
@@ -59,7 +59,7 @@ def test_header_bar_shows_loading_indicator_when_loading(
     # Включить загрузку
     ui_view_model.is_loading.value = True
     
-    rendered = header_bar.render().plain
+    rendered = header_bar.render().plain  # type: ignore[attr-defined]
     assert "⟳" in rendered
     assert "ACP-Client TUI" in rendered
 
@@ -75,7 +75,7 @@ def test_header_bar_hides_loading_indicator_when_not_loading(
     # Потом отключить
     ui_view_model.is_loading.value = False
     
-    rendered = header_bar.render().plain
+    rendered = header_bar.render().plain  # type: ignore[attr-defined]
     assert "⟳" not in rendered
 
 
@@ -94,7 +94,7 @@ def test_header_bar_handles_multiple_status_changes(
     
     for status in statuses:
         ui_view_model.connection_status.value = status
-        rendered = header_bar.render().plain
+        rendered = header_bar.render().plain  # type: ignore[attr-defined]
         assert status.value in rendered
 
 
@@ -105,7 +105,7 @@ def test_header_bar_displays_connected_status(
     """Проверить что HeaderBar отображает CONNECTED статус."""
     ui_view_model.connection_status.value = ConnectionStatus.CONNECTED
     
-    rendered = header_bar.render().plain
+    rendered = header_bar.render().plain  # type: ignore[attr-defined]
     assert "connected" in rendered
 
 
@@ -116,5 +116,5 @@ def test_header_bar_displays_error_status(
     """Проверить что HeaderBar отображает ERROR статус."""
     ui_view_model.connection_status.value = ConnectionStatus.ERROR
     
-    rendered = header_bar.render().plain
+    rendered = header_bar.render().plain  # type: ignore[attr-defined]
     assert "error" in rendered

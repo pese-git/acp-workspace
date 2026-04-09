@@ -70,7 +70,7 @@ def test_permission_modal_shows_request(
     При вызове show_request через ViewModel, состояние должно быть
     обновлено и окно должно быть отмечено как видимое.
     """
-    modal = PermissionModal(
+    PermissionModal(
         permission_vm=permission_view_model,
         title="Test Permission",
         options=sample_options,
@@ -99,7 +99,7 @@ def test_permission_modal_updates_on_type_change(
     Когда тип разрешения изменяется через ViewModel, модальное окно
     должно обновиться и отразить новый тип.
     """
-    modal = PermissionModal(
+    PermissionModal(
         permission_vm=permission_view_model,
         title="Test Permission",
         options=sample_options,
@@ -127,7 +127,7 @@ def test_permission_modal_updates_on_resource_change(
     Когда ресурс изменяется через ViewModel, модальное окно
     должно обновиться и отразить новый ресурс.
     """
-    modal = PermissionModal(
+    PermissionModal(
         permission_vm=permission_view_model,
         title="Test Permission",
         options=sample_options,
@@ -155,7 +155,7 @@ def test_permission_modal_hides_on_close(
     Когда окно закрывается, флаг is_visible в ViewModel должен
     быть установлен в False.
     """
-    modal = PermissionModal(
+    PermissionModal(
         permission_vm=permission_view_model,
         title="Test Permission",
         options=sample_options,
@@ -180,7 +180,7 @@ def test_permission_modal_clear(
     
     При вызове clear(), все значения должны быть сброшены в исходное состояние.
     """
-    modal = PermissionModal(
+    PermissionModal(
         permission_vm=permission_view_model,
         title="Test Permission",
         options=sample_options,
@@ -276,7 +276,7 @@ def test_permission_modal_initializes_with_message(
     
     Когда сообщение не передано, оно должно быть пустым по умолчанию.
     """
-    modal = PermissionModal(
+    PermissionModal(
         permission_vm=permission_view_model,
         title="Test",
         options=sample_options,

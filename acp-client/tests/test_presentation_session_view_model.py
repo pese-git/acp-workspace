@@ -67,6 +67,7 @@ class TestSessionViewModel:
         await vm.load_sessions_cmd.execute()
         
         assert vm.is_loading_sessions.value is False
+        assert vm.error_message.value is not None
         assert "Failed to load sessions" in vm.error_message.value
 
     @pytest.mark.asyncio

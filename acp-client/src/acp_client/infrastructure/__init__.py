@@ -13,6 +13,7 @@ from .di_container import ContainerBuilder, DIContainer, DIError, Scope
 from .handler_registry import (
     FsReadHandler,
     FsWriteHandler,
+    Handler,
     HandlerRegistry,
     PermissionHandler,
     TerminalCreateHandler,
@@ -34,6 +35,7 @@ __all__ = [
     # Parsing
     "MessageParser",
     # Handlers
+    "Handler",
     "HandlerRegistry",
     "PermissionHandler",
     "FsReadHandler",

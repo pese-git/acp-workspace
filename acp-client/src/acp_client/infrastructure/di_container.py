@@ -211,7 +211,8 @@ class Registration(Generic[T]):  # noqa: UP046
         
         # Если это callable функция/factory, вызываем её
         if callable(self.implementation):
-            return cast(T, self.implementation())  # type: ignore[misc]
+            # Type checking fix: Вызов callable с неизвестной сигнатурой
+            return cast(T, self.implementation())  # type: ignore[call-top-callable]
         
         # Иначе это готовый экземпляр - возвращаем как есть
         return cast(T, self.implementation)

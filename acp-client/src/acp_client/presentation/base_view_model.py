@@ -15,7 +15,8 @@ try:
     from acp_client.domain.events import DomainEvent
 except ImportError:
     # Fallback если domain модуль еще не доступен
-    DomainEvent = Any
+    # Type checking fix: Явная аннотация типа для fallback значения
+    DomainEvent: type[Any] = Any  # type: ignore[assignment]
 
 
 class BaseViewModel:

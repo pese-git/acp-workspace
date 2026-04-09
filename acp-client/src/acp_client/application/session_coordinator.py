@@ -87,7 +87,7 @@ class SessionCoordinator:
             client_capabilities=client_capabilities,
         )
         
-        self._logger.info("creating_session", host=server_host, port=server_port)
+        self._logger.info("creating_session", host=server_host, port=server_port)  # type: ignore[arg-type]
         response = await self.create_session_use_case.execute(request)
         
         return {

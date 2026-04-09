@@ -25,9 +25,13 @@ from acp_client.messages import (
     parse_tool_call_update,
 )
 from acp_client.presentation.chat_view_model import ChatViewModel
+from acp_client.presentation.file_viewer_view_model import FileViewerViewModel
 from acp_client.presentation.filesystem_view_model import FileSystemViewModel
+from acp_client.presentation.permission_view_model import PermissionViewModel
 from acp_client.presentation.plan_view_model import PlanViewModel
 from acp_client.presentation.session_view_model import SessionViewModel
+from acp_client.presentation.terminal_log_view_model import TerminalLogViewModel
+from acp_client.presentation.terminal_view_model import TerminalViewModel
 from acp_client.presentation.ui_view_model import UIViewModel
 
 from .components import (
@@ -234,6 +238,19 @@ class ACPClientApp(App[None]):
             
             self._filesystem_vm = self._container.resolve(FileSystemViewModel)
             self._app_logger.debug("resolved_filesystem_view_model")
+            
+            # ViewModels для модальных окон
+            self._terminal_log_vm = self._container.resolve(TerminalLogViewModel)
+            self._app_logger.debug("resolved_terminal_log_view_model")
+            
+            self._file_viewer_vm = self._container.resolve(FileViewerViewModel)
+            self._app_logger.debug("resolved_file_viewer_view_model")
+            
+            self._permission_vm = self._container.resolve(PermissionViewModel)
+            self._app_logger.debug("resolved_permission_view_model")
+            
+            self._terminal_vm = self._container.resolve(TerminalViewModel)
+            self._app_logger.debug("resolved_terminal_view_model")
         except Exception as e:
             self._app_logger.error(
                 "failed_to_resolve_view_models",
@@ -263,8 +280,8 @@ class ACPClientApp(App[None]):
                 yield ChatView(self._chat_vm)
                 # Передаем PlanViewModel в PlanPanel для отображения плана
                 yield PlanPanel(self._plan_vm)
-            # Передаем ChatViewModel в ToolPanel для отображения tool calls
-            yield ToolPanel(self._chat_vm)
+            # Передаем ChatViewModel и TerminalViewModel в ToolPanel
+            yield ToolPanel(self._chat_vm, self._terminal_vm)
         with Vertical(id="bottom"):
             # Передаем ChatViewModel в PromptInput для управления вводом
             yield PromptInput(self._chat_vm)
@@ -487,7 +504,14 @@ class ACPClientApp(App[None]):
             return
 
         title, terminal_id, output = snapshot
-        self.push_screen(TerminalLogModal(title=title, terminal_id=terminal_id, output=output))
+        self.push_screen(
+            TerminalLogModal(
+                terminal_log_vm=self._terminal_log_vm,
+                title=title,
+                terminal_id=terminal_id,
+                output=output,
+            )
+        )
         self._set_connection_state(ConnectionState.CONNECTED, detail="Terminal output opened")
 
     def action_clear_chat(self) -> None:
@@ -663,7 +687,13 @@ class ACPClientApp(App[None]):
             self.query_one(ChatView).add_system_message(f"Ошибка чтения файла: {exc}")
             return
 
-        self.push_screen(FileViewerModal(file_path=str(target_path), content=content))
+        self.push_screen(
+            FileViewerModal(
+                file_viewer_vm=self._file_viewer_vm,
+                file_path=str(target_path),
+                content=content,
+            )
+        )
 
     async def _activate_session_by_id(self, session_id: str) -> None:
         """Активирует указанную сессию и синхронизирует все панели интерфейса."""
@@ -974,7 +1004,11 @@ class ACPClientApp(App[None]):
 
         tool_title = request.params.toolCall.title or request.params.toolCall.toolCallId
         title = f"Разрешить действие: {tool_title}"
-        return PermissionModal(title=title, options=request.params.options)
+        return PermissionModal(
+            permission_vm=self._permission_vm,
+            title=title,
+            options=request.params.options,
+        )
 
     def _set_runtime_state(self, new_state: str) -> None:
         """Переводит UIStateMachine в новое состояние с безопасным fallback."""

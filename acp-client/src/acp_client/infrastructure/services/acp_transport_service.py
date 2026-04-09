@@ -114,7 +114,7 @@ class ACPTransportService(TransportService):
         # TODO: Получить через session
         return {}
     
-    async def listen(self) -> AsyncIterator[dict[str, Any]]:
+    async def listen(self) -> AsyncIterator[dict[str, Any]]:  # type: ignore[override]
         """Слушает входящие сообщения с сервера.
         
         Возвращает асинхронный итератор, который выдает

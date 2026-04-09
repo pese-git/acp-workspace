@@ -14,7 +14,7 @@ T = TypeVar('T')
 logger = structlog.get_logger()
 
 
-class Observable:
+class Observable[T]:
     """Реактивное свойство с поддержкой observers.
     
     Когда значение изменяется, все подписанные observers уведомляются
@@ -33,7 +33,8 @@ class Observable:
             initial_value: Начальное значение свойства
         """
         self._value: T = initial_value
-        self._observers: list[Callable[[T], None]] = []
+        # Используем Any вместо T в списке observers чтобы избежать конфликтов типов
+        self._observers: list[Callable[[Any], None]] = []
 
     @property
     def value(self) -> T:
@@ -53,7 +54,7 @@ class Observable:
             self._value = new_value
             self._notify_observers()
 
-    def subscribe(self, observer: Callable[[T], None]) -> Callable[[], None]:
+    def subscribe(self, observer: Callable[[Any], None]) -> Callable[[], None]:
         """Подписаться на изменения значения.
         
         Args:
@@ -82,10 +83,12 @@ class Observable:
             try:
                 observer(self._value)
             except Exception as e:
+                # Используем getattr для получения имени, так как callable могут не иметь __name__
+                observer_name = getattr(observer, '__name__', repr(observer))
                 logger.exception(
                     "Error in observable observer",
                     error=str(e),
-                    observer=observer.__name__,
+                    observer=observer_name,
                 )
 
     def __repr__(self) -> str:
@@ -117,8 +120,9 @@ class ObservableCommand:
         """
         self.handler = handler
         # Observable свойства для отслеживания статуса
-        self.is_executing = Observable(False)
-        self.error = Observable(None)
+        self.is_executing: Observable[bool] = Observable(False)
+        # Observable для хранения сообщений об ошибках - может быть строка или None
+        self.error: Observable[str | None] = Observable(None)
         self.last_result: Any | None = None
 
     async def execute(self, *args: Any, **kwargs: Any) -> Any | None:

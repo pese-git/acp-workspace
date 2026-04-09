@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import MagicMock
 
+from acp_client.presentation.file_viewer_view_model import FileViewerViewModel
 from acp_client.tui.components.file_viewer import FileViewerModal
 
 
@@ -32,7 +34,12 @@ class _FakeStatic:
 
 
 def test_file_viewer_search_rebuilds_matches_and_updates_status(monkeypatch: Any) -> None:
-    viewer = FileViewerModal(file_path="/tmp/demo.py", content="alpha\nbeta\nalpha\n")
+    mock_vm = MagicMock(spec=FileViewerViewModel)
+    viewer = FileViewerModal(
+        file_viewer_vm=mock_vm,
+        file_path="/tmp/demo.py",
+        content="alpha\nbeta\nalpha\n",
+    )
     search_input = _FakeInput("alpha")
     status = _FakeStatic()
     content = _FakeStatic()
@@ -58,7 +65,12 @@ def test_file_viewer_search_rebuilds_matches_and_updates_status(monkeypatch: Any
 
 
 def test_file_viewer_move_match_cycles_positions(monkeypatch: Any) -> None:
-    viewer = FileViewerModal(file_path="/tmp/demo.py", content="alpha\nbeta\nalpha\n")
+    mock_vm = MagicMock(spec=FileViewerViewModel)
+    viewer = FileViewerModal(
+        file_viewer_vm=mock_vm,
+        file_path="/tmp/demo.py",
+        content="alpha\nbeta\nalpha\n",
+    )
     search_input = _FakeInput("alpha")
     status = _FakeStatic()
     content = _FakeStatic()

@@ -19,6 +19,7 @@ from .terminal_output import TerminalOutputPanel
 
 if TYPE_CHECKING:
     from acp_client.presentation.chat_view_model import ChatViewModel
+    from acp_client.presentation.terminal_view_model import TerminalViewModel
 
 
 class ToolPanel(Static):
@@ -36,14 +37,20 @@ class ToolPanel(Static):
         >>> chat_vm.tool_calls.value = [tool_call1, tool_call2]
     """
 
-    def __init__(self, chat_vm: ChatViewModel) -> None:
-        """Инициализирует ToolPanel с обязательным ChatViewModel.
+    def __init__(
+        self,
+        chat_vm: ChatViewModel,
+        terminal_vm: TerminalViewModel,
+    ) -> None:
+        """Инициализирует ToolPanel с обязательными ViewModels.
         
         Args:
             chat_vm: ChatViewModel для управления tool calls
+            terminal_vm: TerminalViewModel для управления output панелями
         """
         super().__init__("Инструменты: нет активных вызовов", id="tool-panel")
         self.chat_vm = chat_vm
+        self._terminal_vm = terminal_vm
         self._tool_calls: dict[str, dict[str, Any]] = {}
         
         # Подписываемся на изменения в ChatViewModel
@@ -99,7 +106,8 @@ class ToolPanel(Static):
         output_text, exit_code = self._extract_terminal_output(output_payload)
         terminal_view = previous.get("terminal_view")
         if terminal_view is None:
-            terminal_view = TerminalOutputPanel()
+            # Создаём новую панель вывода терминала с ViewModel
+            terminal_view = TerminalOutputPanel(self._terminal_vm)
         if output_text:
             terminal_view.append_output(output_text)
         if exit_code is not None:
