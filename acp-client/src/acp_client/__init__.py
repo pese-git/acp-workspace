@@ -1,6 +1,5 @@
 """ACP client implementation."""
 
-from .client import ACPClient
 from .messages import (
     AvailableCommandsUpdate,
     ConfigOptionUpdate,
@@ -23,7 +22,6 @@ from .messages import (
 )
 
 __all__ = [
-    "ACPClient",
     "SessionUpdateNotification",
     "ToolCallUpdate",
     "PlanUpdate",

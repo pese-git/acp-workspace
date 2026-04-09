@@ -1,0 +1,985 @@
+error[unknown-argument]: Argument `host` does not match any known parameter of bound method `msg`
+  --> src/acp_client/application/session_coordinator.py:90:47
+   |
+88 |         )
+89 |         
+90 |         self._logger.info("creating_session", host=server_host, port=server_port)  # type: ignore[arg-type]
+   |                                               ^^^^^^^^^^^^^^^^
+91 |         response = await self.create_session_use_case.execute(request)
+   |
+info: Union variant `bound method PrintLogger.msg(message: str) -> None` is incompatible with this call site
+info: Attempted to call union type `Unknown | (bound method PrintLogger.msg(message: str) -> None)`
+info: rule `unknown-argument` is enabled by default
+
+error[unknown-argument]: Argument `port` does not match any known parameter of bound method `msg`
+  --> src/acp_client/application/session_coordinator.py:90:65
+   |
+88 |         )
+89 |         
+90 |         self._logger.info("creating_session", host=server_host, port=server_port)  # type: ignore[arg-type]
+   |                                                                 ^^^^^^^^^^^^^^^^
+91 |         response = await self.create_session_use_case.execute(request)
+   |
+info: Union variant `bound method PrintLogger.msg(message: str) -> None` is incompatible with this call site
+info: Attempted to call union type `Unknown | (bound method PrintLogger.msg(message: str) -> None)`
+info: rule `unknown-argument` is enabled by default
+
+error[unresolved-attribute]: Attribute `request_with_callbacks` is not defined on `TransportService` in union `Unknown | TransportService`
+   --> src/acp_client/application/use_cases.py:467:37
+    |
+466 |             # Отправляем prompt через transport с обработкой callbacks
+467 |             prompt_response = await self._transport.request_with_callbacks(
+    |                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+468 |                 method="session/prompt",
+469 |                 params={
+    |
+info: rule `unresolved-attribute` is enabled by default
+
+error[call-top-callable]: Object of type `Top[(...) -> object]` is not safe to call; its signature is not known
+   --> src/acp_client/infrastructure/di_container.py:230:28
+    |
+228 |         if callable(self.implementation):
+229 |             # Type checking fix: Вызов callable с неизвестной сигнатурой
+230 |             return cast(T, self.implementation())  # type: ignore[call-top-callable]
+    |                            ^^^^^^^^^^^^^^^^^^^^^
+231 |         
+232 |         # Иначе это готовый экземпляр - возвращаем как есть
+    |
+info: This type includes all possible callables, so it cannot safely be called because there is no valid set of arguments for it
+info: Intersection element `Top[(...) -> object]` is incompatible with this call site
+info: Attempted to call intersection type `T@Registration & Top[(...) -> object]`
+info: Attempted to call union type `(Unknown & Top[(...) -> object] & ~type) | (((...) -> T@Registration) & ~type) | (T@Registration & Top[(...) -> object] & ~type)`
+info: rule `call-top-callable` is enabled by default
+
+error[invalid-method-override]: Invalid override of method `listen`
+   --> src/acp_client/infrastructure/services/acp_transport_service.py:153:15
+    |
+151 |             raise RuntimeError(msg) from e
+152 |     
+153 |     async def listen(self) -> AsyncIterator[dict[str, Any]]:  # type: ignore[override]
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Definition is incompatible with `TransportService.listen`
+154 |         """Слушает входящие сообщения с сервера.
+    |
+   ::: src/acp_client/domain/services.py:63:15
+    |
+ 62 |     @abstractmethod
+ 63 |     async def listen(self) -> AsyncIterator[dict[str, Any]]:
+    |               --------------------------------------------- `TransportService.listen` defined here
+ 64 |         """Слушает входящие сообщения с сервера.
+    |
+info: This violates the Liskov Substitution Principle
+info: rule `invalid-method-override` is enabled by default
+
+error[no-matching-overload]: No overload of bound method `get` matches arguments
+   --> src/acp_client/tui/components/chat_view.py:140:24
+    |
+138 |         # Извлекаем тип и содержимое из сообщения
+139 |         if isinstance(message, dict):
+140 |             msg_type = message.get("type", "unknown")  # type: ignore[arg-type]
+    |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+141 |             content = message.get("content", "")  # type: ignore[arg-type]
+    |
+info: First overload defined here
+    --> stdlib/builtins.pyi:3015:9
+     |
+3013 |     # Positional-only in dict, but not in MutableMapping
+3014 |     @overload  # type: ignore[override]
+3015 |     def get(self, key: _KT, default: None = None, /) -> _VT | None:
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+3016 |         """Return the value for key if key is in the dictionary, else default."""
+     |
+info: Possible overloads for bound method `get`:
+info:   (self, key: _KT@dict, default: None = None, /) -> _VT@dict | None
+info:   (self, key: _KT@dict, default: _VT@dict, /) -> _VT@dict
+info:   [_T](self, key: _KT@dict, default: _T, /) -> _VT@dict | _T
+info: rule `no-matching-overload` is enabled by default
+
+error[no-matching-overload]: No overload of bound method `get` matches arguments
+   --> src/acp_client/tui/components/chat_view.py:141:23
+    |
+139 |         if isinstance(message, dict):
+140 |             msg_type = message.get("type", "unknown")  # type: ignore[arg-type]
+141 |             content = message.get("content", "")  # type: ignore[arg-type]
+    |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^
+142 |             
+143 |             # Форматируем сообщение в зависимости от типа
+    |
+info: First overload defined here
+    --> stdlib/builtins.pyi:3015:9
+     |
+3013 |     # Positional-only in dict, but not in MutableMapping
+3014 |     @overload  # type: ignore[override]
+3015 |     def get(self, key: _KT, default: None = None, /) -> _VT | None:
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+3016 |         """Return the value for key if key is in the dictionary, else default."""
+     |
+info: Possible overloads for bound method `get`:
+info:   (self, key: _KT@dict, default: None = None, /) -> _VT@dict | None
+info:   (self, key: _KT@dict, default: _VT@dict, /) -> _VT@dict
+info:   [_T](self, key: _KT@dict, default: _T, /) -> _VT@dict | _T
+info: rule `no-matching-overload` is enabled by default
+
+error[invalid-method-override]: Invalid override of method `remove`
+    --> src/acp_client/tui/components/file_tree.py:254:9
+     |
+ 252 |         return any(changed_path.is_relative_to(path) for changed_path in self._changed_paths)
+ 253 |     
+ 254 |     def remove(self) -> None:
+     |         ^^^^^^^^^^^^^^^^^^^^ Definition is incompatible with `Widget.remove`
+ 255 |         """Удалить компонент и очистить ресурсы.
+     |
+    ::: .venv/lib/python3.12/site-packages/textual/widget.py:4376:9
+     |
+4374 |         return self
+4375 |
+4376 |     def remove(self) -> AwaitRemove:
+     |         --------------------------- `Widget.remove` defined here
+4377 |         """Remove the Widget from the DOM (effectively deleting it).
+     |
+info: This violates the Liskov Substitution Principle
+info: rule `invalid-method-override` is enabled by default
+
+error[call-non-callable]: Object of type `None` is not callable
+   --> src/acp_client/tui/navigation/queue.py:119:21
+    |
+117 |             try:
+118 |                 result = await asyncio.wait_for(
+119 |                     self._executor(operation),  # type: ignore[misc]
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^
+120 |                     timeout=operation.timeout_seconds,
+121 |                 )
+    |
+info: Union variant `None` is incompatible with this call site
+info: Attempted to call union type `((NavigationOperation, /) -> Awaitable[Any]) | None`
+info: rule `call-non-callable` is enabled by default
+
+error[missing-argument]: No argument provided for required parameter `session_coordinator` of function `register_view_models`
+  --> tests/test_di_container_integration.py:51:13
+   |
+49 |         # Без параметра координатора тоже ошибка
+50 |         with pytest.raises(TypeError):
+51 |             ViewModelFactory.register_view_models(container)  # type: ignore[call-arg]
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+52 |
+53 |     def test_register_view_models_with_coordinator(self) -> None:
+   |
+info: Parameter declared here
+  --> src/acp_client/presentation/view_model_factory.py:44:9
+   |
+42 |     def register_view_models(
+43 |         container: DIContainer,
+44 |         session_coordinator: Any,  # Обязательный параметр
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^
+45 |         event_bus: Any | None = None,
+46 |         logger: Any | None = None,
+   |
+info: rule `missing-argument` is enabled by default
+
+error[invalid-argument-type]: Argument to bound method `subscribe` is incorrect
+  --> tests/test_infrastructure_events_bus.py:46:44
+   |
+44 |             await asyncio.sleep(0)
+45 |
+46 |         bus.subscribe(SessionCreatedEvent, async_handler)
+   |                                            ^^^^^^^^^^^^^ Expected `(DomainEvent, /) -> Any`, found `def async_handler(event: SessionCreatedEvent) -> CoroutineType[Any, Any, None]`
+47 |         assert bus.subscribers_count(SessionCreatedEvent) == 1
+   |
+info: Method defined here
+  --> src/acp_client/infrastructure/events/bus.py:47:9
+   |
+45 |         self._logger = structlog.get_logger()
+46 |
+47 |     def subscribe(
+   |         ^^^^^^^^^
+48 |         self,
+49 |         event_type: type[T],
+50 |         handler: EventHandler,
+   |         --------------------- Parameter declared here
+51 |     ) -> None:
+52 |         """Подписаться на события определённого типа.
+   |
+info: rule `invalid-argument-type` is enabled by default
+
+error[invalid-argument-type]: Argument to bound method `subscribe` is incorrect
+   --> tests/test_infrastructure_events_bus.py:113:44
+    |
+111 |             called = True
+112 |
+113 |         bus.subscribe(SessionCreatedEvent, handler)
+    |                                            ^^^^^^^ Expected `(DomainEvent, /) -> Any`, found `def handler(event: SessionCreatedEvent) -> None`
+114 |
+115 |         event = SessionCreatedEvent(
+    |
+info: Method defined here
+  --> src/acp_client/infrastructure/events/bus.py:47:9
+   |
+45 |         self._logger = structlog.get_logger()
+46 |
+47 |     def subscribe(
+   |         ^^^^^^^^^
+48 |         self,
+49 |         event_type: type[T],
+50 |         handler: EventHandler,
+   |         --------------------- Parameter declared here
+51 |     ) -> None:
+52 |         """Подписаться на события определённого типа.
+   |
+info: rule `invalid-argument-type` is enabled by default
+
+error[invalid-argument-type]: Argument to bound method `subscribe` is incorrect
+   --> tests/test_infrastructure_events_bus.py:137:44
+    |
+135 |             await asyncio.sleep(0)
+136 |
+137 |         bus.subscribe(SessionCreatedEvent, handler)
+    |                                            ^^^^^^^ Expected `(DomainEvent, /) -> Any`, found `def handler(event: SessionCreatedEvent) -> CoroutineType[Any, Any, None]`
+138 |
+139 |         event = SessionCreatedEvent(
+    |
+info: Method defined here
+  --> src/acp_client/infrastructure/events/bus.py:47:9
+   |
+45 |         self._logger = structlog.get_logger()
+46 |
+47 |     def subscribe(
+   |         ^^^^^^^^^
+48 |         self,
+49 |         event_type: type[T],
+50 |         handler: EventHandler,
+   |         --------------------- Parameter declared here
+51 |     ) -> None:
+52 |         """Подписаться на события определённого типа.
+   |
+info: rule `invalid-argument-type` is enabled by default
+
+error[invalid-argument-type]: Argument to bound method `subscribe` is incorrect
+   --> tests/test_infrastructure_events_bus.py:162:44
+    |
+160 |             calls.append(2)
+161 |
+162 |         bus.subscribe(SessionCreatedEvent, handler1)
+    |                                            ^^^^^^^^ Expected `(DomainEvent, /) -> Any`, found `def handler1(event: SessionCreatedEvent) -> None`
+163 |         bus.subscribe(SessionCreatedEvent, handler2)
+    |
+info: Method defined here
+  --> src/acp_client/infrastructure/events/bus.py:47:9
+   |
+45 |         self._logger = structlog.get_logger()
+46 |
+47 |     def subscribe(
+   |         ^^^^^^^^^
+48 |         self,
+49 |         event_type: type[T],
+50 |         handler: EventHandler,
+   |         --------------------- Parameter declared here
+51 |     ) -> None:
+52 |         """Подписаться на события определённого типа.
+   |
+info: rule `invalid-argument-type` is enabled by default
+
+error[invalid-argument-type]: Argument to bound method `subscribe` is incorrect
+   --> tests/test_infrastructure_events_bus.py:163:44
+    |
+162 |         bus.subscribe(SessionCreatedEvent, handler1)
+163 |         bus.subscribe(SessionCreatedEvent, handler2)
+    |                                            ^^^^^^^^ Expected `(DomainEvent, /) -> Any`, found `def handler2(event: SessionCreatedEvent) -> None`
+164 |
+165 |         event = SessionCreatedEvent(
+    |
+info: Method defined here
+  --> src/acp_client/infrastructure/events/bus.py:47:9
+   |
+45 |         self._logger = structlog.get_logger()
+46 |
+47 |     def subscribe(
+   |         ^^^^^^^^^
+48 |         self,
+49 |         event_type: type[T],
+50 |         handler: EventHandler,
+   |         --------------------- Parameter declared here
+51 |     ) -> None:
+52 |         """Подписаться на события определённого типа.
+   |
+info: rule `invalid-argument-type` is enabled by default
+
+error[invalid-argument-type]: Argument to bound method `subscribe` is incorrect
+   --> tests/test_infrastructure_events_bus.py:190:44
+    |
+188 |             await asyncio.sleep(0.01)
+189 |
+190 |         bus.subscribe(SessionCreatedEvent, sync_handler)
+    |                                            ^^^^^^^^^^^^ Expected `(DomainEvent, /) -> Any`, found `def sync_handler(event: SessionCreatedEvent) -> None`
+191 |         bus.subscribe(SessionCreatedEvent, async_handler)
+    |
+info: Method defined here
+  --> src/acp_client/infrastructure/events/bus.py:47:9
+   |
+45 |         self._logger = structlog.get_logger()
+46 |
+47 |     def subscribe(
+   |         ^^^^^^^^^
+48 |         self,
+49 |         event_type: type[T],
+50 |         handler: EventHandler,
+   |         --------------------- Parameter declared here
+51 |     ) -> None:
+52 |         """Подписаться на события определённого типа.
+   |
+info: rule `invalid-argument-type` is enabled by default
+
+error[invalid-argument-type]: Argument to bound method `subscribe` is incorrect
+   --> tests/test_infrastructure_events_bus.py:191:44
+    |
+190 |         bus.subscribe(SessionCreatedEvent, sync_handler)
+191 |         bus.subscribe(SessionCreatedEvent, async_handler)
+    |                                            ^^^^^^^^^^^^^ Expected `(DomainEvent, /) -> Any`, found `def async_handler(event: SessionCreatedEvent) -> CoroutineType[Any, Any, None]`
+192 |
+193 |         event = SessionCreatedEvent(
+    |
+info: Method defined here
+  --> src/acp_client/infrastructure/events/bus.py:47:9
+   |
+45 |         self._logger = structlog.get_logger()
+46 |
+47 |     def subscribe(
+   |         ^^^^^^^^^
+48 |         self,
+49 |         event_type: type[T],
+50 |         handler: EventHandler,
+   |         --------------------- Parameter declared here
+51 |     ) -> None:
+52 |         """Подписаться на события определённого типа.
+   |
+info: rule `invalid-argument-type` is enabled by default
+
+error[invalid-argument-type]: Argument to bound method `subscribe` is incorrect
+   --> tests/test_infrastructure_events_bus.py:233:44
+    |
+231 |             prompt_calls.append(1)
+232 |
+233 |         bus.subscribe(SessionCreatedEvent, session_handler)
+    |                                            ^^^^^^^^^^^^^^^ Expected `(DomainEvent, /) -> Any`, found `def session_handler(event: SessionCreatedEvent) -> None`
+234 |         bus.subscribe(PromptCompletedEvent, prompt_handler)
+    |
+info: Method defined here
+  --> src/acp_client/infrastructure/events/bus.py:47:9
+   |
+45 |         self._logger = structlog.get_logger()
+46 |
+47 |     def subscribe(
+   |         ^^^^^^^^^
+48 |         self,
+49 |         event_type: type[T],
+50 |         handler: EventHandler,
+   |         --------------------- Parameter declared here
+51 |     ) -> None:
+52 |         """Подписаться на события определённого типа.
+   |
+info: rule `invalid-argument-type` is enabled by default
+
+error[invalid-argument-type]: Argument to bound method `subscribe` is incorrect
+   --> tests/test_infrastructure_events_bus.py:234:45
+    |
+233 |         bus.subscribe(SessionCreatedEvent, session_handler)
+234 |         bus.subscribe(PromptCompletedEvent, prompt_handler)
+    |                                             ^^^^^^^^^^^^^^ Expected `(DomainEvent, /) -> Any`, found `def prompt_handler(event: PromptCompletedEvent) -> None`
+235 |
+236 |         session_event = SessionCreatedEvent(
+    |
+info: Method defined here
+  --> src/acp_client/infrastructure/events/bus.py:47:9
+   |
+45 |         self._logger = structlog.get_logger()
+46 |
+47 |     def subscribe(
+   |         ^^^^^^^^^
+48 |         self,
+49 |         event_type: type[T],
+50 |         handler: EventHandler,
+   |         --------------------- Parameter declared here
+51 |     ) -> None:
+52 |         """Подписаться на события определённого типа.
+   |
+info: rule `invalid-argument-type` is enabled by default
+
+error[invalid-argument-type]: Argument to bound method `subscribe` is incorrect
+   --> tests/test_infrastructure_events_bus.py:264:44
+    |
+262 |             called.append(1)
+263 |
+264 |         bus.subscribe(SessionCreatedEvent, failing_handler)
+    |                                            ^^^^^^^^^^^^^^^ Expected `(DomainEvent, /) -> Any`, found `def failing_handler(event: SessionCreatedEvent) -> None`
+265 |         bus.subscribe(SessionCreatedEvent, working_handler)
+    |
+info: Method defined here
+  --> src/acp_client/infrastructure/events/bus.py:47:9
+   |
+45 |         self._logger = structlog.get_logger()
+46 |
+47 |     def subscribe(
+   |         ^^^^^^^^^
+48 |         self,
+49 |         event_type: type[T],
+50 |         handler: EventHandler,
+   |         --------------------- Parameter declared here
+51 |     ) -> None:
+52 |         """Подписаться на события определённого типа.
+   |
+info: rule `invalid-argument-type` is enabled by default
+
+error[invalid-argument-type]: Argument to bound method `subscribe` is incorrect
+   --> tests/test_infrastructure_events_bus.py:265:44
+    |
+264 |         bus.subscribe(SessionCreatedEvent, failing_handler)
+265 |         bus.subscribe(SessionCreatedEvent, working_handler)
+    |                                            ^^^^^^^^^^^^^^^ Expected `(DomainEvent, /) -> Any`, found `def working_handler(event: SessionCreatedEvent) -> None`
+266 |
+267 |         event = SessionCreatedEvent(
+    |
+info: Method defined here
+  --> src/acp_client/infrastructure/events/bus.py:47:9
+   |
+45 |         self._logger = structlog.get_logger()
+46 |
+47 |     def subscribe(
+   |         ^^^^^^^^^
+48 |         self,
+49 |         event_type: type[T],
+50 |         handler: EventHandler,
+   |         --------------------- Parameter declared here
+51 |     ) -> None:
+52 |         """Подписаться на события определённого типа.
+   |
+info: rule `invalid-argument-type` is enabled by default
+
+error[invalid-argument-type]: Argument to bound method `subscribe` is incorrect
+   --> tests/test_infrastructure_events_bus.py:290:44
+    |
+288 |             called.append(1)
+289 |
+290 |         bus.subscribe(SessionCreatedEvent, failing_handler)
+    |                                            ^^^^^^^^^^^^^^^ Expected `(DomainEvent, /) -> Any`, found `def failing_handler(event: SessionCreatedEvent) -> CoroutineType[Any, Any, None]`
+291 |         bus.subscribe(SessionCreatedEvent, working_handler)
+    |
+info: Method defined here
+  --> src/acp_client/infrastructure/events/bus.py:47:9
+   |
+45 |         self._logger = structlog.get_logger()
+46 |
+47 |     def subscribe(
+   |         ^^^^^^^^^
+48 |         self,
+49 |         event_type: type[T],
+50 |         handler: EventHandler,
+   |         --------------------- Parameter declared here
+51 |     ) -> None:
+52 |         """Подписаться на события определённого типа.
+   |
+info: rule `invalid-argument-type` is enabled by default
+
+error[invalid-argument-type]: Argument to bound method `subscribe` is incorrect
+   --> tests/test_infrastructure_events_bus.py:291:44
+    |
+290 |         bus.subscribe(SessionCreatedEvent, failing_handler)
+291 |         bus.subscribe(SessionCreatedEvent, working_handler)
+    |                                            ^^^^^^^^^^^^^^^ Expected `(DomainEvent, /) -> Any`, found `def working_handler(event: SessionCreatedEvent) -> CoroutineType[Any, Any, None]`
+292 |
+293 |         event = SessionCreatedEvent(
+    |
+info: Method defined here
+  --> src/acp_client/infrastructure/events/bus.py:47:9
+   |
+45 |         self._logger = structlog.get_logger()
+46 |
+47 |     def subscribe(
+   |         ^^^^^^^^^
+48 |         self,
+49 |         event_type: type[T],
+50 |         handler: EventHandler,
+   |         --------------------- Parameter declared here
+51 |     ) -> None:
+52 |         """Подписаться на события определённого типа.
+   |
+info: rule `invalid-argument-type` is enabled by default
+
+error[invalid-argument-type]: Argument to bound method `subscribe` is incorrect
+   --> tests/test_infrastructure_events_bus.py:392:44
+    |
+390 |             events_received.append("permission_requested")
+391 |
+392 |         bus.subscribe(SessionCreatedEvent, session_handler)
+    |                                            ^^^^^^^^^^^^^^^ Expected `(DomainEvent, /) -> Any`, found `def session_handler(event: SessionCreatedEvent) -> None`
+393 |         bus.subscribe(PromptCompletedEvent, prompt_handler)
+394 |         bus.subscribe(PermissionRequestedEvent, permission_handler)
+    |
+info: Method defined here
+  --> src/acp_client/infrastructure/events/bus.py:47:9
+   |
+45 |         self._logger = structlog.get_logger()
+46 |
+47 |     def subscribe(
+   |         ^^^^^^^^^
+48 |         self,
+49 |         event_type: type[T],
+50 |         handler: EventHandler,
+   |         --------------------- Parameter declared here
+51 |     ) -> None:
+52 |         """Подписаться на события определённого типа.
+   |
+info: rule `invalid-argument-type` is enabled by default
+
+error[invalid-argument-type]: Argument to bound method `subscribe` is incorrect
+   --> tests/test_infrastructure_events_bus.py:393:45
+    |
+392 |         bus.subscribe(SessionCreatedEvent, session_handler)
+393 |         bus.subscribe(PromptCompletedEvent, prompt_handler)
+    |                                             ^^^^^^^^^^^^^^ Expected `(DomainEvent, /) -> Any`, found `def prompt_handler(event: PromptCompletedEvent) -> CoroutineType[Any, Any, None]`
+394 |         bus.subscribe(PermissionRequestedEvent, permission_handler)
+    |
+info: Method defined here
+  --> src/acp_client/infrastructure/events/bus.py:47:9
+   |
+45 |         self._logger = structlog.get_logger()
+46 |
+47 |     def subscribe(
+   |         ^^^^^^^^^
+48 |         self,
+49 |         event_type: type[T],
+50 |         handler: EventHandler,
+   |         --------------------- Parameter declared here
+51 |     ) -> None:
+52 |         """Подписаться на события определённого типа.
+   |
+info: rule `invalid-argument-type` is enabled by default
+
+error[invalid-argument-type]: Argument to bound method `subscribe` is incorrect
+   --> tests/test_infrastructure_events_bus.py:394:49
+    |
+392 |         bus.subscribe(SessionCreatedEvent, session_handler)
+393 |         bus.subscribe(PromptCompletedEvent, prompt_handler)
+394 |         bus.subscribe(PermissionRequestedEvent, permission_handler)
+    |                                                 ^^^^^^^^^^^^^^^^^^ Expected `(DomainEvent, /) -> Any`, found `def permission_handler(event: PermissionRequestedEvent) -> None`
+395 |
+396 |         # Публикуем события
+    |
+info: Method defined here
+  --> src/acp_client/infrastructure/events/bus.py:47:9
+   |
+45 |         self._logger = structlog.get_logger()
+46 |
+47 |     def subscribe(
+   |         ^^^^^^^^^
+48 |         self,
+49 |         event_type: type[T],
+50 |         handler: EventHandler,
+   |         --------------------- Parameter declared here
+51 |     ) -> None:
+52 |         """Подписаться на события определённого типа.
+   |
+info: rule `invalid-argument-type` is enabled by default
+
+error[invalid-argument-type]: Argument to bound method `unsubscribe` is incorrect
+   --> tests/test_infrastructure_events_bus.py:477:50
+    |
+475 |             calls.append(2)
+476 |             # Отписываемся во время обработки события
+477 |             bus.unsubscribe(SessionCreatedEvent, handler1)
+    |                                                  ^^^^^^^^ Expected `(DomainEvent, /) -> Any`, found `def handler1(event: SessionCreatedEvent) -> None`
+478 |
+479 |         bus.subscribe(SessionCreatedEvent, handler1)
+    |
+info: Method defined here
+  --> src/acp_client/infrastructure/events/bus.py:77:9
+   |
+75 |             )
+76 |
+77 |     def unsubscribe(
+   |         ^^^^^^^^^^^
+78 |         self,
+79 |         event_type: type[T],
+80 |         handler: EventHandler,
+   |         --------------------- Parameter declared here
+81 |     ) -> None:
+82 |         """Отписаться от событий определённого типа.
+   |
+info: rule `invalid-argument-type` is enabled by default
+
+error[invalid-argument-type]: Argument to bound method `subscribe` is incorrect
+   --> tests/test_infrastructure_events_bus.py:479:44
+    |
+477 |             bus.unsubscribe(SessionCreatedEvent, handler1)
+478 |
+479 |         bus.subscribe(SessionCreatedEvent, handler1)
+    |                                            ^^^^^^^^ Expected `(DomainEvent, /) -> Any`, found `def handler1(event: SessionCreatedEvent) -> None`
+480 |         bus.subscribe(SessionCreatedEvent, handler2)
+    |
+info: Method defined here
+  --> src/acp_client/infrastructure/events/bus.py:47:9
+   |
+45 |         self._logger = structlog.get_logger()
+46 |
+47 |     def subscribe(
+   |         ^^^^^^^^^
+48 |         self,
+49 |         event_type: type[T],
+50 |         handler: EventHandler,
+   |         --------------------- Parameter declared here
+51 |     ) -> None:
+52 |         """Подписаться на события определённого типа.
+   |
+info: rule `invalid-argument-type` is enabled by default
+
+error[invalid-argument-type]: Argument to bound method `subscribe` is incorrect
+   --> tests/test_infrastructure_events_bus.py:480:44
+    |
+479 |         bus.subscribe(SessionCreatedEvent, handler1)
+480 |         bus.subscribe(SessionCreatedEvent, handler2)
+    |                                            ^^^^^^^^ Expected `(DomainEvent, /) -> Any`, found `def handler2(event: SessionCreatedEvent) -> None`
+481 |
+482 |         event = SessionCreatedEvent(
+    |
+info: Method defined here
+  --> src/acp_client/infrastructure/events/bus.py:47:9
+   |
+45 |         self._logger = structlog.get_logger()
+46 |
+47 |     def subscribe(
+   |         ^^^^^^^^^
+48 |         self,
+49 |         event_type: type[T],
+50 |         handler: EventHandler,
+   |         --------------------- Parameter declared here
+51 |     ) -> None:
+52 |         """Подписаться на события определённого типа.
+   |
+info: rule `invalid-argument-type` is enabled by default
+
+error[invalid-assignment]: Object of type `Mock` is not assignable to attribute `dismiss` of type `def dismiss(self, result: Unknown | None = None) -> AwaitComplete`
+   --> tests/test_navigation_manager.py:625:9
+    |
+624 |         modal = CustomModalScreen()
+625 |         modal.dismiss = Mock()
+    |         ^^^^^^^^^^^^^
+626 |         
+627 |         # Имитируем registration через metadata
+    |
+info: Implicit shadowing of function `dismiss`, add an annotation to make it explicit if this is intentional
+info: rule `invalid-assignment` is enabled by default
+
+error[unsupported-operator]: Unsupported `in` operation
+   --> tests/test_presentation_observable.py:187:16
+    |
+186 |         assert cmd.is_executing.value is False
+187 |         assert "Test error" in cmd.error.value
+    |                ------------^^^^---------------
+    |                |               |
+    |                |               Has type `str | None`
+    |                Has type `Literal["Test error"]`
+188 |
+189 |     @pytest.mark.asyncio
+    |
+info: Operation fails because operator `in` is not supported between objects of type `Literal["Test error"]` and `None`
+info: rule `unsupported-operator` is enabled by default
+
+error[unresolved-attribute]: Object of type `ConsoleRenderable | RichCast | str | Visual | SupportsVisual` has no attribute `plain`
+  --> tests/test_tui_footer_and_tool_panel_mvvm.py:68:16
+   |
+66 |     ui_view_model.connection_status.value = ConnectionStatus.CONNECTED
+67 |     
+68 |     rendered = footer_bar.render().plain  # type: ignore[attr-defined]
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^
+69 |     assert "connected" in rendered
+   |
+info: rule `unresolved-attribute` is enabled by default
+
+error[unresolved-attribute]: Object of type `ConsoleRenderable | RichCast | str | Visual | SupportsVisual` has no attribute `plain`
+  --> tests/test_tui_footer_and_tool_panel_mvvm.py:79:16
+   |
+77 |     ui_view_model.error_message.value = "Connection failed"
+78 |     
+79 |     rendered = footer_bar.render().plain  # type: ignore[attr-defined]
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^
+80 |     assert "Error" in rendered
+81 |     assert "Connection failed" in rendered
+   |
+info: rule `unresolved-attribute` is enabled by default
+
+error[unresolved-attribute]: Object of type `ConsoleRenderable | RichCast | str | Visual | SupportsVisual` has no attribute `plain`
+  --> tests/test_tui_footer_and_tool_panel_mvvm.py:91:16
+   |
+89 |     ui_view_model.warning_message.value = "Low memory"
+90 |     
+91 |     rendered = footer_bar.render().plain  # type: ignore[attr-defined]
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^
+92 |     assert "Warning" in rendered
+93 |     assert "Low memory" in rendered
+   |
+info: rule `unresolved-attribute` is enabled by default
+
+error[unresolved-attribute]: Object of type `ConsoleRenderable | RichCast | str | Visual | SupportsVisual` has no attribute `plain`
+   --> tests/test_tui_footer_and_tool_panel_mvvm.py:103:16
+    |
+101 |     ui_view_model.info_message.value = "Loading data..."
+102 |     
+103 |     rendered = footer_bar.render().plain  # type: ignore[attr-defined]
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^
+104 |     assert "Loading data..." in rendered
+    |
+info: rule `unresolved-attribute` is enabled by default
+
+error[unresolved-attribute]: Object of type `ConsoleRenderable | RichCast | str | Visual | SupportsVisual` has no attribute `plain`
+   --> tests/test_tui_footer_and_tool_panel_mvvm.py:115:16
+    |
+113 |     ui_view_model.warning_message.value = "Low memory"
+114 |     
+115 |     rendered = footer_bar.render().plain  # type: ignore[attr-defined]
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^
+116 |     assert "Error" in rendered
+117 |     assert "Critical error" in rendered
+    |
+info: rule `unresolved-attribute` is enabled by default
+
+error[unresolved-attribute]: Object of type `ConsoleRenderable | RichCast | str | Visual | SupportsVisual` has no attribute `plain`
+   --> tests/test_tui_footer_and_tool_panel_mvvm.py:129:16
+    |
+127 |     ui_view_model.info_message.value = "Loading..."
+128 |     
+129 |     rendered = footer_bar.render().plain  # type: ignore[attr-defined]
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^
+130 |     assert "Warning" in rendered
+131 |     assert "Low memory" in rendered
+    |
+info: rule `unresolved-attribute` is enabled by default
+
+error[unresolved-attribute]: Object of type `ConsoleRenderable | RichCast | str | Visual | SupportsVisual` has no attribute `plain`
+   --> tests/test_tui_footer_and_tool_panel_mvvm.py:151:16
+    |
+149 | def test_tool_panel_displays_empty_message_by_default(tool_panel: ToolPanel) -> None:
+150 |     """Проверить что ToolPanel показывает "нет активных вызовов" по умолчанию."""
+151 |     rendered = tool_panel.render().plain  # type: ignore[attr-defined]
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^
+152 |     assert "нет активных вызовов" in rendered
+    |
+info: rule `unresolved-attribute` is enabled by default
+
+error[unresolved-attribute]: Object of type `ConsoleRenderable | RichCast | str | Visual | SupportsVisual` has no attribute `plain`
+   --> tests/test_tui_footer_and_tool_panel_mvvm.py:162:16
+    |
+160 |     chat_view_model.tool_calls.value = []
+161 |     
+162 |     rendered = tool_panel.render().plain  # type: ignore[attr-defined]
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^
+163 |     assert "нет активных вызовов" in rendered
+    |
+info: rule `unresolved-attribute` is enabled by default
+
+error[unresolved-attribute]: Object of type `ConsoleRenderable | RichCast | str | Visual | SupportsVisual` has no attribute `plain`
+   --> tests/test_tui_footer_and_tool_panel_mvvm.py:178:16
+    |
+176 |     chat_view_model.tool_calls.value = tool_calls
+177 |     
+178 |     rendered = tool_panel.render().plain  # type: ignore[attr-defined]
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^
+179 |     assert "Инструменты:" in rendered
+    |
+info: rule `unresolved-attribute` is enabled by default
+
+error[unresolved-attribute]: Object of type `ConsoleRenderable | RichCast | str | Visual | SupportsVisual` has no attribute `plain`
+   --> tests/test_tui_footer_and_tool_panel_mvvm.py:186:16
+    |
+184 |     tool_panel.reset()
+185 |     
+186 |     rendered = tool_panel.render().plain  # type: ignore[attr-defined]
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^
+187 |     assert "нет активных вызовов" in rendered
+    |
+info: rule `unresolved-attribute` is enabled by default
+
+error[unresolved-attribute]: Object of type `ConsoleRenderable | RichCast | str | Visual | SupportsVisual` has no attribute `plain`
+  --> tests/test_tui_header.py:38:47
+   |
+36 |     """Проверить что HeaderBar отображает начальный статус (DISCONNECTED)."""
+37 |     # Начальный статус — DISCONNECTED, не загружается
+38 |     assert "ACP-Client TUI | disconnected" in header_bar.render().plain  # type: ignore[attr-defined]
+   |                                               ^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+info: rule `unresolved-attribute` is enabled by default
+
+error[unresolved-attribute]: Object of type `ConsoleRenderable | RichCast | str | Visual | SupportsVisual` has no attribute `plain`
+  --> tests/test_tui_header.py:49:16
+   |
+47 |     ui_view_model.connection_status.value = ConnectionStatus.CONNECTING
+48 |     
+49 |     rendered = header_bar.render().plain  # type: ignore[attr-defined]
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^
+50 |     assert "connecting" in rendered
+51 |     assert "ACP-Client TUI" in rendered
+   |
+info: rule `unresolved-attribute` is enabled by default
+
+error[unresolved-attribute]: Object of type `ConsoleRenderable | RichCast | str | Visual | SupportsVisual` has no attribute `plain`
+  --> tests/test_tui_header.py:62:16
+   |
+60 |     ui_view_model.is_loading.value = True
+61 |     
+62 |     rendered = header_bar.render().plain  # type: ignore[attr-defined]
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^
+63 |     assert "⟳" in rendered
+64 |     assert "ACP-Client TUI" in rendered
+   |
+info: rule `unresolved-attribute` is enabled by default
+
+error[unresolved-attribute]: Object of type `ConsoleRenderable | RichCast | str | Visual | SupportsVisual` has no attribute `plain`
+  --> tests/test_tui_header.py:78:16
+   |
+76 |     ui_view_model.is_loading.value = False
+77 |     
+78 |     rendered = header_bar.render().plain  # type: ignore[attr-defined]
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^
+79 |     assert "⟳" not in rendered
+   |
+info: rule `unresolved-attribute` is enabled by default
+
+error[unresolved-attribute]: Object of type `ConsoleRenderable | RichCast | str | Visual | SupportsVisual` has no attribute `plain`
+  --> tests/test_tui_header.py:97:20
+   |
+95 |     for status in statuses:
+96 |         ui_view_model.connection_status.value = status
+97 |         rendered = header_bar.render().plain  # type: ignore[attr-defined]
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^
+98 |         assert status.value in rendered
+   |
+info: rule `unresolved-attribute` is enabled by default
+
+error[unresolved-attribute]: Object of type `ConsoleRenderable | RichCast | str | Visual | SupportsVisual` has no attribute `plain`
+   --> tests/test_tui_header.py:108:16
+    |
+106 |     ui_view_model.connection_status.value = ConnectionStatus.CONNECTED
+107 |     
+108 |     rendered = header_bar.render().plain  # type: ignore[attr-defined]
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^
+109 |     assert "connected" in rendered
+    |
+info: rule `unresolved-attribute` is enabled by default
+
+error[unresolved-attribute]: Object of type `ConsoleRenderable | RichCast | str | Visual | SupportsVisual` has no attribute `plain`
+   --> tests/test_tui_header.py:119:16
+    |
+117 |     ui_view_model.connection_status.value = ConnectionStatus.ERROR
+118 |     
+119 |     rendered = header_bar.render().plain  # type: ignore[attr-defined]
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^
+120 |     assert "error" in rendered
+    |
+info: rule `unresolved-attribute` is enabled by default
+
+error[missing-argument]: No argument provided for required parameter `plan_vm` of bound method `__init__`
+  --> tests/test_tui_plan_panel_mvvm.py:45:9
+   |
+43 |     # Попытаемся создать PlanPanel без параметра - должна быть ошибка типа
+44 |     with pytest.raises(TypeError):
+45 |         PlanPanel()  # type: ignore[attr-defined]
+   |         ^^^^^^^^^^^
+   |
+info: Parameter declared here
+  --> src/acp_client/tui/components/plan_panel.py:37:24
+   |
+35 |     """
+36 |
+37 |     def __init__(self, plan_vm: PlanViewModel) -> None:
+   |                        ^^^^^^^^^^^^^^^^^^^^^^
+38 |         """Инициализирует PlanPanel с обязательным PlanViewModel.
+   |
+info: rule `missing-argument` is enabled by default
+
+error[unresolved-attribute]: Object of type `ConsoleRenderable | RichCast | str | Visual | SupportsVisual` has no attribute `plain`
+  --> tests/test_tui_plan_panel_mvvm.py:58:16
+   |
+56 |     assert plan_view_model.has_plan.value is False
+57 |     
+58 |     rendered = plan_panel.render().plain  # type: ignore[attr-defined]
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^
+59 |     assert "План: не получен" in rendered
+   |
+info: rule `unresolved-attribute` is enabled by default
+
+error[unresolved-attribute]: Object of type `ConsoleRenderable | RichCast | str | Visual | SupportsVisual` has no attribute `plain`
+  --> tests/test_tui_plan_panel_mvvm.py:76:16
+   |
+75 |     # Проверяем что план отображается в UI
+76 |     rendered = plan_panel.render().plain  # type: ignore[attr-defined]
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^
+77 |     assert test_plan in rendered
+78 |     assert "План: не получен" not in rendered
+   |
+info: rule `unresolved-attribute` is enabled by default
+
+error[unresolved-attribute]: Object of type `ConsoleRenderable | RichCast | str | Visual | SupportsVisual` has no attribute `plain`
+  --> tests/test_tui_plan_panel_mvvm.py:91:16
+   |
+89 |     assert plan_view_model.has_plan.value is False
+90 |     
+91 |     rendered = plan_panel.render().plain  # type: ignore[attr-defined]
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^
+92 |     assert "План: не получен" in rendered
+   |
+info: rule `unresolved-attribute` is enabled by default
+
+error[unresolved-attribute]: Object of type `ConsoleRenderable | RichCast | str | Visual | SupportsVisual` has no attribute `plain`
+   --> tests/test_tui_plan_panel_mvvm.py:103:16
+    |
+101 |     plan_view_model.set_plan(multiline_plan)
+102 |     
+103 |     rendered = plan_panel.render().plain  # type: ignore[attr-defined]
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^
+104 |     assert "1. Первая задача" in rendered
+105 |     assert "2. Вторая задача" in rendered
+    |
+info: rule `unresolved-attribute` is enabled by default
+
+error[unresolved-attribute]: Object of type `ConsoleRenderable | RichCast | str | Visual | SupportsVisual` has no attribute `plain`
+   --> tests/test_tui_plan_panel_mvvm.py:171:16
+    |
+170 |     # Проверяем что UI обновилось
+171 |     rendered = plan_panel.render().plain  # type: ignore[attr-defined]
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^
+172 |     assert test_plan in rendered
+    |
+info: rule `unresolved-attribute` is enabled by default
+
+error[unresolved-attribute]: Object of type `ConsoleRenderable | RichCast | str | Visual | SupportsVisual` has no attribute `plain`
+   --> tests/test_tui_plan_panel_mvvm.py:220:16
+    |
+218 |     # Проверяем что план обновился в ViewModel
+219 |     assert plan_view_model.has_plan.value is True
+220 |     rendered = plan_panel.render().plain  # type: ignore[attr-defined]
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^
+221 |     assert "Задача 1" in rendered
+222 |     assert "Задача 2" in rendered
+    |
+info: rule `unresolved-attribute` is enabled by default
+
+error[unresolved-attribute]: Object of type `ConsoleRenderable | RichCast | str | Visual | SupportsVisual` has no attribute `plain`
+   --> tests/test_tui_plan_panel_mvvm.py:241:20
+    |
+239 |     for plan in plans:
+240 |         plan_view_model.set_plan(plan)
+241 |         rendered = plan_panel.render().plain  # type: ignore[attr-defined]
+    |                    ^^^^^^^^^^^^^^^^^^^^^^^^^
+242 |         
+243 |         if plan.strip():
+    |
+info: rule `unresolved-attribute` is enabled by default
+
+error[unresolved-attribute]: Object of type `ConsoleRenderable | RichCast | str | Visual | SupportsVisual` has no attribute `plain`
+   --> tests/test_tui_plan_panel_mvvm.py:262:16
+    |
+261 |     # Проверяем что UI обновился
+262 |     rendered = plan_panel.render().plain  # type: ignore[attr-defined]
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^
+263 |     assert "Новый план" in rendered
+264 |     assert plan_view_model.has_plan.value is True
+    |
+info: rule `unresolved-attribute` is enabled by default
+
+Found 57 diagnostics

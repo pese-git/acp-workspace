@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import structlog
@@ -29,7 +29,7 @@ from ..messages import (
     parse_request_permission_request,
 )
 
-type PermissionHandler = Callable[[dict[str, Any]], str | None]
+type PermissionHandler = Callable[[dict[str, Any]], str | None | Awaitable[str | None]]
 type FsReadHandler = Callable[[str], str]
 type FsWriteHandler = Callable[[str, str], str | None]
 type TerminalCreateHandler = Callable[[str], str]
@@ -71,17 +71,22 @@ async def await_ws_response(
         )
     """
 
+    logger = structlog.get_logger("acp_client.ws_response")
+    
     while True:
         # Получаем сообщение из WebSocket
         message = await ws.receive()
         if message.type != WSMsgType.TEXT:
+            # Логируем неожиданный тип сообщения для отладки disconnect проблем
+            logger.error("unexpected_ws_message_type", type=str(message.type), expected="TEXT")
             msg = f"Unexpected WebSocket response type: {message.type}"
             raise RuntimeError(msg)
 
         # Парсим JSON payload
         payload = json.loads(message.data)
+        logger.debug("ws_recv_payload", payload=payload)
         raw_method = payload.get("method") if isinstance(payload, dict) else None
-        
+
         # Обрабатываем session/update события (промежуточные уведомления)
         if raw_method == "session/update":
             if on_update is not None:
@@ -93,7 +98,7 @@ async def await_ws_response(
         if isinstance(payload, dict):
             permission_request = parse_request_permission_request(payload)
         if permission_request is not None:
-            permission_result = build_permission_result(
+            permission_result = await build_permission_result(
                 payload=payload,
                 on_permission=on_permission,
             )
@@ -157,16 +162,23 @@ async def perform_ws_initialize(
     while True:
         message = await ws.receive()
         if message.type != WSMsgType.TEXT:
+            # Логируем неожиданный тип сообщения при инициализации
+            logger = structlog.get_logger("acp_client.ws_initialize")
+            logger.error(
+                "unexpected_ws_message_type_in_initialize",
+                type=str(message.type),
+                expected="TEXT",
+            )
             msg = f"Unexpected WebSocket response type during initialize: {message.type}"
             raise RuntimeError(msg)
 
         payload = json.loads(message.data)
         raw_method = payload.get("method") if isinstance(payload, dict) else None
-        
+
         # Инициализация не должна блокироваться на update-событиях
         if raw_method == "session/update":
             continue
-        
+
         response = ACPMessage.from_dict(payload)
         if response.id != init_request.id:
             continue
@@ -205,23 +217,28 @@ async def perform_ws_authenticate(
     while True:
         message = await ws.receive()
         if message.type != WSMsgType.TEXT:
+            # Логируем неожиданный тип сообщения при аутентификации
+            logger = structlog.get_logger("acp_client.ws_authenticate")
+            logger.error(
+                "unexpected_ws_message_type_in_authenticate",
+                type=str(message.type),
+                expected="TEXT",
+            )
             msg = f"Unexpected WebSocket response type during authenticate: {message.type}"
             raise RuntimeError(msg)
 
         payload = json.loads(message.data)
         raw_method = payload.get("method") if isinstance(payload, dict) else None
-        
+
         # Пропускаем update-события во время аутентификации
         if raw_method == "session/update":
             continue
-        
+
         response = ACPMessage.from_dict(payload)
         if response.id != auth_request.id:
             continue
         if response.error is not None:
-            msg = (
-                f"WebSocket authenticate failed: {response.error.code} {response.error.message}"
-            )
+            msg = f"WebSocket authenticate failed: {response.error.code} {response.error.message}"
             raise RuntimeError(msg)
         return parse_authenticate_result(response)
 
@@ -304,6 +321,8 @@ class ACPClientWSSession:
         """
 
         if self._ws is None:
+            # Логируем попытку отправки запроса при закрытой сессии
+            self.logger.error("websocket_session_not_opened", method=method)
             raise RuntimeError("WebSocket session is not opened")
 
         # Для session/* методов требуется handshake (инициализация и аутентификация)
@@ -314,10 +333,11 @@ class ACPClientWSSession:
                 self._ws,
                 self._client._default_client_capabilities(),
             )
-            
+
             # Выполняем auto-authenticate если включен
             if self._client.auto_authenticate:
                 from ..helpers import pick_auth_method_id
+
                 selected_auth_method = pick_auth_method_id(
                     init_result,
                     self._client.preferred_auth_method_id,
@@ -332,8 +352,10 @@ class ACPClientWSSession:
 
         # Отправляем запрос
         request = ACPMessage.request(method=method, params=params)
-        await self._ws.send_str(request.to_json())
-        
+        request_json = request.to_json()
+        self.logger.debug("ws_send_payload", payload=json.loads(request_json), method=method)
+        await self._ws.send_str(request_json)
+
         # Ждем ответ (обрабатывая промежуточные события)
         response = await await_ws_response(
             ws=self._ws,
@@ -348,11 +370,11 @@ class ACPClientWSSession:
             on_terminal_release=on_terminal_release,
             on_terminal_kill=on_terminal_kill,
         )
-        
+
         # Если это initialize - отмечаем инициализацию
         if method == "initialize" and response.error is None:
             self._initialized = True
-        
+
         return response
 
     async def authenticate(

@@ -1,0 +1,158 @@
+Screen {
+    layout: vertical;
+    background: #f3f4f7;
+    color: #141a22;
+}
+
+#header {
+    height: 1;
+    background: #dfe6f5;
+    color: #0f2747;
+    padding: 0 1;
+}
+
+#body {
+    height: 1fr;
+}
+
+#sidebar-column {
+    width: 30;
+}
+
+#main-column {
+    width: 3fr;
+}
+
+#sidebar {
+    height: 1fr;
+    background: #ebeff7;
+    border: round #6d7f9a;
+    padding: 1;
+}
+
+#sidebar:focus {
+    border: round #1d4ed8;
+    background: #e3ecff;
+}
+
+#file-tree {
+    height: 1fr;
+    background: #f4f7fc;
+    border: round #6d7f9a;
+    padding: 0 1;
+}
+
+#chat-view {
+    height: 1fr;
+    border: round #6d7f9a;
+    background: #ffffff;
+    padding: 1;
+}
+
+#chat_content {
+    width: 1fr;
+    height: auto;
+    layout: vertical;
+}
+
+#plan-panel {
+    height: 8;
+    border: round #6d7f9a;
+    background: #f8fafc;
+    padding: 1;
+}
+
+#tool-panel {
+    width: 2fr;
+    border: round #6d7f9a;
+    background: #f8fafc;
+    padding: 1;
+}
+
+#prompt-input {
+    height: 6;
+    border: round #6d7f9a;
+    background: #ffffff;
+}
+
+#prompt-input:focus {
+    border: round #1d4ed8;
+    background: #f8fbff;
+}
+
+#footer {
+    height: 1;
+    background: #dfe6f5;
+    color: #0f2747;
+    padding: 0 1;
+}
+
+.message {
+    margin: 0 0 1 0;
+}
+
+#permission-modal {
+    width: 80;
+    max-width: 90%;
+    height: auto;
+    border: round #2f4a75;
+    background: #f6f9ff;
+    padding: 1 2;
+}
+
+#permission-title {
+    margin: 0 0 1 0;
+}
+
+#file-viewer-modal {
+    width: 90;
+    max-width: 95%;
+    height: 80%;
+    border: round #2f4a75;
+    background: #f6f9ff;
+    padding: 1;
+}
+
+#file-viewer-title {
+    margin: 0 0 1 0;
+}
+
+#file-viewer-search {
+    margin: 0 0 1 0;
+    border: round #6d7f9a;
+    background: #ffffff;
+}
+
+#file-viewer-search-status {
+    margin: 0 0 1 0;
+    color: #334155;
+}
+
+#file-viewer-content {
+    height: 1fr;
+    overflow: auto;
+    background: #ffffff;
+    border: round #6d7f9a;
+    padding: 0 1;
+}
+
+#terminal-log-modal {
+    width: 110;
+    max-width: 95%;
+    height: 80%;
+    border: round #2f4a75;
+    background: #f6f9ff;
+    padding: 1;
+}
+
+#terminal-log-title {
+    margin: 0 0 1 0;
+}
+
+#terminal-log-content {
+    height: 1fr;
+    overflow: auto;
+    background: #ffffff;
+    border: round #6d7f9a;
+    padding: 0 1;
+}

@@ -1,4 +1,4 @@
-.PHONY: server-sync server-check client-sync client-check check \
+.PHONY: server-sync server-check client-sync client-check check check-tui \
 	run-server-ws ping-ws
 
 HOST ?= 127.0.0.1
@@ -19,6 +19,11 @@ client-check:
 	uv run --directory acp-client ruff check .
 	uv run --directory acp-client ty check
 	uv run --directory acp-client python -m pytest
+
+check-tui:
+	uv run --directory acp-client ruff check src/acp_client/tui tests/test_tui_*.py
+	uv run --directory acp-client ty check
+	uv run --directory acp-client python -m pytest tests/test_tui_*.py
 
 check: server-check client-check
 
