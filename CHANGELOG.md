@@ -6,6 +6,24 @@
 
 ## [Unreleased]
 
+### Added (Phase 4.8: Complete MVVM Integration)
+
+- ✅ **Завершение MVVM интеграции для всех TUI компонентов** (Phase 4.8)
+   - Созданы 6 новых ViewModels: PlanViewModel, TerminalViewModel, FileSystemViewModel, FileViewerViewModel, PermissionViewModel, TerminalLogViewModel
+   - Обновлены 6 TUI компонентов: PlanPanel, TerminalOutputPanel, FileTree, FileViewerModal, PermissionModal, TerminalLogModal
+   - Все 12 TUI компонентов теперь используют MVVM паттерн
+   - Добавлено 82 новых MVVM теста (все пройдены):
+     - test_tui_plan_panel_mvvm.py - 14 тестов
+     - test_tui_terminal_output_mvvm.py - 19 тестов
+     - test_tui_file_tree_mvvm.py - 13 тестов
+     - test_tui_file_viewer_mvvm.py - 13 тестов
+     - test_tui_permission_modal_mvvm.py - 10 тестов
+     - test_tui_terminal_log_modal_mvvm.py - 13 тестов
+   - Количество ViewModels увеличено с 3 до 9
+   - Качество кода: все проверки пройдены (ruff check ✅)
+   - Статистика тестирования: 465 тестов пройдены из 488 (95.3%)
+   - Создан отчет о завершении Phase 4.8: `doc/PHASE_4_PART8_COMPLETION_REPORT.md`
+
 ### Added (Phase 4.6: DIContainer Integration)
 
 - ✅ **ViewModelFactory для DIContainer** (Phase 4.6)

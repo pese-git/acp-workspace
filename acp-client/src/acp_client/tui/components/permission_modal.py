@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -148,7 +149,9 @@ class PermissionModal(ModalScreen[str | None]):
         # Обновляем заголовок если компонент смонтирован
         try:
             title_widget = self.query_one("#permission-title", Static)
-            title_text = f"{self.permission_vm.permission_type.value}: {self.permission_vm.resource.value}"
+            perm_type = self.permission_vm.permission_type.value
+            resource = self.permission_vm.resource.value
+            title_text = f"{perm_type}: {resource}"
             if new_message:
                 title_text += f" - {new_message}"
             title_widget.update(title_text)
@@ -189,10 +192,8 @@ class PermissionModal(ModalScreen[str | None]):
         self.permission_vm.hide()
         # dismiss() требует активное приложение, поэтому вызываем его только
         # если приложение существует
-        try:
+        with contextlib.suppress(Exception):
             self.dismiss(None)
-        except Exception:
-            pass  # Приложение может быть недоступно в тестах
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Закрывает модал с выбранной опцией или отменой."""
