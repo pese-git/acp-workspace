@@ -12,6 +12,7 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
+import structlog
 from textual.app import ComposeResult
 from textual.containers import Container, VerticalScroll
 from textual.widgets import Static
@@ -48,6 +49,7 @@ class ChatView(VerticalScroll):
         self.chat_vm = chat_vm
         self._mounted = False
         self._content_container: Container | None = None
+        self._logger = structlog.get_logger("chat_view")
         
         self.chat_vm.messages.subscribe(self._on_messages_changed)
         self.chat_vm.tool_calls.subscribe(self._on_tool_calls_changed)
@@ -95,6 +97,8 @@ class ChatView(VerticalScroll):
         Args:
             text: Новый streaming текст
         """
+        self._logger.debug("on_streaming_text_changed", text=text[:50] if text else "", 
+                          text_length=len(text))
         self._update_display()
 
     def _update_display(self) -> None:
@@ -240,10 +244,16 @@ class ChatView(VerticalScroll):
         Args:
             text: Текст chunk'а от агента
         """
+        self._logger.debug("append_agent_chunk", text=text, text_length=len(text))
         if self.chat_vm is not None:
-            # Активируем streaming режим и добавляем текст
+            # Активируем streaming режим и конкатенируем текст
             self.chat_vm.is_streaming.value = True
-            self.chat_vm.streaming_text.value = text
+            # Конкатенируем новый текст со старым (не перезаписываем!)
+            old_text = self.chat_vm.streaming_text.value
+            self.chat_vm.streaming_text.value += text
+            self._logger.debug("streaming_text_updated", 
+                             old_length=len(old_text),
+                             new_length=len(self.chat_vm.streaming_text.value))
 
     def finish_agent_message(self) -> None:
         """Обозначить окончание агентского сообщения.
@@ -251,6 +261,19 @@ class ChatView(VerticalScroll):
         Используется для маркировки конца streaming сообщения от агента.
         """
         if self.chat_vm is not None:
-            # Отключаем streaming режим
+            # Сохраняем streaming текст в messages перед сбросом
+            streaming_text = self.chat_vm.streaming_text.value
+            self._logger.debug("finish_agent_message", 
+                             streaming_text_length=len(streaming_text))
+            
+            if streaming_text:
+                # Добавляем накопленный streaming текст в историю сообщений
+                messages = self.chat_vm.messages.value.copy()
+                messages.append({"type": "assistant", "content": streaming_text})
+                self.chat_vm.messages.value = messages
+                self._logger.debug("streaming_text_saved_to_messages", 
+                                 text_length=len(streaming_text))
+            
+            # Отключаем streaming режим и очищаем буфер
             self.chat_vm.is_streaming.value = False
             self.chat_vm.streaming_text.value = ""

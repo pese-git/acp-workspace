@@ -71,6 +71,8 @@ async def await_ws_response(
         )
     """
 
+    logger = structlog.get_logger("acp_client.ws_response")
+    
     while True:
         # Получаем сообщение из WebSocket
         message = await ws.receive()
@@ -80,6 +82,7 @@ async def await_ws_response(
 
         # Парсим JSON payload
         payload = json.loads(message.data)
+        logger.debug("ws_recv_payload", payload=payload)
         raw_method = payload.get("method") if isinstance(payload, dict) else None
 
         # Обрабатываем session/update события (промежуточные уведомления)
@@ -331,7 +334,9 @@ class ACPClientWSSession:
 
         # Отправляем запрос
         request = ACPMessage.request(method=method, params=params)
-        await self._ws.send_str(request.to_json())
+        request_json = request.to_json()
+        self.logger.debug("ws_send_payload", payload=json.loads(request_json), method=method)
+        await self._ws.send_str(request_json)
 
         # Ждем ответ (обрабатывая промежуточные события)
         response = await await_ws_response(

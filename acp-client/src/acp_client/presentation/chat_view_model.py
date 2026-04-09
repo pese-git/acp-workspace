@@ -254,12 +254,12 @@ class ChatViewModel(BaseViewModel):
         Args:
             event: PromptStartedEvent из EventBus
         """
-        self.is_streaming.value = True
-        self.streaming_text.value = ""
         self.logger.debug(
-            "Prompt started event received",
+            "Prompt started event received - CLEARING streaming_text",
             session_id=getattr(event, 'session_id', 'unknown'),
         )
+        self.is_streaming.value = True
+        self.streaming_text.value = ""
 
     def _handle_prompt_completed(self, event: Any) -> None:
         """Обработать завершение prompt-turn.
@@ -267,13 +267,14 @@ class ChatViewModel(BaseViewModel):
         Args:
             event: PromptCompletedEvent из EventBus
         """
+        self.logger.debug(
+            "Prompt completed event received - STOPPING streaming",
+            session_id=getattr(event, 'session_id', 'unknown'),
+            stop_reason=getattr(event, 'stop_reason', None),
+            final_streaming_text_length=len(self.streaming_text.value),
+        )
         self.is_streaming.value = False
         self.last_stop_reason.value = getattr(event, 'stop_reason', None)
-        self.logger.debug(
-            "Prompt completed event received",
-            session_id=getattr(event, 'session_id', 'unknown'),
-            stop_reason=self.last_stop_reason.value,
-        )
 
     def _handle_permission_requested(self, event: Any) -> None:
         """Обработать запрос разрешения.

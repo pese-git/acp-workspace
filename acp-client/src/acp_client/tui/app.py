@@ -13,6 +13,7 @@ import structlog
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 
+from acp_client.infrastructure.di_bootstrapper import DIBootstrapper
 from acp_client.messages import (
     PlanUpdate,
     RequestPermissionRequest,
@@ -23,6 +24,9 @@ from acp_client.messages import (
     parse_session_update_notification,
     parse_tool_call_update,
 )
+from acp_client.presentation.chat_view_model import ChatViewModel
+from acp_client.presentation.session_view_model import SessionViewModel
+from acp_client.presentation.ui_view_model import UIViewModel
 
 from .components import (
     ChatView,
@@ -191,22 +195,68 @@ class ACPClientApp(App[None]):
         self._ui_state_machine = UIStateMachine()
         self._ui_state_store = UIStateStore()
         self._loaded_ui_state = self._ui_state_store.load()
+        
+        # Инициализируем DIContainer с помощью DIBootstrapper
+        # DIBootstrapper регистрирует все необходимые сервисы и ViewModels
+        try:
+            self._container = DIBootstrapper.build(
+                host=host,
+                port=port,
+                logger=self._app_logger,
+            )
+            self._app_logger.info("di_container_built_successfully")
+        except Exception as e:
+            self._app_logger.error(
+                "failed_to_build_di_container",
+                error=str(e),
+            )
+            raise RuntimeError(
+                f"Failed to initialize DI container: {e}. "
+                "Check connection parameters and service configuration."
+            ) from e
+        
+        # Извлекаем все ViewModels из контейнера для использования в compose()
+        # Все ViewModels должны быть успешно разрешены, иначе приложение не запустится
+        try:
+            self._ui_vm = self._container.resolve(UIViewModel)
+            self._app_logger.debug("resolved_ui_view_model")
+            
+            self._session_vm = self._container.resolve(SessionViewModel)
+            self._app_logger.debug("resolved_session_view_model")
+            
+            self._chat_vm = self._container.resolve(ChatViewModel)
+            self._app_logger.debug("resolved_chat_view_model")
+        except Exception as e:
+            self._app_logger.error(
+                "failed_to_resolve_view_models",
+                error=str(e),
+            )
+            raise RuntimeError(
+                f"Failed to initialize ViewModels: {e}. "
+                "Make sure DIContainer was properly configured."
+            ) from e
 
     def compose(self) -> ComposeResult:
-        """Собирает базовый layout приложения."""
+        """Собирает базовый layout приложения с инъекцией обязательных ViewModels."""
 
-        yield HeaderBar()
+        # Передаем UIViewModel в HeaderBar для отображения статуса соединения
+        yield HeaderBar(self._ui_vm)
         with Horizontal(id="body"):
             with Vertical(id="sidebar-column"):
-                yield Sidebar()
+                # Передаем SessionViewModel в Sidebar для управления сессиями
+                yield Sidebar(self._session_vm)
                 yield FileTree(root_path=self._sessions.active_cwd)
             with Vertical(id="main-column"):
-                yield ChatView()
+                # Передаем ChatViewModel в ChatView для отображения сообщений
+                yield ChatView(self._chat_vm)
                 yield PlanPanel()
-            yield ToolPanel()
+            # Передаем ChatViewModel в ToolPanel для отображения tool calls
+            yield ToolPanel(self._chat_vm)
         with Vertical(id="bottom"):
-            yield PromptInput()
-            yield FooterBar()
+            # Передаем ChatViewModel в PromptInput для управления вводом
+            yield PromptInput(self._chat_vm)
+            # Передаем UIViewModel в FooterBar для отображения сообщений
+            yield FooterBar(self._ui_vm)
 
     def on_mount(self) -> None:
         """Запускает начальную инициализацию после старта приложения."""
@@ -482,12 +532,28 @@ class ACPClientApp(App[None]):
     def _on_agent_chunk(self, text: str) -> None:
         """Получает agent chunk и рендерит его в ChatView."""
 
-        self.query_one(ChatView).append_agent_chunk(text)
+        import structlog
+        logger = structlog.get_logger("tui_app")
+        logger.debug("on_agent_chunk_called", text_length=len(text), text=text)
+        try:
+            self.query_one(ChatView).append_agent_chunk(text)
+            logger.debug("on_agent_chunk_success")
+        except Exception as e:
+            logger.exception("on_agent_chunk_failed", error=str(e))
+            raise
 
     def _on_user_chunk(self, text: str) -> None:
         """Получает user chunk из replay/update и добавляет в ChatView."""
 
-        self.query_one(ChatView).add_user_message(text)
+        import structlog
+        logger = structlog.get_logger("tui_app")
+        logger.debug("on_user_chunk_called", text_length=len(text))
+        try:
+            self.query_one(ChatView).add_user_message(text)
+            logger.debug("on_user_chunk_success")
+        except Exception as e:
+            logger.exception("on_user_chunk_failed", error=str(e))
+            raise
 
     def _handle_update(self, payload: dict[str, object]) -> None:
         """Маршрутизирует update в UI и сохраняет его в локальный history cache."""
@@ -913,8 +979,27 @@ class ACPClientApp(App[None]):
             )
 
 
-def run_tui_app(*, host: str | None = None, port: int | None = None) -> None:
-    """Запускает TUI приложение с указанными параметрами подключения."""
+def run_tui_app(
+    *,
+    host: str | None = None,
+    port: int | None = None,
+    log_level: str = "INFO",
+    log_json: bool = False,
+    log_file: str | None = None,
+) -> None:
+    """Запускает TUI приложение с указанными параметрами подключения и логирования.
+    
+    Args:
+        host: Хост для подключения к серверу
+        port: Порт для подключения к серверу
+        log_level: Уровень логирования (DEBUG, INFO, WARNING, ERROR)
+        log_json: Использовать JSON формат для логов
+        log_file: Путь к файлу логов. 'default' для ~/.acp-client/logs/acp-client.log
+    """
+    # Настроить логирование, если нужно
+    if log_level != "INFO" or log_json or log_file:
+        from acp_client.logging import setup_logging
+        setup_logging(level=log_level, json_format=log_json, log_file=log_file)
 
     resolved_host, resolved_port = resolve_tui_connection(host=host, port=port)
     app = ACPClientApp(host=resolved_host, port=resolved_port)
