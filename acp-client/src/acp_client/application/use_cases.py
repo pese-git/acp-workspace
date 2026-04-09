@@ -237,11 +237,22 @@ class CreateSessionUseCase(UseCase):
                 self._logger.info("authenticated", auth_method=request.auth_method)
             
             # Шаг 3: Создание сессии через session/new
+            session_params = {
+                "cwd": request.cwd,  # Обязательный параметр протокола ACP
+                "clientCapabilities": request.client_capabilities or {},
+            }
+            
+            # DEBUG: Логируем параметры запроса session/new
+            self._logger.debug(
+                "session_new_request_params",
+                params=session_params,
+                request_cwd=request.cwd,
+                request_client_capabilities=request.client_capabilities,
+            )
+            
             session_request = ACPMessage.request(
                 "session/new",
-                {
-                    "clientCapabilities": request.client_capabilities or {},
-                },
+                session_params,
             )
             await self._transport.send(session_request.to_dict())
             
@@ -280,6 +291,7 @@ class CreateSessionUseCase(UseCase):
             self._logger.info(
                 "session_created_and_saved",
                 session_id=session.id,
+                cwd=request.cwd,
                 is_authenticated=session.is_authenticated,
             )
             

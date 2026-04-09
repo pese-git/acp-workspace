@@ -73,13 +73,17 @@ class TestSessionViewModel:
     @pytest.mark.asyncio
     async def test_create_session(self, vm: SessionViewModel, coordinator: AsyncMock) -> None:
         """Проверить создание новой сессии."""
-        new_session = MagicMock(id="new_session")
-        coordinator.create_session.return_value = new_session
+        # coordinator.create_session теперь возвращает dict с session_id
+        coordinator.create_session.return_value = {
+            "session_id": "new_session",
+            "server_capabilities": {},
+            "is_authenticated": False,
+        }
         
         await vm.create_session_cmd.execute("localhost", 8080)
         
         assert len(vm.sessions.value) == 1
-        assert vm.sessions.value[0] == new_session
+        assert vm.sessions.value[0].id == "new_session"
         assert vm.selected_session_id.value == "new_session"
         assert vm.session_count.value == 1
 
@@ -91,8 +95,11 @@ class TestSessionViewModel:
         existing = MagicMock(id="existing")
         vm.sessions.value = [existing]
         
-        new_session = MagicMock(id="new")
-        coordinator.create_session.return_value = new_session
+        coordinator.create_session.return_value = {
+            "session_id": "new",
+            "server_capabilities": {},
+            "is_authenticated": False,
+        }
         
         await vm.create_session_cmd.execute("localhost", 8080)
         
@@ -208,6 +215,9 @@ class TestSessionViewModel:
         
         await vm.create_session_cmd.execute("localhost", 8080, custom="value")
         
-        coordinator.create_session.assert_called_once_with(
-            "localhost", 8080, custom="value"
-        )
+        # Проверяем что create_session вызван с нужными параметрами
+        # Параметр cwd добавляется автоматически из текущей директории
+        call_args = coordinator.create_session.call_args
+        assert call_args[0] == ("localhost", 8080)  # positional args
+        assert "cwd" in call_args[1]  # cwd должен быть в kwargs
+        assert call_args[1].get("custom") == "value"  # custom параметр должен быть передан

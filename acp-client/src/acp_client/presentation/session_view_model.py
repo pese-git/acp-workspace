@@ -111,13 +111,45 @@ class SessionViewModel(BaseViewModel):
         Args:
             host: Хост сервера
             port: Порт сервера
-            **kwargs: Дополнительные параметры сессии
+            **kwargs: Дополнительные параметры сессии (cwd, client_capabilities)
         """
+        from pathlib import Path
+        
         self.is_loading_sessions.value = True
         self.error_message.value = None
 
+        # Используем текущую директорию как default для cwd
+        cwd = kwargs.get("cwd") or str(Path.cwd())
+
+        # DEBUG: Логируем переданные параметры
+        self.logger.debug(
+            "session_view_model_create_session_called",
+            host=host,
+            port=port,
+            cwd=cwd,
+            kwargs=kwargs,
+        )
+
         try:
-            session = await self.coordinator.create_session(host, port, **kwargs)
+            # Передаем cwd в координатор
+            result = await self.coordinator.create_session(
+                host, port, cwd=cwd, **kwargs
+            )
+            
+            # coordinator.create_session возвращает dict, преобразуем в объект для совместимости
+            # Создаем простой объект для хранения результата сессии
+            class SessionResult:
+                def __init__(self, session_data: dict[str, Any]) -> None:
+                    session_id = session_data.get("session_id")
+                    self.id = session_id
+                    self.session_id = session_id
+                    self.sessionId = session_id  # camelCase для совместимости
+                    # title используется для отображения в UI (sidebar)
+                    self.title = f"Session {session_id[-8:]}" if session_id else "New Session"
+                    self.server_capabilities = session_data.get("server_capabilities", {})
+                    self.is_authenticated = session_data.get("is_authenticated", False)
+            
+            session = SessionResult(result)
             
             # Добавить новую сессию в список
             sessions = self.sessions.value + [session]

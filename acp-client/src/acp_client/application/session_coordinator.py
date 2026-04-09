@@ -6,11 +6,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from acp_client.domain import SessionRepository, TransportService
 from acp_client.infrastructure.logging_config import get_logger
 
+from .dto import CreateSessionRequest
 from .use_cases import (
     CreateSessionUseCase,
     InitializeUseCase,
@@ -67,6 +69,7 @@ class SessionCoordinator:
         self,
         server_host: str,
         server_port: int,
+        cwd: str | None = None,
         client_capabilities: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Создает новую сессию на сервере.
@@ -74,17 +77,39 @@ class SessionCoordinator:
         Аргументы:
             server_host: Адрес сервера
             server_port: Порт сервера
+            cwd: Абсолютный путь рабочей директории (если None, используется текущая директория)
             client_capabilities: Возможности клиента (опционально)
         
         Возвращает:
             Объект созданной сессии с ID и capabilities
         """
-        from .dto import CreateSessionRequest
+        # Используем текущую директорию как default, если cwd не указана
+        session_cwd = cwd or str(Path.cwd())
+        
+        # DEBUG: Логируем входные параметры coordinator
+        self._logger.debug(
+            "session_coordinator_create_session_called",
+            server_host=server_host,
+            server_port=server_port,
+            cwd=session_cwd,
+            client_capabilities=client_capabilities,
+        )
         
         request = CreateSessionRequest(
             server_host=server_host,
             server_port=server_port,
+            cwd=session_cwd,
             client_capabilities=client_capabilities,
+        )
+        
+        # DEBUG: Логируем созданный DTO
+        self._logger.debug(
+            "create_session_request_dto_created",
+            dto_server_host=request.server_host,
+            dto_server_port=request.server_port,
+            dto_client_capabilities=request.client_capabilities,
+            dto_auth_method=request.auth_method,
+            dto_auth_credentials=request.auth_credentials,
         )
         
         self._logger.info("creating_session", host=server_host, port=server_port)  # type: ignore[unknown-argument]

@@ -26,6 +26,9 @@ class CreateSessionRequest:
     server_port: int
     """Порт ACP сервера."""
     
+    cwd: str
+    """Абсолютный путь рабочей директории сессии (обязательный параметр ACP протокола)."""
+    
     client_capabilities: dict[str, Any] | None = None
     """Возможности клиента (если None, используются default)."""
     
