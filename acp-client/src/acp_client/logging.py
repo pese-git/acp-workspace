@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 import logging.handlers
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +20,8 @@ def setup_logging(
     log_file: str | None = None,
 ) -> structlog.BoundLogger:
     """Настраивает структурированное логирование для клиента.
+
+    Логи выводятся только в файл, вывод в stdout/stderr отключен.
 
     Args:
         level: Уровень логирования (DEBUG, INFO, WARNING, ERROR)
@@ -37,7 +38,7 @@ def setup_logging(
         logger = setup_logging(level="DEBUG", json_format=False)
         logger.info("client_request", method="session/prompt", session_id="sess_123")
         
-        # С сохранением логов
+        # С сохранением логов в файл
         logger = setup_logging(
             level="DEBUG",
             json_format=True,
@@ -61,10 +62,9 @@ def setup_logging(
             file_path = Path(log_file)
             file_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Настройка стандартного logging для вывода в stdout и файл
-    handlers: list[logging.Handler] = [
-        logging.StreamHandler(sys.stdout),
-    ]
+    # Настройка стандартного logging только для файлового вывода
+    # StreamHandler удалён - логи выводятся только в файл, не в stdout
+    handlers: list[logging.Handler] = []
 
     # Добавляем файловый обработчик, если указан путь
     if file_path:

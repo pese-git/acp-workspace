@@ -4,6 +4,7 @@
 - Инициализацию structlog с форматированием
 - Логирование операций с контекстом
 - Отслеживание времени выполнения
+- Все логи записываются в файлы, вывод в stdout отключен
 
 Пример использования:
     from acp_client.infrastructure.logging_config import setup_logging
@@ -15,7 +16,6 @@
 from __future__ import annotations
 
 import logging
-import sys
 from typing import Any, Literal, Protocol
 
 import structlog
@@ -49,8 +49,8 @@ def setup_logging(
     Настраивает:
     - Structlog для JSON-подобного логирования
     - Форматирование времени в ISO 8601
-    - Вывод в stdout/stderr
-    - Стандартное логирование Python (fallback)
+    - Вывод только в стандартный logging Python (без stdout)
+    - Стандартное логирование Python как fallback
 
     Args:
         level: Уровень логирования (по умолчанию INFO)
@@ -60,14 +60,16 @@ def setup_logging(
         logger = structlog.get_logger(__name__)
         logger.debug("test_message", key="value")
     """
-    # Стандартное логирование Python как fallback
+    # Стандартное логирование Python как fallback (без вывода в stdout)
+    # handlers=[] означает, что логи не выводятся в консоль
     logging.basicConfig(
         format="%(message)s",
-        stream=sys.stdout,
+        handlers=[],
         level=getattr(logging, level),
     )
 
-    # Structlog конфигурация
+    # Structlog конфигурация с использованием stdlib logger factory
+    # для интеграции с стандартным logging без вывода в консоль
     structlog.configure(
         processors=[
             # Добавляем текущее время
@@ -83,7 +85,9 @@ def setup_logging(
             ),
         ],
         context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),
+        # Используем StandardLibLoggerFactory вместо PrintLoggerFactory
+        # для записи логов через стандартный logging, а не в stdout
+        logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=True,
     )
 
