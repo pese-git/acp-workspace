@@ -302,9 +302,19 @@ acp-client/
 │   ├── test_navigation_*.py
 │   └── ...                         # Другие тесты
 │
+├── docs/                           # 📚 Документация
+│   ├── developer-guide/            # Для разработчиков
+│   │   ├── ARCHITECTURE.md
+│   │   ├── DEVELOPING.md
+│   │   ├── TESTING.md
+│   │   └── NAVIGATION_MANAGER.md
+│   ├── user-guide/                 # Для пользователей
+│   ├── roadmap/                    # План развития
+│   └── archive/                    # Устаревшие документы
+│
 ├── pyproject.toml                  # Конфигурация проекта
-├── README.md                       # Документация пользователя
-└── DEVELOPING.md                   # Этот файл
+├── README.md                       # Основная документация
+└── uv.lock                         # Lock файл зависимостей
 ```
 
 ### Основные слои архитектуры (Clean Architecture)
@@ -528,9 +538,10 @@ uv --version
 
 ## Полезные ссылки
 
-- [README.md](./README.md) — основная документация
-- [ARCHITECTURE.md](../ARCHITECTURE.md) — архитектура монорепозитория
-- [AGENTS.md](../AGENTS.md) — правила разработки для обоих проектов
+- [README.md](../README.md) — основная документация
+- [ARCHITECTURE.md](./ARCHITECTURE.md) — архитектура acp-client
+- [TESTING.md](./TESTING.md) — стратегия тестирования
+- [AGENTS.md](../../AGENTS.md) — правила разработки для обоих проектов
 - [Textual документация](https://textual.textualize.io/)
 - [Pydantic документация](https://docs.pydantic.dev/)
 - [pytest документация](https://docs.pytest.org/)
@@ -590,7 +601,7 @@ uv run --directory acp-server python -m acp_server.http_server --host 127.0.0.1 
 uv run --directory acp-client acp-client-tui --host 127.0.0.1 --port 8000
 ```
 
-## Контактов и вопросы
+## Контакты и вопросы
 
 При возникновении проблем:
 1. Проверьте логи приложения (запустите с `--log-level DEBUG`)
