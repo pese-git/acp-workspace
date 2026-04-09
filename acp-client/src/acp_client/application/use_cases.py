@@ -60,22 +60,69 @@ class InitializeUseCase(UseCase):
     async def execute(self) -> InitializeResponse:
         """Инициализирует соединение с сервером.
         
+        Отправляет метод 'initialize' и получает информацию о сервере.
+        
         Возвращает:
             InitializeResponse с информацией о сервере
+        
+        Raises:
+            RuntimeError: При ошибке подключения или инициализации
         """
-        # Подключаемся к серверу
-        await self._transport.connect()
-        self._logger.info("connected_to_server")
+        try:
+            # Подключаемся к серверу
+            await self._transport.connect()
+            self._logger.info("connected_to_server")
+            
+            # Отправляем initialize запрос к серверу
+            from acp_client.messages import ACPMessage
+            
+            init_request = ACPMessage.request(
+                method="initialize",
+                params={},
+            )
+            await self._transport.send(init_request.to_dict())
+            self._logger.debug("initialize_request_sent", request_id=init_request.id)
+            
+            # Получаем ответ с информацией о сервере
+            response_data = await self._transport.receive()
+            response = ACPMessage.from_dict(response_data)
+            
+            # Обработка ошибок от сервера
+            if response.error is not None:
+                error_msg = f"Initialize failed: {response.error.message}"
+                self._logger.error(
+                    "initialize_error",
+                    error_code=response.error.code,
+                    error_message=response.error.message,
+                )
+                raise RuntimeError(error_msg)
+            
+            # Извлекаем capabilities и методы аутентификации из результата
+            result = response.result or {}
+            server_capabilities = result.get("serverCapabilities", {})
+            available_auth_methods = result.get("authMethods", [])
+            protocol_version = result.get("protocolVersion", "1.0")
+            
+            self._logger.info(
+                "initialize_success",
+                protocol_version=protocol_version,
+                auth_methods_count=len(available_auth_methods),
+            )
+            
+            return InitializeResponse(
+                server_capabilities=server_capabilities,
+                available_auth_methods=available_auth_methods,
+                protocol_version=str(protocol_version),
+            )
         
-        # Отправляем initialize запрос
-        # TODO: Реализовать через transport.send/receive
-        # когда будет готова инфраструктура
-        
-        return InitializeResponse(
-            server_capabilities={},
-            available_auth_methods=[],
-            protocol_version="1.0",
-        )
+        except RuntimeError as e:
+            self._logger.error("initialize_runtime_error", error=str(e))
+            raise
+        except Exception as e:
+            # Обработка неожиданных ошибок подключения/сети
+            error_msg = f"Failed to initialize: {e}"
+            self._logger.error("initialize_unexpected_error", error=str(e))
+            raise RuntimeError(error_msg) from e
 
 
 class CreateSessionUseCase(UseCase):
@@ -102,14 +149,21 @@ class CreateSessionUseCase(UseCase):
     async def execute(self, request: CreateSessionRequest) -> CreateSessionResponse:
         """Создает новую сессию.
         
+        Полный жизненный цикл:
+        1. Подключение к серверу (если еще не подключены)
+        2. Отправка initialize запроса для получения capabilities
+        3. Аутентификация (если требуется)
+        4. Создание сессии через session/new
+        5. Сохранение в repository
+        
         Аргументы:
-            request: CreateSessionRequest с параметрами
+            request: CreateSessionRequest с параметрами подключения и credentials
         
         Возвращает:
             CreateSessionResponse с созданной сессией
         
         Raises:
-            UseCaseError: При ошибке создания
+            RuntimeError: При ошибке подключения, аутентификации или создания сессии
         """
         self._logger.info(
             "creating_session",
@@ -117,24 +171,114 @@ class CreateSessionUseCase(UseCase):
             port=request.server_port,
         )
         
-        # Создаем Session сущность
-        session = Session.create(
-            server_host=request.server_host,
-            server_port=request.server_port,
-            client_capabilities=request.client_capabilities or {},
-            server_capabilities={},
-        )
+        try:
+            from acp_client.messages import ACPMessage
+            
+            # Подключение к серверу
+            if not self._transport.is_connected():
+                await self._transport.connect()
+                self._logger.info("connected_to_server")
+            
+            # Шаг 1: Инициализация для получения capabilities
+            init_request = ACPMessage.request("initialize", {})
+            await self._transport.send(init_request.to_dict())
+            
+            init_response_data = await self._transport.receive()
+            init_response = ACPMessage.from_dict(init_response_data)
+            
+            if init_response.error is not None:
+                error_msg = f"Initialize failed: {init_response.error.message}"
+                self._logger.error("initialize_failed_during_session_create", error=error_msg)
+                raise RuntimeError(error_msg)
+            
+            server_capabilities = (init_response.result or {}).get("serverCapabilities", {})
+            self._logger.debug("server_capabilities_received")
+            
+            # Шаг 2: Аутентификация (если требуется)
+            if request.auth_method and request.auth_credentials:
+                auth_request = ACPMessage.request(
+                    "authenticate",
+                    {
+                        "authMethod": request.auth_method,
+                        **request.auth_credentials,
+                    },
+                )
+                await self._transport.send(auth_request.to_dict())
+                auth_response_data = await self._transport.receive()
+                auth_response = ACPMessage.from_dict(auth_response_data)
+                
+                if auth_response.error is not None:
+                    error_msg = f"Authentication failed: {auth_response.error.message}"
+                    self._logger.error(
+                        "authentication_failed",
+                        auth_method=request.auth_method,
+                        error=error_msg,
+                    )
+                    raise RuntimeError(error_msg)
+                
+                self._logger.info("authenticated", auth_method=request.auth_method)
+            
+            # Шаг 3: Создание сессии через session/new
+            session_request = ACPMessage.request(
+                "session/new",
+                {
+                    "clientCapabilities": request.client_capabilities or {},
+                },
+            )
+            await self._transport.send(session_request.to_dict())
+            
+            session_response_data = await self._transport.receive()
+            session_response = ACPMessage.from_dict(session_response_data)
+            
+            if session_response.error is not None:
+                error_msg = f"Session creation failed: {session_response.error.message}"
+                self._logger.error("session_creation_failed", error=error_msg)
+                raise RuntimeError(error_msg)
+            
+            # Шаг 4: Создание Domain сущности из ответа
+            result = session_response.result or {}
+            session_id = result.get("sessionId")
+            
+            if not session_id:
+                error_msg = "Server response missing sessionId"
+                self._logger.error("missing_session_id_in_response")
+                raise RuntimeError(error_msg)
+            
+            session = Session.create(
+                server_host=request.server_host,
+                server_port=request.server_port,
+                client_capabilities=request.client_capabilities or {},
+                server_capabilities=server_capabilities,
+                session_id=session_id,
+            )
+            
+            # Отмечаем аутентификацию если была
+            if request.auth_method:
+                session.is_authenticated = True
+            
+            # Шаг 5: Сохранение в repository
+            await self._session_repo.save(session)
+            
+            self._logger.info(
+                "session_created_and_saved",
+                session_id=session.id,
+                is_authenticated=session.is_authenticated,
+            )
+            
+            return CreateSessionResponse(
+                session_id=session.id,
+                server_capabilities=session.server_capabilities,
+                is_authenticated=session.is_authenticated,
+            )
         
-        # Сохраняем в repository
-        await self._session_repo.save(session)
-        
-        self._logger.info("session_created", session_id=session.id)
-        
-        return CreateSessionResponse(
-            session_id=session.id,
-            server_capabilities=session.server_capabilities,
-            is_authenticated=session.is_authenticated,
-        )
+        except RuntimeError as e:
+            self._logger.error("create_session_runtime_error", error=str(e))
+            raise
+        except Exception as e:
+            # Обработка неожиданных ошибок
+            error_msg = f"Failed to create session: {e}"
+            self._logger.error("create_session_unexpected_error", error=str(e))
+            raise RuntimeError(error_msg) from e
 
 
 class LoadSessionUseCase(UseCase):
@@ -211,16 +355,30 @@ class SendPromptUseCase(UseCase):
         self._logger = structlog.get_logger("send_prompt_use_case")
     
     async def execute(self, request: SendPromptRequest) -> SendPromptResponse:
-        """Отправляет prompt в сессию.
+        """Отправляет prompt в сессию с обработкой событий.
+        
+        Полный процесс:
+        1. Проверка сессии в repository
+        2. Отправка session/prompt запроса с вложенными файлами
+        3. Обработка промежуточных событий (session/update, permission, и т.д.)
+        4. Получение финального результата
+        5. Сохранение обновлений сессии
         
         Аргументы:
-            request: SendPromptRequest с prompt и callbacks
+            request: SendPromptRequest с:
+                - session_id: ID активной сессии
+                - prompt_text: Текст запроса
+                - callbacks: Callbacks для обработки событий
         
         Возвращает:
-            SendPromptResponse с результатом
+            SendPromptResponse с:
+                - session_id: ID сессии
+                - prompt_result: Финальный результат выполнения
+                - updates: Список обновлений, полученных во время выполнения
         
         Raises:
-            UseCaseError: При ошибке отправки
+            ValueError: Если сессия не найдена
+            RuntimeError: При ошибке транспорта или протокола
         """
         self._logger.info(
             "sending_prompt",
@@ -228,23 +386,137 @@ class SendPromptUseCase(UseCase):
             prompt_length=len(request.prompt_text),
         )
         
-        # Проверяем что сессия существует
-        session = await self._session_repo.load(request.session_id)
-        if session is None:
-            self._logger.error("session_not_found", session_id=request.session_id)
-            msg = f"Session {request.session_id} not found"
-            raise ValueError(msg)
+        try:
+            # Проверяем что сессия существует
+            session = await self._session_repo.load(request.session_id)
+            if session is None:
+                self._logger.error("session_not_found", session_id=request.session_id)
+                msg = f"Session {request.session_id} not found"
+                raise ValueError(msg)
+            
+            # Сохраняем полученные обновления для возврата в response
+            collected_updates: list[dict[str, Any]] = []
+            
+            # Обработчик для session/update - собираем обновления
+            def handle_update(update_data: dict[str, Any]) -> None:
+                """Обработчик обновлений сессии."""
+                self._logger.debug("session_update_received", update_data=update_data)
+                collected_updates.append(update_data)
+                
+                # Передаем в пользовательский callback если есть
+                if request.callbacks and request.callbacks.on_update:
+                    try:
+                        request.callbacks.on_update(update_data)
+                    except Exception as e:
+                        self._logger.warning(
+                            "user_update_callback_error",
+                            error=str(e),
+                        )
+            
+            # Обработчик для permission - обрабатываем через callback
+            def handle_permission(perm_data: dict[str, Any]) -> str | None:
+                """Обработчик запроса разрешения."""
+                self._logger.debug("permission_request_received", perm_data=perm_data)
+                
+                if request.callbacks and request.callbacks.on_permission:
+                    try:
+                        result = request.callbacks.on_permission(perm_data)
+                        self._logger.info("permission_handled", result=result)
+                        return result
+                    except Exception as e:
+                        self._logger.warning(
+                            "user_permission_callback_error",
+                            error=str(e),
+                        )
+                        return None
+                
+                return None
+            
+            # Подготовляем callbacks для транспорта
+            transport_callbacks = {
+                "on_update": handle_update,
+                "on_permission": handle_permission,
+            }
+            
+            # Добавляем остальные callbacks если предоставлены
+            if request.callbacks:
+                if request.callbacks.on_fs_read:
+                    transport_callbacks["on_fs_read"] = request.callbacks.on_fs_read
+                if request.callbacks.on_fs_write:
+                    transport_callbacks["on_fs_write"] = request.callbacks.on_fs_write
+                if request.callbacks.on_terminal_create:
+                    transport_callbacks["on_terminal_create"] = request.callbacks.on_terminal_create
+                if request.callbacks.on_terminal_output:
+                    transport_callbacks["on_terminal_output"] = (
+                        request.callbacks.on_terminal_output
+                    )
+                if request.callbacks.on_terminal_wait_for_exit:
+                    transport_callbacks["on_terminal_wait"] = (
+                        request.callbacks.on_terminal_wait_for_exit
+                    )
+                if request.callbacks.on_terminal_release:
+                    transport_callbacks["on_terminal_release"] = (
+                        request.callbacks.on_terminal_release
+                    )
+                if request.callbacks.on_terminal_kill:
+                    transport_callbacks["on_terminal_kill"] = (
+                        request.callbacks.on_terminal_kill
+                    )
+            
+            # Отправляем prompt через transport с обработкой callbacks
+            prompt_response = await self._transport.request_with_callbacks(
+                method="session/prompt",
+                params={
+                    "sessionId": request.session_id,
+                    "prompt": request.prompt_text,
+                },
+                **transport_callbacks,
+            )
+            
+            # Проверяем ошибки в ответе
+            from acp_client.messages import ACPMessage
+            response = ACPMessage.from_dict(prompt_response)
+            
+            if response.error is not None:
+                error_msg = f"Prompt failed: {response.error.message}"
+                self._logger.error(
+                    "prompt_failed",
+                    session_id=request.session_id,
+                    error=error_msg,
+                )
+                raise RuntimeError(error_msg)
+            
+            prompt_result = response.result or {}
+            
+            # Обновляем сессию в repository
+            session.is_authenticated = True  # После успешного prompt считаем аутентифицированной
+            await self._session_repo.save(session)
+            
+            self._logger.info(
+                "prompt_completed",
+                session_id=request.session_id,
+                updates_count=len(collected_updates),
+            )
+            
+            return SendPromptResponse(
+                session_id=request.session_id,
+                prompt_result=prompt_result,
+                updates=collected_updates,
+            )
         
-        # TODO: Реализовать отправку prompt через transport
-        # когда будет готова инфраструктура
-        
-        self._logger.info("prompt_sent", session_id=request.session_id)
-        
-        return SendPromptResponse(
-            session_id=request.session_id,
-            prompt_result={},
-            updates=[],
-        )
+        except ValueError as e:
+            # Ошибка валидации (не найдена сессия)
+            self._logger.error("send_prompt_validation_error", error=str(e))
+            raise
+        except RuntimeError as e:
+            # Ошибка транспорта или протокола
+            self._logger.error("send_prompt_runtime_error", error=str(e))
+            raise
+        except Exception as e:
+            # Неожиданные ошибки
+            error_msg = f"Failed to send prompt: {e}"
+            self._logger.error("send_prompt_unexpected_error", error=str(e))
+            raise RuntimeError(error_msg) from e
 
 
 class ListSessionsUseCase(UseCase):
