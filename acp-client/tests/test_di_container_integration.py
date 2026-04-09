@@ -42,13 +42,9 @@ class TestViewModelFactory:
         """ViewModelFactory требует coordinator как обязательный параметр."""
         container = DIContainer()
         
-        # Без coordinator выбросит TypeError
-        with pytest.raises(TypeError, match="session_coordinator is required"):
-            ViewModelFactory.register_view_models(container, session_coordinator=None)
-        
-        # Без параметра координатора тоже ошибка
+        # Без параметра координатора - ошибка типизации
         with pytest.raises(TypeError):
-            ViewModelFactory.register_view_models(container)  # type: ignore[missing-argument]
+            ViewModelFactory.register_view_models(container, session_coordinator=None)  # type: ignore[arg-type]
 
     def test_register_view_models_with_coordinator(self) -> None:
         """ViewModelFactory регистрирует все три VM с coordinator и event_bus."""

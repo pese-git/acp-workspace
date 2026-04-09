@@ -184,7 +184,8 @@ class TestObservableCommand:
             await cmd.execute()
         
         assert cmd.is_executing.value is False
-        assert "Test error" in cmd.error.value  # type: ignore[unsupported-operator]
+        assert cmd.error.value is not None
+        assert "Test error" in cmd.error.value
 
     @pytest.mark.asyncio
     async def test_command_sync_handler(self) -> None:

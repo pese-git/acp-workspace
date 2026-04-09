@@ -137,8 +137,8 @@ class ChatView(VerticalScroll):
             
         # Извлекаем тип и содержимое из сообщения
         if isinstance(message, dict):
-            msg_type: str = message.get("type", "unknown")  # type: ignore[no-matching-overload]
-            content: str = message.get("content", "")  # type: ignore[no-matching-overload]
+            msg_type: str = str(message.get("type", "unknown"))  # type: ignore[arg-type]
+            content: str = str(message.get("content", ""))  # type: ignore[arg-type]
             
             # Форматируем сообщение в зависимости от типа
             if msg_type == "user":

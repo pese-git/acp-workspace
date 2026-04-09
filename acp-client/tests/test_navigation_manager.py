@@ -622,7 +622,8 @@ class TestNavigationManager:
             pass
         
         modal = CustomModalScreen()
-        modal.dismiss = Mock()  # type: ignore[invalid-assignment]
+        from unittest.mock import AsyncMock
+        modal.dismiss = AsyncMock()  # type: ignore[assignment, attr-defined]
         
         # Имитируем registration через metadata
         modal_type = type(modal).__name__
