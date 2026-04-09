@@ -195,6 +195,35 @@ class ACPClientApp(App[None]):
             exclusive=False
         )
 
+    def on_prompt_input_submitted(self, event: PromptInput.Submitted) -> None:
+        """Обработать отправку промпта пользователем.
+        
+        Args:
+            event: Событие с текстом промпта
+        """
+        # Получаем ID активной сессии
+        session_id = self._session_vm.selected_session_id.value
+        
+        if not session_id:
+            self._app_logger.warning("prompt_submitted_without_active_session")
+            # Можно показать уведомление пользователю
+            return
+        
+        self._app_logger.info(
+            "prompt_submitted",
+            session_id=session_id,
+            prompt_length=len(event.text),
+        )
+        
+        # Добавляем сообщение пользователя в чат
+        self._chat_vm.add_message("user", event.text)
+        
+        # Запускаем отправку промпта асинхронно
+        self.run_worker(
+            self._chat_vm.send_prompt_cmd.execute(session_id, event.text),
+            exclusive=False,
+        )
+
     async def on_unmount(self) -> None:
         """Очистка ресурсов при завершении приложения."""
         self._app_logger.info("app_unmounting")

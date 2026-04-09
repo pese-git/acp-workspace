@@ -12,7 +12,7 @@ from typing import Any
 from acp_client.domain import SessionRepository, TransportService
 from acp_client.infrastructure.logging_config import get_logger
 
-from .dto import CreateSessionRequest
+from .dto import CreateSessionRequest, PromptCallbacks, SendPromptRequest
 from .use_cases import (
     CreateSessionUseCase,
     InitializeUseCase,
@@ -130,3 +130,71 @@ class SessionCoordinator:
         self._logger.info("listing_sessions")
         response = await self.list_sessions_use_case.execute()
         return response.sessions
+    
+    async def send_prompt(
+        self,
+        session_id: str,
+        prompt_text: str,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Отправить prompt в активную сессию.
+        
+        Аргументы:
+            session_id: ID сессии
+            prompt_text: Текст промпта
+            **kwargs: Дополнительные параметры (callbacks и т.д.)
+        
+        Возвращает:
+            Результат выполнения промпта
+        """
+        # DEBUG: Проверяем что пришло в kwargs
+        self._logger.debug(
+            "send_prompt - received kwargs",
+            has_kwargs=bool(kwargs),
+            kwargs_keys=list(kwargs.keys()) if kwargs else [],
+        )
+        
+        # Извлекаем callbacks если переданы
+        callbacks = kwargs.get('callbacks')
+        if callbacks is None and any(k.startswith('on_') for k in kwargs):
+            # Создаем PromptCallbacks из kwargs
+            callbacks = PromptCallbacks(
+                on_update=kwargs.get('on_update'),
+                on_permission=kwargs.get('on_permission'),
+                on_fs_read=kwargs.get('on_fs_read'),
+                on_fs_write=kwargs.get('on_fs_write'),
+                on_terminal_create=kwargs.get('on_terminal_create'),
+                on_terminal_output=kwargs.get('on_terminal_output'),
+                on_terminal_wait_for_exit=kwargs.get('on_terminal_wait_for_exit'),
+                on_terminal_release=kwargs.get('on_terminal_release'),
+                on_terminal_kill=kwargs.get('on_terminal_kill'),
+            )
+        
+        # Trace логи после извлечения callbacks
+        self._logger.info(
+            "SessionCoordinator.send_prompt callbacks extracted",
+            has_callbacks=callbacks is not None,
+            has_on_update=callbacks.on_update is not None if callbacks else False,
+        )
+        
+        # DEBUG: Проверяем что получилось с callbacks
+        self._logger.debug(
+            "send_prompt - callbacks extracted",
+            has_callbacks=callbacks is not None,
+            has_on_update=callbacks.on_update is not None if callbacks else False,
+        )
+        
+        request = SendPromptRequest(
+            session_id=session_id,
+            prompt_text=prompt_text,
+            callbacks=callbacks,
+        )
+        
+        self._logger.info("sending_prompt", session_id=session_id, prompt_length=len(prompt_text))
+        response = await self.send_prompt_use_case.execute(request)
+        
+        return {
+            "session_id": response.session_id,
+            "prompt_result": response.prompt_result,
+            "updates": response.updates,
+        }

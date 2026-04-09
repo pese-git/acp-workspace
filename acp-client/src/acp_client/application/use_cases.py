@@ -433,15 +433,28 @@ class SendPromptUseCase(UseCase):
                 self._logger.debug("session_update_received", update_data=update_data)
                 collected_updates.append(update_data)
                 
+                # DEBUG: Проверяем наличие callback
+                self._logger.debug(
+                    "handle_update - checking callbacks",
+                    has_request_callbacks=request.callbacks is not None,
+                    has_on_update=bool(request.callbacks and request.callbacks.on_update),
+                )
+                
                 # Передаем в пользовательский callback если есть
                 if request.callbacks and request.callbacks.on_update:
                     try:
+                        self._logger.debug("handle_update - calling user callback")
                         request.callbacks.on_update(update_data)
                     except Exception as e:
                         self._logger.warning(
                             "user_update_callback_error",
                             error=str(e),
                         )
+                else:
+                    self._logger.warning(
+                        "handle_update - NO USER CALLBACK REGISTERED",
+                        has_callbacks=request.callbacks is not None,
+                    )
             
             # Обработчик для permission - обрабатываем через callback
             def handle_permission(perm_data: dict[str, Any]) -> str | None:
@@ -494,11 +507,12 @@ class SendPromptUseCase(UseCase):
                     )
             
             # Отправляем prompt через transport с обработкой callbacks
+            # Согласно протоколу ACP, prompt должен быть массивом content items
             prompt_response = await self._transport.request_with_callbacks(
                 method="session/prompt",
                 params={
                     "sessionId": request.session_id,
-                    "prompt": request.prompt_text,
+                    "prompt": [{"type": "text", "text": request.prompt_text}],
                 },
                 **transport_callbacks,
             )
