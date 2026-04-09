@@ -59,12 +59,14 @@ class FileViewerModal(ModalScreen[None]):
         # Если переданы параметры, инициализируем состояние в ViewModel
         if file_path and content:
             self.file_viewer_vm.show_file(Path(file_path), content)
-        
-        # Получаем текущее состояние из ViewModel
-        self._file_path = str(
-            self.file_viewer_vm.file_path.value or "Неизвестный файл"
-        )
-        self._content = self.file_viewer_vm.content.value or ""
+            self._file_path = str(file_path)
+            self._content = content
+        else:
+            # Получаем текущее состояние из ViewModel
+            self._file_path = str(
+                self.file_viewer_vm.file_path.value or "Неизвестный файл"
+            )
+            self._content = self.file_viewer_vm.content.value or ""
         
         # Управление поиском в файле
         self._match_lines: list[int] = []
@@ -109,12 +111,6 @@ class FileViewerModal(ModalScreen[None]):
             self._on_content_changed
         )
         self._unsubscribers.append(unsub_content)
-        
-        # Подписываемся на изменение видимости
-        unsub_visible = self.file_viewer_vm.is_visible.subscribe(
-            self._on_visibility_changed
-        )
-        self._unsubscribers.append(unsub_visible)
         
         # Подписываемся на изменение статуса загрузки
         unsub_loading = self.file_viewer_vm.is_loading.subscribe(
@@ -161,14 +157,6 @@ class FileViewerModal(ModalScreen[None]):
         except Exception:
             pass  # Компонент еще не смонтирован
     
-    def _on_visibility_changed(self, is_visible: bool) -> None:
-        """Обработчик изменения видимости в ViewModel.
-        
-        Args:
-            is_visible: True если окно должно быть видимым.
-        """
-        if not is_visible:
-            self.dismiss(None)
     
     def _on_loading_changed(self, is_loading: bool) -> None:
         """Обработчик изменения статуса загрузки в ViewModel.
@@ -190,10 +178,11 @@ class FileViewerModal(ModalScreen[None]):
         self._unsubscribe_from_view_model()
     
     def action_close(self) -> None:
-        """Закрывает окно просмотра файла по hotkey."""
-        # Обновляем состояние ViewModel
+        """Закрывает окно просмотра файла по hotkey.
+        
+        Только обновляет ViewModel, NavigationManager сам удалит виджет.
+        """
         self.file_viewer_vm.hide()
-        self.dismiss(None)
     
     def show_file(self, path: Path | str, content: str) -> None:
         """Показать файл в модальном окне (обратная совместимость).

@@ -101,12 +101,6 @@ class PermissionModal(ModalScreen[str | None]):
             self._on_message_changed
         )
         self._unsubscribers.append(unsub_message)
-        
-        # Подписываемся на изменение видимости
-        unsub_visible = self.permission_vm.is_visible.subscribe(
-            self._on_visibility_changed
-        )
-        self._unsubscribers.append(unsub_visible)
     
     def _on_permission_type_changed(self, new_type: str) -> None:
         """Обработчик изменения типа разрешения в ViewModel.
@@ -158,14 +152,6 @@ class PermissionModal(ModalScreen[str | None]):
         except Exception:
             pass  # Компонент еще не смонтирован
     
-    def _on_visibility_changed(self, is_visible: bool) -> None:
-        """Обработчик изменения видимости в ViewModel.
-        
-        Args:
-            is_visible: Новое значение видимости.
-        """
-        # Синхронизируем видимость с ViewModel (для информации)
-        pass
     
     def show_request(
         self,

@@ -83,6 +83,21 @@ class DIContainer:
             scope=scope.value,
         )
     
+    def set_instance(self, interface: type[T], instance: T) -> None:
+        """Устанавливает готовый экземпляр для интерфейса.
+        
+        Полезно для установки singleton экземпляров после их создания.
+        
+        Аргументы:
+            interface: Интерфейс
+            instance: Готовый экземпляр
+        """
+        self._singletons[interface] = instance
+        self._logger.debug(
+            "set_instance",
+            interface=interface.__name__,
+        )
+    
     def resolve(self, interface: type[T]) -> T:
         """Разрешает сервис из контейнера.
         

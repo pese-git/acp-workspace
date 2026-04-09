@@ -90,12 +90,6 @@ class TerminalLogModal(ModalScreen[None]):
             self._on_entries_changed
         )
         self._unsubscribers.append(unsub_entries)
-        
-        # Подписываемся на изменение видимости
-        unsub_visible = self.terminal_log_vm.is_visible.subscribe(
-            self._on_visibility_changed
-        )
-        self._unsubscribers.append(unsub_visible)
     
     def _on_entries_changed(self, entries: list[str]) -> None:
         """Обработчик изменения записей логов в ViewModel.
@@ -112,22 +106,12 @@ class TerminalLogModal(ModalScreen[None]):
             content_widget = self.query_one("#terminal-log-content", Static)
             content_widget.update(self._output)
     
-    def _on_visibility_changed(self, is_visible: bool) -> None:
-        """Обработчик изменения видимости в ViewModel.
-        
-        Args:
-            is_visible: Нужно ли показывать модальное окно.
-        """
-        # При скрытии обновляем статус
-        if not is_visible:
-            with suppress(Exception):
-                self.dismiss(None)
-
     def action_close(self) -> None:
-        """Закрывает модальное окно по hotkey."""
-
+        """Закрывает модальное окно по hotkey.
+        
+        Только обновляет ViewModel, NavigationManager сам удалит виджет.
+        """
         self.terminal_log_vm.hide()
-        self.dismiss(None)
 
     # === Методы для обратной совместимости ===
     

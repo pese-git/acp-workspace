@@ -33,6 +33,7 @@ from acp_client.presentation.session_view_model import SessionViewModel
 from acp_client.presentation.terminal_log_view_model import TerminalLogViewModel
 from acp_client.presentation.terminal_view_model import TerminalViewModel
 from acp_client.presentation.ui_view_model import UIViewModel
+from acp_client.tui.navigation import NavigationManager
 
 from .components import (
     ChatView,
@@ -202,6 +203,9 @@ class ACPClientApp(App[None]):
         self._ui_state_store = UIStateStore()
         self._loaded_ui_state = self._ui_state_store.load()
         
+        # NavigationManager будет инициализирован в on_mount после что App готов
+        self._navigation_manager: NavigationManager | None = None
+        
         # Инициализируем DIContainer с помощью DIBootstrapper
         # DIBootstrapper регистрирует все необходимые сервисы и ViewModels
         try:
@@ -290,15 +294,87 @@ class ACPClientApp(App[None]):
 
     def on_mount(self) -> None:
         """Запускает начальную инициализацию после старта приложения."""
+        
+        # Инициализируем NavigationManager после монтирования App
+        try:
+            self._navigation_manager = NavigationManager(self)
+            self._container.set_instance(NavigationManager, self._navigation_manager)
+            self._app_logger.info("navigation_manager_initialized")
+            
+            # Подписываем ViewModels на NavigationManager
+            self._setup_navigation_subscriptions()
+        except Exception as e:
+            self._app_logger.error(
+                "failed_to_initialize_navigation_manager",
+                error=str(e),
+            )
+            # NavigationManager критичен для TUI, но приложение может работать без него
+            # Логируем ошибку но продолжаем инициализацию
 
         self.run_worker(self._bootstrap(), exclusive=True)
 
     async def on_unmount(self) -> None:
         """Закрывает persistent WS-соединение при завершении приложения."""
+        
+        # Очищаем NavigationManager
+        if self._navigation_manager:
+            try:
+                self._navigation_manager.dispose()
+                self._app_logger.debug("navigation_manager_disposed")
+            except Exception as e:
+                self._app_logger.error(
+                    "error_disposing_navigation_manager",
+                    error=str(e),
+                )
 
         self._persist_ui_state()
         self._persist_tui_config()
         await self._connection.close()
+    
+    def _setup_navigation_subscriptions(self) -> None:
+        """Настроить подписки ViewModels на NavigationManager.
+        
+        Синхронизирует видимость модальных окон с их состояниями в ViewModels.
+        Когда ViewModel изменяет is_visible, модальное окно автоматически показывается/скрывается.
+        """
+        if not self._navigation_manager:
+            self._app_logger.warning("navigation_manager_not_initialized")
+            return
+        
+        try:
+            # Подписываем FileViewerViewModel
+            self._app_logger.debug("subscribing_file_viewer_vm")
+            self._navigation_manager.subscribe_to_view_model(
+                view_model=self._file_viewer_vm,
+                modal_type="file_viewer",
+                on_show=lambda: self._app_logger.debug("file_viewer_showing"),
+                on_hide=lambda: self._app_logger.debug("file_viewer_hidden"),
+            )
+            
+            # Подписываем PermissionViewModel
+            self._app_logger.debug("subscribing_permission_vm")
+            self._navigation_manager.subscribe_to_view_model(
+                view_model=self._permission_vm,
+                modal_type="permission_modal",
+                on_show=lambda: self._app_logger.debug("permission_modal_showing"),
+                on_hide=lambda: self._app_logger.debug("permission_modal_hidden"),
+            )
+            
+            # Подписываем TerminalLogViewModel
+            self._app_logger.debug("subscribing_terminal_log_vm")
+            self._navigation_manager.subscribe_to_view_model(
+                view_model=self._terminal_log_vm,
+                modal_type="terminal_log",
+                on_show=lambda: self._app_logger.debug("terminal_log_showing"),
+                on_hide=lambda: self._app_logger.debug("terminal_log_hidden"),
+            )
+            
+            self._app_logger.info("navigation_subscriptions_setup_complete")
+        except Exception as e:
+            self._app_logger.error(
+                "error_setting_up_navigation_subscriptions",
+                error=str(e),
+            )
 
     async def _bootstrap(self) -> None:
         """Инициализирует соединение и обеспечивает активную сессию."""
