@@ -25,6 +25,8 @@ from acp_client.messages import (
     parse_tool_call_update,
 )
 from acp_client.presentation.chat_view_model import ChatViewModel
+from acp_client.presentation.filesystem_view_model import FileSystemViewModel
+from acp_client.presentation.plan_view_model import PlanViewModel
 from acp_client.presentation.session_view_model import SessionViewModel
 from acp_client.presentation.ui_view_model import UIViewModel
 
@@ -226,6 +228,12 @@ class ACPClientApp(App[None]):
             
             self._chat_vm = self._container.resolve(ChatViewModel)
             self._app_logger.debug("resolved_chat_view_model")
+            
+            self._plan_vm = self._container.resolve(PlanViewModel)
+            self._app_logger.debug("resolved_plan_view_model")
+            
+            self._filesystem_vm = self._container.resolve(FileSystemViewModel)
+            self._app_logger.debug("resolved_filesystem_view_model")
         except Exception as e:
             self._app_logger.error(
                 "failed_to_resolve_view_models",
@@ -245,11 +253,16 @@ class ACPClientApp(App[None]):
             with Vertical(id="sidebar-column"):
                 # Передаем SessionViewModel в Sidebar для управления сессиями
                 yield Sidebar(self._session_vm)
-                yield FileTree(root_path=self._sessions.active_cwd)
+                # Передаем FileSystemViewModel в FileTree для управления файловой системой
+                yield FileTree(
+                    filesystem_vm=self._filesystem_vm,
+                    root_path=self._sessions.active_cwd,
+                )
             with Vertical(id="main-column"):
                 # Передаем ChatViewModel в ChatView для отображения сообщений
                 yield ChatView(self._chat_vm)
-                yield PlanPanel()
+                # Передаем PlanViewModel в PlanPanel для отображения плана
+                yield PlanPanel(self._plan_vm)
             # Передаем ChatViewModel в ToolPanel для отображения tool calls
             yield ToolPanel(self._chat_vm)
         with Vertical(id="bottom"):

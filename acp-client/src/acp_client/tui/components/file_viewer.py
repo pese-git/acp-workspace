@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from rich.syntax import Syntax
 from textual.app import ComposeResult
@@ -10,9 +12,21 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Input, Static
 
+if TYPE_CHECKING:
+    from acp_client.presentation.file_viewer_view_model import FileViewerViewModel
+
 
 class FileViewerModal(ModalScreen[None]):
-    """Показывает содержимое выбранного файла с подсветкой синтаксиса."""
+    """Показывает содержимое выбранного файла с подсветкой синтаксиса.
+    
+    Интегрирован с FileViewerViewModel для управления состоянием:
+    - file_path: путь к просматриваемому файлу из ViewModel
+    - content: содержимое файла из ViewModel
+    - is_visible: видимость модального окна из ViewModel
+    - is_loading: статус загрузки из ViewModel
+    
+    Все изменения UI синхронизируются с ViewModel через Observable паттерн.
+    """
 
     BINDINGS = [
         ("ctrl+f", "focus_search", "Search"),
@@ -22,14 +36,45 @@ class FileViewerModal(ModalScreen[None]):
         ("q", "close", "Close"),
     ]
 
-    def __init__(self, *, file_path: str, content: str) -> None:
-        """Сохраняет путь и текст файла для последующего рендера."""
-
+    def __init__(
+        self,
+        *,
+        file_viewer_vm: FileViewerViewModel,
+        file_path: str | None = None,
+        content: str | None = None,
+    ) -> None:
+        """Создает модальное окно просмотра файла.
+        
+        Args:
+            file_viewer_vm: FileViewerViewModel для управления состоянием.
+                Обязательный параметр для MVVM интеграции.
+            file_path: Начальный путь файла (опционально).
+                Если указан, используется вместо значения из ViewModel.
+            content: Начальное содержимое файла (опционально).
+                Если указан, используется вместо значения из ViewModel.
+        """
         super().__init__()
-        self._file_path = file_path
-        self._content = content
+        self.file_viewer_vm = file_viewer_vm
+        
+        # Если переданы параметры, инициализируем состояние в ViewModel
+        if file_path and content:
+            self.file_viewer_vm.show_file(Path(file_path), content)
+        
+        # Получаем текущее состояние из ViewModel
+        self._file_path = str(
+            self.file_viewer_vm.file_path.value or "Неизвестный файл"
+        )
+        self._content = self.file_viewer_vm.content.value or ""
+        
+        # Управление поиском в файле
         self._match_lines: list[int] = []
         self._active_match_index: int = -1
+        
+        # Сохраняем unsubscribe функции для очистки при уничтожении
+        self._unsubscribers: list[Callable[[], None]] = []
+        
+        # Подписываемся на изменения ViewModel сразу (не только при on_mount)
+        self._subscribe_to_view_model()
 
     def compose(self) -> ComposeResult:
         """Рендерит заголовок и подсвеченный контент файла."""
@@ -45,13 +90,130 @@ class FileViewerModal(ModalScreen[None]):
 
     def on_mount(self) -> None:
         """Оставляет фокус на контенте файла при открытии модального окна."""
-
         self.query_one("#file-viewer-content", Static).focus()
+    
+    def _subscribe_to_view_model(self) -> None:
+        """Подписаться на изменения ViewModel.
+        
+        Устанавливает observers на все Observable свойства ViewModel
+        для синхронизации UI при изменениях состояния.
+        """
+        # Подписываемся на изменение пути файла
+        unsub_path = self.file_viewer_vm.file_path.subscribe(
+            self._on_file_path_changed
+        )
+        self._unsubscribers.append(unsub_path)
+        
+        # Подписываемся на изменение содержимого
+        unsub_content = self.file_viewer_vm.content.subscribe(
+            self._on_content_changed
+        )
+        self._unsubscribers.append(unsub_content)
+        
+        # Подписываемся на изменение видимости
+        unsub_visible = self.file_viewer_vm.is_visible.subscribe(
+            self._on_visibility_changed
+        )
+        self._unsubscribers.append(unsub_visible)
+        
+        # Подписываемся на изменение статуса загрузки
+        unsub_loading = self.file_viewer_vm.is_loading.subscribe(
+            self._on_loading_changed
+        )
+        self._unsubscribers.append(unsub_loading)
+    
+    def _on_file_path_changed(self, new_path: Path | None) -> None:
+        """Обработчик изменения пути файла в ViewModel.
+        
+        Args:
+            new_path: Новый путь файла или None.
+        """
+        if new_path is None:
+            return
+        
+        self._file_path = str(new_path)
+        
+        # Обновляем заголовок если компонент смонтирован
+        try:
+            title_widget = self.query_one("#file-viewer-title", Static)
+            title_widget.update(f"Файл: {self._file_path}")
+        except Exception:
+            pass  # Компонент еще не смонтирован
+    
+    def _on_content_changed(self, new_content: str) -> None:
+        """Обработчик изменения содержимого в ViewModel.
+        
+        Args:
+            new_content: Новое содержимое файла.
+        """
+        self._content = new_content
+        self._match_lines = []
+        self._active_match_index = -1
+        
+        # Обновляем контент если компонент смонтирован
+        try:
+            content_widget = self.query_one("#file-viewer-content", Static)
+            content_widget.update(self._build_syntax())
+            # Сбрасываем поиск
+            search_input = self.query_one("#file-viewer-search", Input)
+            search_input.value = ""
+            self._update_search_status()
+        except Exception:
+            pass  # Компонент еще не смонтирован
+    
+    def _on_visibility_changed(self, is_visible: bool) -> None:
+        """Обработчик изменения видимости в ViewModel.
+        
+        Args:
+            is_visible: True если окно должно быть видимым.
+        """
+        if not is_visible:
+            self.dismiss(None)
+    
+    def _on_loading_changed(self, is_loading: bool) -> None:
+        """Обработчик изменения статуса загрузки в ViewModel.
+        
+        Args:
+            is_loading: True если файл загружается.
+        """
+        # Здесь можно добавить логику отображения loading indicator
+        pass
+    
+    def _unsubscribe_from_view_model(self) -> None:
+        """Отписаться от всех изменений ViewModel."""
+        for unsubscriber in self._unsubscribers:
+            unsubscriber()
+        self._unsubscribers.clear()
 
+    def on_unmount(self) -> None:
+        """Очистить подписки при удалении компонента."""
+        self._unsubscribe_from_view_model()
+    
     def action_close(self) -> None:
         """Закрывает окно просмотра файла по hotkey."""
-
+        # Обновляем состояние ViewModel
+        self.file_viewer_vm.hide()
         self.dismiss(None)
+    
+    def show_file(self, path: Path | str, content: str) -> None:
+        """Показать файл в модальном окне (обратная совместимость).
+        
+        Обновляет состояние ViewModel и отображает файл.
+        
+        Args:
+            path: Путь к файлу (Path или строка).
+            content: Содержимое файла.
+        """
+        if isinstance(path, str):
+            path = Path(path)
+        self.file_viewer_vm.show_file(path, content)
+    
+    def close(self) -> None:
+        """Закрыть модальное окно (обратная совместимость).
+        
+        Скрывает окно через ViewModel и dismisses модальное окно.
+        """
+        self.action_close()
 
     def action_focus_search(self) -> None:
         """Переводит фокус в строку поиска по Ctrl+F."""

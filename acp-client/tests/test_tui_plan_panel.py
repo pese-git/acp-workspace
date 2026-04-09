@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from acp_client.messages import PlanEntry, PlanUpdate
+from acp_client.presentation.plan_view_model import PlanViewModel
 from acp_client.tui.components.plan_panel import PlanPanel
 
 
 def test_plan_panel_applies_plan_update_snapshot() -> None:
-    panel = PlanPanel()
+    # Создаем PlanViewModel для компонента
+    plan_vm = PlanViewModel()
+    panel = PlanPanel(plan_vm)
     panel.apply_update(
         PlanUpdate(
             sessionUpdate="plan",
@@ -23,7 +26,9 @@ def test_plan_panel_applies_plan_update_snapshot() -> None:
 
 
 def test_plan_panel_reset_restores_placeholder() -> None:
-    panel = PlanPanel()
+    # Создаем PlanViewModel для компонента
+    plan_vm = PlanViewModel()
+    panel = PlanPanel(plan_vm)
     panel.apply_update(
         PlanUpdate(
             sessionUpdate="plan",

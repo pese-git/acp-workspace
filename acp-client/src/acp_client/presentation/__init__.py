@@ -14,12 +14,24 @@
 """
 
 from acp_client.presentation.base_view_model import BaseViewModel
+from acp_client.presentation.file_viewer_view_model import FileViewerViewModel
+from acp_client.presentation.filesystem_view_model import FileSystemViewModel
 from acp_client.presentation.observable import Observable, ObservableCommand
+from acp_client.presentation.permission_view_model import PermissionViewModel
+from acp_client.presentation.plan_view_model import PlanViewModel
+from acp_client.presentation.terminal_log_view_model import TerminalLogViewModel
+from acp_client.presentation.terminal_view_model import TerminalViewModel
 from acp_client.presentation.view_model_factory import ViewModelFactory
 
 __all__ = [
     'Observable',
     'ObservableCommand',
     'BaseViewModel',
+    'FileSystemViewModel',
+    'FileViewerViewModel',
+    'PermissionViewModel',
+    'PlanViewModel',
+    'TerminalLogViewModel',
+    'TerminalViewModel',
     'ViewModelFactory',
 ]
