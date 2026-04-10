@@ -15,6 +15,9 @@ import asyncio
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+from .config import AppConfig
 from .http_server import ACPHttpServer
 from .logging import setup_logging
 from .storage import InMemoryStorage, JsonFileStorage, SessionStorage
@@ -52,9 +55,22 @@ def parse_storage_arg(storage_arg: str) -> SessionStorage:
 def run_server() -> None:
     """Запускает ACP WS-сервер из аргументов командной строки.
 
+    Загружает переменные окружения из .env файла в текущей директории.
+    Приоритет: CLI аргументы > .env переменные > значения по умолчанию
+
+    Пример .env файла:
+        ACP_LLM_PROVIDER=openai
+        ACP_LLM_MODEL=gpt-4-turbo
+        ACP_LLM_API_KEY=sk-...
+        ACP_LLM_TEMPERATURE=0.9
+        ACP_SYSTEM_PROMPT=Your custom prompt
+
     Пример использования:
+        # Загружает .env из текущей директории
         run_server()
     """
+    # Загружаем переменные окружения из .env файла если он существует
+    load_dotenv()
 
     parser = argparse.ArgumentParser(prog="acp-server")
     parser.add_argument("--host", default="127.0.0.1")
@@ -88,10 +104,66 @@ def run_server() -> None:
         default="memory",
         help="Storage backend: 'memory' (default) или 'json:/path/to/dir' для persistence",
     )
+    parser.add_argument(
+        "--llm-provider",
+        default=None,
+        help="LLM провайдер (openai, mock). Переопределяет ACP_LLM_PROVIDER",
+    )
+    parser.add_argument(
+        "--llm-model",
+        default=None,
+        help="Модель LLM. Переопределяет ACP_LLM_MODEL",
+    )
+    parser.add_argument(
+        "--llm-api-key",
+        default=None,
+        help="API ключ для LLM. Переопределяет ACP_LLM_API_KEY",
+    )
+    parser.add_argument(
+        "--llm-base-url",
+        default=None,
+        help="Base URL для LLM провайдера. Переопределяет ACP_LLM_BASE_URL",
+    )
+    parser.add_argument(
+        "--llm-temperature",
+        type=float,
+        default=None,
+        help="Temperature для LLM (0.0-1.0). Переопределяет ACP_LLM_TEMPERATURE",
+    )
+    parser.add_argument(
+        "--llm-max-tokens",
+        type=int,
+        default=None,
+        help="Максимум токенов для LLM. Переопределяет ACP_LLM_MAX_TOKENS",
+    )
+    parser.add_argument(
+        "--system-prompt",
+        default=None,
+        help="Системный промпт для агента. Переопределяет ACP_SYSTEM_PROMPT",
+    )
     args = parser.parse_args()
 
     # Инициализируем логирование перед запуском сервера
     setup_logging(level=args.log_level, json_format=args.log_json)
+
+    # Загружаем конфигурацию из переменных окружения
+    config = AppConfig.from_env()
+
+    # Переопределяем конфиг из аргументов командной строки если указаны
+    if args.llm_provider:
+        config.llm.provider = args.llm_provider
+    if args.llm_model:
+        config.llm.model = args.llm_model
+    if args.llm_api_key:
+        config.llm.api_key = args.llm_api_key
+    if args.llm_base_url:
+        config.llm.base_url = args.llm_base_url
+    if args.llm_temperature is not None:
+        config.llm.temperature = args.llm_temperature
+    if args.llm_max_tokens is not None:
+        config.llm.max_tokens = args.llm_max_tokens
+    if args.system_prompt:
+        config.agent.system_prompt = args.system_prompt
 
     auth_api_key = args.auth_api_key
     if not isinstance(auth_api_key, str) or not auth_api_key:
@@ -107,6 +179,7 @@ def run_server() -> None:
         require_auth=args.require_auth,
         auth_api_key=auth_api_key,
         storage=storage,
+        config=config,
     )
 
     asyncio.run(server.run())

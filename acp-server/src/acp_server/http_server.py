@@ -17,9 +17,14 @@ import uuid
 import structlog
 from aiohttp import WSMsgType, web
 
+from .agent.orchestrator import AgentOrchestrator
+from .agent.state import OrchestratorConfig
+from .config import AppConfig
+from .llm import LLMProvider, MockLLMProvider, OpenAIProvider
 from .messages import ACPMessage
 from .protocol import ACPProtocol, ProtocolOutcome
 from .storage import SessionStorage
+from .tools.registry import SimpleToolRegistry
 
 # Получаем структурированный logger
 logger = structlog.get_logger()
@@ -44,6 +49,7 @@ class ACPHttpServer:
         require_auth: bool = False,
         auth_api_key: str | None = None,
         storage: SessionStorage | None = None,
+        config: AppConfig | None = None,
     ) -> None:
         """Создает транспортный сервер с адресом прослушивания.
 
@@ -53,6 +59,7 @@ class ACPHttpServer:
             require_auth: Требовать аутентификацию перед session/new и session/load.
             auth_api_key: API ключ для аутентификации.
             storage: Backend для хранения сессий (по умолчанию InMemoryStorage).
+            config: Глобальная конфигурация приложения (LLM, агент и т.д.).
 
         Пример использования:
             ACPHttpServer(host="0.0.0.0", port=8080)
@@ -63,13 +70,94 @@ class ACPHttpServer:
         self.require_auth = require_auth
         self.auth_api_key = auth_api_key
         self.storage = storage
+        self.config = config or AppConfig()
+        # Оркестратор агента инициализируется в методе run()
+        self._agent_orchestrator: AgentOrchestrator | None = None
+
+    async def _initialize_llm_provider(self) -> LLMProvider | None:
+        """Инициализирует LLM провайдера на основе конфигурации.
+
+        Returns:
+            Инициализированный LLM провайдер или None если тип провайдера неизвестен.
+
+        Пример использования:
+            provider = await server._initialize_llm_provider()
+        """
+        llm_provider: LLMProvider | None = None
+
+        if self.config.llm.provider == "openai":
+            # Инициализируем OpenAI провайдера
+            openai_provider = OpenAIProvider()
+            config_dict = {
+                "api_key": self.config.llm.api_key,
+                "model": self.config.llm.model,
+                "temperature": self.config.llm.temperature,
+                "max_tokens": self.config.llm.max_tokens,
+            }
+            if self.config.llm.base_url:
+                config_dict["base_url"] = self.config.llm.base_url
+
+            await openai_provider.initialize(config_dict)
+            llm_provider = openai_provider
+            logger.info(
+                "openai llm provider initialized",
+                model=self.config.llm.model,
+            )
+        elif self.config.llm.provider == "mock":
+            # Используем mock провайдера для разработки
+            llm_provider = MockLLMProvider()
+            logger.info("mock llm provider initialized")
+        else:
+            # Неизвестный тип провайдера, логируем ошибку
+            logger.warning(
+                "unknown llm provider type, using mock",
+                provider=self.config.llm.provider,
+            )
+            llm_provider = MockLLMProvider()
+
+        return llm_provider
 
     async def run(self) -> None:
         """Запускает WS endpoint и держит процесс живым.
 
+        Инициализирует LLM провайдера и AgentOrchestrator на основе конфигурации.
+
         Пример использования:
             await ACPHttpServer().run()
         """
+        # Инициализируем LLM провайдера на основе конфигурации
+        llm_provider = await self._initialize_llm_provider()
+        
+        # Создаем AgentOrchestrator если есть провайдер
+        agent_orchestrator: AgentOrchestrator | None = None
+        if llm_provider is not None:
+            # Создаем реестр инструментов (пока пустой, можно расширить в будущем)
+            tool_registry = SimpleToolRegistry()
+            
+            # Создаем конфигурацию оркестратора на основе глобального конфига
+            orchestrator_config = OrchestratorConfig(
+                enabled=True,
+                agent_class="naive",
+                model=self.config.llm.model,
+                temperature=self.config.llm.temperature,
+                max_tokens=self.config.llm.max_tokens,
+                llm_provider_class="openai" if self.config.llm.provider == "openai" else "mock",
+            )
+            
+            # Инициализируем оркестратор
+            agent_orchestrator = AgentOrchestrator(
+                config=orchestrator_config,
+                llm_provider=llm_provider,
+                tool_registry=tool_registry,
+            )
+            
+            logger.info(
+                "agent orchestrator initialized",
+                system_prompt_length=len(self.config.agent.system_prompt),
+            )
+        
+        # Сохраняем оркестратор для использования в обработчике
+        self._agent_orchestrator = agent_orchestrator
 
         app = web.Application()
         app.router.add_get("/acp/ws", self.handle_ws_request)
