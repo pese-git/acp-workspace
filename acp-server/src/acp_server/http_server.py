@@ -242,6 +242,7 @@ class ACPHttpServer:
             require_auth=self.require_auth,
             auth_api_key=self.auth_api_key,
             storage=self.storage,
+            agent_orchestrator=self._agent_orchestrator,
         )
         # Храним отложенные завершения prompt-turn по sessionId в рамках WS-соединения.
         deferred_prompt_tasks: dict[str, asyncio.Task[None]] = {}
