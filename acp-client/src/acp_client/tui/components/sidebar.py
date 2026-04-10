@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from textual import events
 from textual.message import Message
@@ -126,7 +126,7 @@ class Sidebar(Static):
         sessions = self.session_vm.sessions.value
         if not sessions or self._selected_index >= len(sessions):
             return None
-        return sessions[self._selected_index].sessionId
+        return self._extract_session_id(sessions[self._selected_index])
 
     def _update_selected_session(self) -> None:
         """Обновить выбранную сессию в ViewModel."""
@@ -165,9 +165,10 @@ class Sidebar(Static):
 
         lines: list[str] = ["Сессии (Up/Down + Enter):"]
         for index, session in enumerate(sessions[:10]):
-            marker = "*" if session.sessionId == selected_id else " "
+            session_id = self._extract_session_id(session)
+            marker = "*" if session_id == selected_id else " "
             cursor = ">" if index == self._selected_index else " "
-            title = session.title or session.sessionId
+            title = self._extract_session_title(session)
             lines.append(f"{cursor}{marker} {title}")
         return "\n".join(lines)
 
@@ -186,9 +187,43 @@ class Sidebar(Static):
 
         # Найти индекс выбранной сессии
         for index, session in enumerate(sessions):
-            if session.sessionId == selected_id:
+            if self._extract_session_id(session) == selected_id:
                 self._selected_index = index
                 return
 
         # Если не нашли, выбрать первую
         self._selected_index = 0
+
+    @staticmethod
+    def _extract_session_id(session: Any) -> str | None:
+        """Возвращает идентификатор сессии из dict/DTO/entity объектов."""
+
+        if isinstance(session, dict):
+            raw_id = session.get("sessionId") or session.get("id")
+            return raw_id if isinstance(raw_id, str) else None
+
+        for attribute_name in ("sessionId", "id"):
+            if hasattr(session, attribute_name):
+                raw_id = getattr(session, attribute_name)
+                if isinstance(raw_id, str):
+                    return raw_id
+        return None
+
+    @classmethod
+    def _extract_session_title(cls, session: Any) -> str:
+        """Возвращает заголовок сессии или fallback по идентификатору."""
+
+        if isinstance(session, dict):
+            raw_title = session.get("title")
+            if isinstance(raw_title, str) and raw_title:
+                return raw_title
+            session_id = cls._extract_session_id(session)
+            return session_id or "unknown-session"
+        try:
+            raw_title = session.title
+            if isinstance(raw_title, str) and raw_title:
+                return raw_title
+        except AttributeError:
+            pass
+        session_id = cls._extract_session_id(session)
+        return session_id or "unknown-session"

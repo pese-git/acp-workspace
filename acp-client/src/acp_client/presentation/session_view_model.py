@@ -180,7 +180,7 @@ class SessionViewModel(BaseViewModel):
             session_id: ID сессии для переключения
         """
         # Проверить что сессия существует
-        session_exists = any(s.id == session_id for s in self.sessions.value)
+        session_exists = any(self._extract_session_id(s) == session_id for s in self.sessions.value)
 
         if not session_exists:
             error_msg = f"Session {session_id} not found"
@@ -205,13 +205,15 @@ class SessionViewModel(BaseViewModel):
             await self.coordinator.delete_session(session_id)
 
             # Удалить сессию из списка
-            sessions = [s for s in self.sessions.value if s.id != session_id]
+            sessions = [s for s in self.sessions.value if self._extract_session_id(s) != session_id]
             self.sessions.value = sessions
             self.session_count.value = len(sessions)
 
             # Если удалена выбранная сессия, выбрать первую оставшуюся или None
             if self.selected_session_id.value == session_id:
-                self.selected_session_id.value = sessions[0].id if sessions else None
+                self.selected_session_id.value = (
+                    self._extract_session_id(sessions[0]) if sessions else None
+                )
 
             self.logger.info("Session deleted successfully", session_id=session_id)
         except Exception as e:
@@ -252,7 +254,24 @@ class SessionViewModel(BaseViewModel):
             reason=getattr(event, "reason", "unknown"),
         )
         # Удалить закрытую сессию из списка
-        sessions = [s for s in self.sessions.value if s.id != event.session_id]
+        sessions = [
+            s for s in self.sessions.value if self._extract_session_id(s) != event.session_id
+        ]
         if len(sessions) < len(self.sessions.value):
             self.sessions.value = sessions
             self.session_count.value = len(sessions)
+
+    @staticmethod
+    def _extract_session_id(session: Any) -> str | None:
+        """Возвращает идентификатор сессии из разных форматов объекта."""
+
+        if isinstance(session, dict):
+            raw_id = session.get("sessionId") or session.get("id")
+            return raw_id if isinstance(raw_id, str) else None
+
+        for attribute_name in ("sessionId", "id"):
+            if hasattr(session, attribute_name):
+                raw_id = getattr(session, attribute_name)
+                if isinstance(raw_id, str):
+                    return raw_id
+        return None

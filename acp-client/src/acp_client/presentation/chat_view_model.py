@@ -25,6 +25,18 @@ class PermissionRequest:
     description: str = ""
 
 
+@dataclass
+class ChatSessionState:
+    """Состояние чата, привязанное к конкретной сессии."""
+
+    messages: list[Any]
+    tool_calls: list[Any]
+    pending_permissions: list[Any]
+    streaming_text: str
+    is_streaming: bool
+    last_stop_reason: str | None
+
+
 class ChatViewModel(BaseViewModel):
     """ViewModel для управления чатом в активной сессии.
 
@@ -76,6 +88,10 @@ class ChatViewModel(BaseViewModel):
         self.streaming_text: Observable[str] = Observable("")
         self.last_stop_reason: Observable[str | None] = Observable(None)
 
+        # Активная сессия и кэш UI-состояния по session_id.
+        self._active_session_id: str | None = None
+        self._session_states: dict[str, ChatSessionState] = {}
+
         # Observable команды
         self.send_prompt_cmd = ObservableCommand(self._send_prompt)
         self.cancel_prompt_cmd = ObservableCommand(self._cancel_prompt)
@@ -111,9 +127,12 @@ class ChatViewModel(BaseViewModel):
             self.logger.warning("Cannot send prompt: session_id is empty")
             return
 
-        self.is_streaming.value = True
-        self.streaming_text.value = ""
-        self.last_stop_reason.value = None
+        # Гарантируем что prompt отправляется в активную сессию
+        # и обновления пишутся в её состояние.
+        self.set_active_session(session_id)
+
+        self._set_streaming_state(session_id, is_streaming=True, clear_text=True)
+        self._set_last_stop_reason(session_id, None)
 
         try:
             # Отправить prompt через coordinator с callback для обработки обновлений
@@ -124,11 +143,17 @@ class ChatViewModel(BaseViewModel):
 
             # Гарантированное добавление streaming текста в историю после завершения
             # (на случай, если PromptCompletedEvent не был опубликован)
-            streaming_text = self.streaming_text.value
+            session_state = self._get_or_create_session_state(session_id)
+            streaming_text = session_state.streaming_text
             if streaming_text:
-                messages = self.messages.value.copy()
-                messages.append({"role": "assistant", "content": streaming_text})
-                self.messages.value = messages
+                session_state.messages.append({"role": "assistant", "content": streaming_text})
+                session_state.streaming_text = ""
+                session_state.is_streaming = False
+                self._session_states[session_id] = session_state
+                if self._active_session_id == session_id:
+                    self.messages.value = list(session_state.messages)
+                    self.streaming_text.value = ""
+                    self.is_streaming.value = False
                 self.logger.info(
                     "Agent response added to message history (fallback)",
                     text_length=len(streaming_text),
@@ -139,8 +164,7 @@ class ChatViewModel(BaseViewModel):
             raise
         finally:
             # Очищаем streaming состояние
-            self.is_streaming.value = False
-            self.streaming_text.value = ""
+            self._set_streaming_state(session_id, is_streaming=False, clear_text=True)
 
     def _handle_session_update(self, update_data: dict[str, Any]) -> None:
         """Обработать session/update от сервера.
@@ -158,6 +182,7 @@ class ChatViewModel(BaseViewModel):
             params = update_data.get("params", {})
             update = params.get("update", {})
             session_update_type = update.get("sessionUpdate")
+            session_id = params.get("sessionId")
 
             self.logger.debug(
                 "session_update_received",
@@ -171,8 +196,12 @@ class ChatViewModel(BaseViewModel):
                 text = content.get("text", "")
 
                 if text:
-                    # Добавляем текст к streaming_text для отображения в реальном времени
-                    self.append_streaming_text(text)
+                    # Добавляем текст в состояние той сессии, откуда пришёл update.
+                    target_session_id = (
+                        session_id if isinstance(session_id, str) else self._active_session_id
+                    )
+                    if target_session_id is not None:
+                        self._append_streaming_text_to_session(target_session_id, text)
 
                     self.logger.debug("agent_message_chunk_processed", text_length=len(text))
 
@@ -276,18 +305,29 @@ class ChatViewModel(BaseViewModel):
         self.tool_calls.value = []
         self.pending_permissions.value = []
         self.streaming_text.value = ""
+        self.last_stop_reason.value = None
+        self._persist_active_state()
         self.logger.info("Chat cleared")
 
-    def add_message(self, role: str, content: str) -> None:
+    def add_message(self, role: str, content: str, session_id: str | None = None) -> None:
         """Добавить сообщение в чат.
 
         Args:
             role: Роль ("user", "assistant", "system")
             content: Содержимое сообщения
+            session_id: ID сессии, для которой добавляется сообщение
         """
-        messages = self.messages.value
-        messages.append({"role": role, "content": content})
-        self.messages.value = list(messages)
+        if session_id is not None:
+            state = self._get_or_create_session_state(session_id)
+            state.messages.append({"role": role, "content": content})
+            self._session_states[session_id] = state
+            if self._active_session_id == session_id:
+                self.messages.value = list(state.messages)
+        else:
+            messages = self.messages.value
+            messages.append({"role": role, "content": content})
+            self.messages.value = list(messages)
+            self._persist_active_state()
         self.logger.debug("Message added", role=role, content_length=len(content))
 
     def append_streaming_text(self, text: str) -> None:
@@ -297,6 +337,7 @@ class ChatViewModel(BaseViewModel):
             text: Текст для добавления
         """
         self.streaming_text.value += text
+        self._persist_active_state()
 
     def _remove_pending_permission(self, permission_id: str) -> None:
         """Удалить разрешение из pending.
@@ -306,6 +347,103 @@ class ChatViewModel(BaseViewModel):
         """
         perms = self.pending_permissions.value
         self.pending_permissions.value = [p for p in perms if p.request_id != permission_id]
+        self._persist_active_state()
+
+    def set_active_session(self, session_id: str | None) -> None:
+        """Переключает ChatViewModel на состояние выбранной сессии."""
+
+        # Сохраняем текущее состояние перед переключением.
+        self._persist_active_state()
+        self._active_session_id = session_id
+
+        if session_id is None:
+            self.messages.value = []
+            self.tool_calls.value = []
+            self.pending_permissions.value = []
+            self.streaming_text.value = ""
+            self.is_streaming.value = False
+            self.last_stop_reason.value = None
+            return
+
+        state = self._get_or_create_session_state(session_id)
+
+        self.messages.value = list(state.messages)
+        self.tool_calls.value = list(state.tool_calls)
+        self.pending_permissions.value = list(state.pending_permissions)
+        self.streaming_text.value = state.streaming_text
+        self.is_streaming.value = state.is_streaming
+        self.last_stop_reason.value = state.last_stop_reason
+
+    def _persist_active_state(self) -> None:
+        """Сохраняет текущее состояние чата для активной сессии."""
+
+        if self._active_session_id is None:
+            return
+
+        self._session_states[self._active_session_id] = ChatSessionState(
+            messages=list(self.messages.value),
+            tool_calls=list(self.tool_calls.value),
+            pending_permissions=list(self.pending_permissions.value),
+            streaming_text=self.streaming_text.value,
+            is_streaming=self.is_streaming.value,
+            last_stop_reason=self.last_stop_reason.value,
+        )
+
+    def _get_or_create_session_state(self, session_id: str) -> ChatSessionState:
+        """Возвращает состояние сессии или создаёт пустое."""
+
+        state = self._session_states.get(session_id)
+        if state is not None:
+            return state
+
+        state = ChatSessionState(
+            messages=[],
+            tool_calls=[],
+            pending_permissions=[],
+            streaming_text="",
+            is_streaming=False,
+            last_stop_reason=None,
+        )
+        self._session_states[session_id] = state
+        return state
+
+    def _append_streaming_text_to_session(self, session_id: str, text: str) -> None:
+        """Добавляет streaming chunk в состояние указанной сессии."""
+
+        state = self._get_or_create_session_state(session_id)
+        state.streaming_text += text
+        state.is_streaming = True
+        self._session_states[session_id] = state
+
+        if self._active_session_id == session_id:
+            self.streaming_text.value = state.streaming_text
+            self.is_streaming.value = True
+
+    def _set_streaming_state(
+        self, session_id: str, *, is_streaming: bool, clear_text: bool
+    ) -> None:
+        """Обновляет флаг streaming и буфер текста для сессии."""
+
+        state = self._get_or_create_session_state(session_id)
+        state.is_streaming = is_streaming
+        if clear_text:
+            state.streaming_text = ""
+        self._session_states[session_id] = state
+
+        if self._active_session_id == session_id:
+            self.is_streaming.value = is_streaming
+            if clear_text:
+                self.streaming_text.value = ""
+
+    def _set_last_stop_reason(self, session_id: str, stop_reason: str | None) -> None:
+        """Сохраняет stop reason для сессии и синхронизирует активный UI."""
+
+        state = self._get_or_create_session_state(session_id)
+        state.last_stop_reason = stop_reason
+        self._session_states[session_id] = state
+
+        if self._active_session_id == session_id:
+            self.last_stop_reason.value = stop_reason
 
     # Event handlers
     def _handle_prompt_started(self, event: Any) -> None:
@@ -318,8 +456,9 @@ class ChatViewModel(BaseViewModel):
             "Prompt started event received - CLEARING streaming_text",
             session_id=getattr(event, "session_id", "unknown"),
         )
-        self.is_streaming.value = True
-        self.streaming_text.value = ""
+        session_id = getattr(event, "session_id", None)
+        if isinstance(session_id, str):
+            self._set_streaming_state(session_id, is_streaming=True, clear_text=True)
 
     def _handle_prompt_completed(self, event: Any) -> None:
         """Обработать завершение prompt-turn.
@@ -336,22 +475,25 @@ class ChatViewModel(BaseViewModel):
             final_streaming_text_length=len(self.streaming_text.value),
         )
 
-        # Сохраняем накопленный streaming текст в историю перед отключением streaming
-        streaming_text = self.streaming_text.value
+        session_id = getattr(event, "session_id", None)
+        if not isinstance(session_id, str):
+            return
+
+        state = self._get_or_create_session_state(session_id)
+        streaming_text = state.streaming_text
         if streaming_text:
-            # Добавляем полученный от агента текст в историю сообщений
-            messages = self.messages.value.copy()
-            messages.append({"role": "assistant", "content": streaming_text})
-            self.messages.value = messages
+            state.messages.append({"role": "assistant", "content": streaming_text})
+            self._session_states[session_id] = state
+            if self._active_session_id == session_id:
+                self.messages.value = list(state.messages)
             self.logger.debug(
                 "Agent response saved to message history",
                 text_length=len(streaming_text),
             )
 
         # Отключаем streaming и очищаем буфер
-        self.is_streaming.value = False
-        self.streaming_text.value = ""
-        self.last_stop_reason.value = getattr(event, "stop_reason", None)
+        self._set_streaming_state(session_id, is_streaming=False, clear_text=True)
+        self._set_last_stop_reason(session_id, getattr(event, "stop_reason", None))
 
     def _handle_permission_requested(self, event: Any) -> None:
         """Обработать запрос разрешения.
@@ -368,6 +510,7 @@ class ChatViewModel(BaseViewModel):
         )
         perms = self.pending_permissions.value
         self.pending_permissions.value = list(perms) + [perm]
+        self._persist_active_state()
         self.logger.debug(
             "Permission requested event received",
             request_id=perm.request_id,
@@ -380,7 +523,12 @@ class ChatViewModel(BaseViewModel):
         Args:
             event: ErrorOccurredEvent из EventBus
         """
-        self.is_streaming.value = False
+        session_id = getattr(event, "session_id", None)
+        if isinstance(session_id, str):
+            self._set_streaming_state(session_id, is_streaming=False, clear_text=False)
+        else:
+            self.is_streaming.value = False
+            self._persist_active_state()
         error_msg = getattr(event, "error_message", "Unknown error")
         self.logger.error(
             "Error occurred event received",

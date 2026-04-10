@@ -122,6 +122,10 @@ class ACPClientApp(App[None]):
             self._terminal_vm = self._container.resolve(TerminalViewModel)
 
             self._app_logger.info("all_view_models_resolved")
+
+            # Синхронизируем ChatViewModel с выбранной сессией.
+            self._session_vm.selected_session_id.subscribe(self._on_selected_session_changed)
+            self._chat_vm.set_active_session(self._session_vm.selected_session_id.value)
         except Exception as e:
             self._app_logger.error(
                 "failed_to_resolve_view_models",
@@ -213,6 +217,51 @@ class ACPClientApp(App[None]):
             exclusive=False,
         )
 
+    def action_focus_sidebar(self) -> None:
+        """Переводит фокус в список сессий."""
+
+        sidebar = self.query_one(Sidebar)
+        sidebar.focus()
+
+    def action_focus_session_list(self) -> None:
+        """Алиас для перевода фокуса в список сессий."""
+
+        self.action_focus_sidebar()
+
+    def action_next_session(self) -> None:
+        """Выбирает следующую сессию в sidebar и применяет выбор."""
+
+        sidebar = self.query_one(Sidebar)
+        sidebar.select_next()
+        selected_session_id = sidebar.get_selected_session_id()
+        if selected_session_id is None:
+            return
+        self.run_worker(
+            self._session_vm.switch_session_cmd.execute(selected_session_id),
+            exclusive=False,
+        )
+
+    def action_previous_session(self) -> None:
+        """Выбирает предыдущую сессию в sidebar и применяет выбор."""
+
+        sidebar = self.query_one(Sidebar)
+        sidebar.select_previous()
+        selected_session_id = sidebar.get_selected_session_id()
+        if selected_session_id is None:
+            return
+        self.run_worker(
+            self._session_vm.switch_session_cmd.execute(selected_session_id),
+            exclusive=False,
+        )
+
+    def on_sidebar_session_selected(self, event: Sidebar.SessionSelected) -> None:
+        """Применяет выбор сессии по Enter в sidebar."""
+
+        self.run_worker(
+            self._session_vm.switch_session_cmd.execute(event.session_id),
+            exclusive=False,
+        )
+
     def on_prompt_input_submitted(self, event: PromptInput.Submitted) -> None:
         """Обработать отправку промпта пользователем.
 
@@ -234,13 +283,18 @@ class ACPClientApp(App[None]):
         )
 
         # Добавляем сообщение пользователя в чат
-        self._chat_vm.add_message("user", event.text)
+        self._chat_vm.add_message("user", event.text, session_id=session_id)
 
         # Запускаем отправку промпта асинхронно
         self.run_worker(
             self._chat_vm.send_prompt_cmd.execute(session_id, event.text),
             exclusive=False,
         )
+
+    def _on_selected_session_changed(self, session_id: str | None) -> None:
+        """Обновляет ChatView при смене активной сессии."""
+
+        self._chat_vm.set_active_session(session_id)
 
     async def on_unmount(self) -> None:
         """Очистка ресурсов при завершении приложения."""
