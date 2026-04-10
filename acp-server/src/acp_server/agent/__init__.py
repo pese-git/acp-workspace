@@ -10,6 +10,7 @@ from acp_server.agent.base import (
     LLMAgent,
 )
 from acp_server.agent.naive import NaiveAgent
+from acp_server.agent.orchestrator import AgentOrchestrator
 from acp_server.agent.state import OrchestratorConfig
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "AgentResponse",
     "OrchestratorConfig",
     "NaiveAgent",
+    "AgentOrchestrator",
 ]
