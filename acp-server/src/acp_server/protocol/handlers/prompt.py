@@ -44,26 +44,26 @@ async def _handle_with_agent(
     agent_orchestrator: AgentOrchestrator,
 ) -> ProtocolOutcome:
     """Обрабатывает промпт через LLM-агента.
-    
+
     Извлекает текст из prompt blocks, передает агенту для обработки,
     и формирует результат в виде ProtocolOutcome с notifications.
-    
+
     Args:
         request_id: ID запроса для response
         params: Параметры запроса (должны содержать prompt array)
         session: Состояние текущей сессии
         sessions: Словарь всех сессий
         agent_orchestrator: Оркестратор для обработки промпта
-        
+
     Returns:
         ProtocolOutcome с результатами обработки через агента
     """
     session_id = session.session_id
     prompt = params.get("prompt", [])
-    
+
     # Установить активный turn
     session.active_turn = ActiveTurnState(prompt_request_id=request_id, session_id=session_id)
-    
+
     # Извлечь текст из prompt blocks
     text_blocks: list[str] = []
     for block in prompt:
@@ -73,13 +73,13 @@ async def _handle_with_agent(
             and isinstance(block.get("text"), str)
         ):
             text_blocks.append(block["text"])
-    
+
     prompt_text = "\n".join(text_blocks) if text_blocks else ""
     text_preview = text_blocks[0] if text_blocks else "Prompt received"
-    
+
     # Уведомления для транспорта
     notifications: list[ACPMessage] = []
-    
+
     # Отправить сообщение подтверждения
     ack_message = f"Processing with agent: {text_preview[:80]}"
     notifications.append(
@@ -97,7 +97,7 @@ async def _handle_with_agent(
             },
         )
     )
-    
+
     # Обработать промпт через агента
     try:
         # Агент обновит состояние сессии
@@ -123,15 +123,15 @@ async def _handle_with_agent(
                 },
             )
         )
-    
+
     # Добавить промпт и ответ в историю сессии
     session.history.append({"role": "user", "content": prompt})
     session.updated_at = datetime.now(UTC).isoformat()
-    
+
     # Установить заголовок сессии, если его еще нет
     if session.title is None and text_preview:
         session.title = text_preview.strip()[:80]
-    
+
     # Отправить notification об обновлении session info
     notifications.append(
         session_info_notification(
@@ -140,7 +140,7 @@ async def _handle_with_agent(
             updated_at=session.updated_at,
         )
     )
-    
+
     # Отправить notification об обновлении доступных команд
     notifications.append(
         ACPMessage.notification(
@@ -154,15 +154,23 @@ async def _handle_with_agent(
             },
         )
     )
-    
+
     # Завершить turn и отправить response
     session.active_turn = None
     stop_reason = "end_turn"
-    
-    # Логирование финального ответа ассистента из истории
+
+    # Логирование и отправка финального ответа ассистента из истории.
+    #
+    # В orchestrator-ветке первый chunk является техническим ACK,
+    # а фактический ответ LLM сохраняется в session.history.
+    # Чтобы клиент мог отобразить реальный ответ в ChatView,
+    # публикуем дополнительный agent_message_chunk с этим текстом.
+    final_assistant_text: str | None = None
     for history_entry in reversed(session.history):
         if isinstance(history_entry, dict) and history_entry.get("role") == "assistant":
             assistant_text = history_entry.get("text", "")
+            if isinstance(assistant_text, str) and assistant_text:
+                final_assistant_text = assistant_text
             logger.info(
                 "final assistant response in session history",
                 session_id=session_id,
@@ -173,26 +181,43 @@ async def _handle_with_agent(
                 content=assistant_text[:200],
             )
             break
-    
+
+    if final_assistant_text is not None:
+        notifications.append(
+            ACPMessage.notification(
+                "session/update",
+                {
+                    "sessionId": session_id,
+                    "update": {
+                        "sessionUpdate": "agent_message_chunk",
+                        "content": {
+                            "type": "text",
+                            "text": final_assistant_text,
+                        },
+                    },
+                },
+            )
+        )
+
     # Логирование содержимого отправляемых сообщений
     for notification in notifications:
         if notification.method == "session/update":
-            params = notification.params
+            notif_params = notification.params
             if (
-                isinstance(params, dict)
-                and "update" in params
-                and isinstance(params["update"], dict)
-                and params["update"].get("sessionUpdate") == "agent_message_chunk"
+                isinstance(notif_params, dict)
+                and "update" in notif_params
+                and isinstance(notif_params["update"], dict)
+                and notif_params["update"].get("sessionUpdate") == "agent_message_chunk"
             ):
                 # Логирование agent_message_chunk с содержимым ответа
-                content = params["update"].get("content", {})
+                content = notif_params["update"].get("content", {})
                 if isinstance(content, dict) and content.get("type") == "text":
                     message_text = content.get("text", "")
                     logger.debug(
                         "agent message chunk being sent",
                         content=message_text[:200],
                     )
-    
+
     # Логирование отправки ответа клиенту
     logger.info(
         "sending response to client",
@@ -205,7 +230,7 @@ async def _handle_with_agent(
         request_id=str(request_id) if request_id else None,
         session_title=session.title,
     )
-    
+
     return ProtocolOutcome(
         response=ACPMessage.response(request_id, {"stopReason": stop_reason}),
         notifications=notifications,
@@ -223,7 +248,7 @@ async def session_prompt(
 
     Метод валидирует контент, добавляет сообщение агента, обновляет историю,
     публикует `session_info_update` и `available_commands_update`.
-    
+
     Если передан agent_orchestrator, обрабатывает промпт через LLM-агента.
     В противном случае использует legacy директивы.
 
@@ -272,7 +297,7 @@ async def session_prompt(
     content_error = validate_prompt_content(request_id, prompt)
     if content_error is not None:
         return ProtocolOutcome(response=content_error)
-    
+
     # Если передан agent_orchestrator, обработать промпт через LLM-агента
     if agent_orchestrator is not None:
         return await _handle_with_agent(
@@ -597,9 +622,7 @@ def session_cancel(
                 session.active_turn.pending_client_request.request_id
             )
         pending = (
-            session.active_turn.pending_client_request
-            if session.active_turn is not None
-            else None
+            session.active_turn.pending_client_request if session.active_turn is not None else None
         )
         if pending is not None and pending.terminal_id is not None:
             # Для terminal-flow отправляем best-effort cleanup перед завершением turn.
@@ -626,9 +649,7 @@ def session_cancel(
             stop_reason="cancelled",
         )
         # При отмене переводим все незавершенные tool calls в `cancelled`.
-        notifications.extend(
-            cancel_active_tool_calls(session=session, session_id=session_id)
-        )
+        notifications.extend(cancel_active_tool_calls(session=session, session_id=session_id))
         session.updated_at = datetime.now(UTC).isoformat()
         notifications.append(
             session_info_notification(
@@ -844,8 +865,16 @@ def resolve_prompt_directives(
 
     if supported_tool_kinds is None:
         supported_tool_kinds = {
-            "read", "edit", "delete", "move", "search", "execute",
-            "think", "fetch", "switch_mode", "other"
+            "read",
+            "edit",
+            "delete",
+            "move",
+            "search",
+            "execute",
+            "think",
+            "fetch",
+            "switch_mode",
+            "other",
         }
 
     directives = extract_prompt_directives(text_preview, supported_tool_kinds)
@@ -929,7 +958,11 @@ def normalize_stop_reason(stop_reason: str, supported_stop_reasons: set[str] | N
 
     if supported_stop_reasons is None:
         supported_stop_reasons = {
-            "end_turn", "max_tokens", "max_turn_requests", "refusal", "cancelled"
+            "end_turn",
+            "max_tokens",
+            "max_turn_requests",
+            "refusal",
+            "cancelled",
         }
 
     if stop_reason in supported_stop_reasons:
@@ -968,8 +1001,16 @@ def normalize_tool_kind(candidate: str, supported_tool_kinds: set[str] | None = 
 
     if supported_tool_kinds is None:
         supported_tool_kinds = {
-            "read", "edit", "delete", "move", "search", "execute",
-            "think", "fetch", "switch_mode", "other"
+            "read",
+            "edit",
+            "delete",
+            "move",
+            "search",
+            "execute",
+            "think",
+            "fetch",
+            "switch_mode",
+            "other",
         }
 
     normalized = "edit" if candidate == "write" else candidate
@@ -1520,9 +1561,7 @@ def cancel_active_tool_calls(session: SessionState, session_id: str) -> list[ACP
     return notifications
 
 
-def finalize_active_turn(
-    session: SessionState, *, stop_reason: str
-) -> ACPMessage | None:
+def finalize_active_turn(session: SessionState, *, stop_reason: str) -> ACPMessage | None:
     """Финализирует текущий active turn и очищает его состояние.
 
     Пример использования:
@@ -1893,9 +1932,7 @@ def resolve_pending_client_rpc_response_impl(
                 tool_call_id=pending.tool_call_id,
                 failure_text="Invalid terminal/release response.",
             )
-        completion_text = (
-            f"Terminal command finished with exit code {pending.terminal_exit_code}."
-        )
+        completion_text = f"Terminal command finished with exit code {pending.terminal_exit_code}."
         if pending.terminal_exit_code is None:
             completion_text = "Terminal command finished."
         if pending.terminal_signal is not None:
