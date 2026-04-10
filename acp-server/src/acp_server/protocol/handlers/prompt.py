@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ...messages import ACPMessage, JsonRpcId
 from ..state import (
@@ -27,17 +27,160 @@ from .session import (
     session_info_notification,
 )
 
+if TYPE_CHECKING:
+    from ...agent.orchestrator import AgentOrchestrator
 
-def session_prompt(
+
+async def _handle_with_agent(
+    request_id: JsonRpcId | None,
+    params: dict[str, Any],
+    session: SessionState,
+    sessions: dict[str, SessionState],
+    agent_orchestrator: AgentOrchestrator,
+) -> ProtocolOutcome:
+    """Обрабатывает промпт через LLM-агента.
+    
+    Извлекает текст из prompt blocks, передает агенту для обработки,
+    и формирует результат в виде ProtocolOutcome с notifications.
+    
+    Args:
+        request_id: ID запроса для response
+        params: Параметры запроса (должны содержать prompt array)
+        session: Состояние текущей сессии
+        sessions: Словарь всех сессий
+        agent_orchestrator: Оркестратор для обработки промпта
+        
+    Returns:
+        ProtocolOutcome с результатами обработки через агента
+    """
+    session_id = session.session_id
+    prompt = params.get("prompt", [])
+    
+    # Установить активный turn
+    session.active_turn = ActiveTurnState(prompt_request_id=request_id, session_id=session_id)
+    
+    # Извлечь текст из prompt blocks
+    text_blocks: list[str] = []
+    for block in prompt:
+        if (
+            isinstance(block, dict)
+            and block.get("type") == "text"
+            and isinstance(block.get("text"), str)
+        ):
+            text_blocks.append(block["text"])
+    
+    prompt_text = "\n".join(text_blocks) if text_blocks else ""
+    text_preview = text_blocks[0] if text_blocks else "Prompt received"
+    
+    # Уведомления для транспорта
+    notifications: list[ACPMessage] = []
+    
+    # Отправить сообщение подтверждения
+    ack_message = f"Processing with agent: {text_preview[:80]}"
+    notifications.append(
+        ACPMessage.notification(
+            "session/update",
+            {
+                "sessionId": session_id,
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {
+                        "type": "text",
+                        "text": ack_message,
+                    },
+                },
+            },
+        )
+    )
+    
+    # Обработать промпт через агента
+    try:
+        # Агент обновит состояние сессии
+        updated_session = await agent_orchestrator.process_prompt(session, prompt_text)
+        # Обновить сессию в словаре
+        sessions[session_id] = updated_session
+        session = updated_session
+    except Exception as e:
+        # На случай ошибок в агенте, отправить error message
+        error_message = f"Agent error: {str(e)}"
+        notifications.append(
+            ACPMessage.notification(
+                "session/update",
+                {
+                    "sessionId": session_id,
+                    "update": {
+                        "sessionUpdate": "agent_message_chunk",
+                        "content": {
+                            "type": "text",
+                            "text": error_message,
+                        },
+                    },
+                },
+            )
+        )
+    
+    # Добавить промпт и ответ в историю сессии
+    session.history.append({"role": "user", "content": prompt})
+    session.updated_at = datetime.now(UTC).isoformat()
+    
+    # Установить заголовок сессии, если его еще нет
+    if session.title is None and text_preview:
+        session.title = text_preview.strip()[:80]
+    
+    # Отправить notification об обновлении session info
+    notifications.append(
+        session_info_notification(
+            session_id=session_id,
+            title=session.title,
+            updated_at=session.updated_at,
+        )
+    )
+    
+    # Отправить notification об обновлении доступных команд
+    notifications.append(
+        ACPMessage.notification(
+            "session/update",
+            {
+                "sessionId": session_id,
+                "update": {
+                    "sessionUpdate": "available_commands_update",
+                    "availableCommands": session.available_commands,
+                },
+            },
+        )
+    )
+    
+    # Завершить turn и отправить response
+    session.active_turn = None
+    stop_reason = "end_turn"
+    
+    return ProtocolOutcome(
+        response=ACPMessage.response(request_id, {"stopReason": stop_reason}),
+        notifications=notifications,
+    )
+
+
+async def session_prompt(
     request_id: JsonRpcId | None,
     params: dict[str, Any],
     sessions: dict[str, SessionState],
     config_specs: dict[str, dict[str, Any]],
+    agent_orchestrator: AgentOrchestrator | None = None,
 ) -> ProtocolOutcome:
     """Обрабатывает пользовательский prompt-turn и формирует updates.
 
     Метод валидирует контент, добавляет сообщение агента, обновляет историю,
     публикует `session_info_update` и `available_commands_update`.
+    
+    Если передан agent_orchestrator, обрабатывает промпт через LLM-агента.
+    В противном случае использует legacy директивы.
+
+    Args:
+        request_id: ID запроса
+        params: Параметры запроса (sessionId, prompt, ...)
+        sessions: Словарь активных сессий
+        config_specs: Спецификации конфигурационных опций
+        agent_orchestrator: Оркестратор агента для обработки через LLM (опционально)
 
     Пример использования:
         outcome = session_prompt("req_1", {"sessionId": "sess_1", "prompt": []}, sessions, specs)
@@ -77,6 +220,16 @@ def session_prompt(
     content_error = validate_prompt_content(request_id, prompt)
     if content_error is not None:
         return ProtocolOutcome(response=content_error)
+    
+    # Если передан agent_orchestrator, обработать промпт через LLM-агента
+    if agent_orchestrator is not None:
+        return await _handle_with_agent(
+            request_id=request_id,
+            params=params,
+            session=session,
+            sessions=sessions,
+            agent_orchestrator=agent_orchestrator,
+        )
 
     if session.active_turn is not None:
         return ProtocolOutcome(

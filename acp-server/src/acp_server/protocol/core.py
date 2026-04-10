@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..messages import ACPMessage, JsonRpcId
 from ..storage import SessionStorage
@@ -23,6 +23,9 @@ from .state import (
     ProtocolOutcome,
     SessionState,
 )
+
+if TYPE_CHECKING:
+    from ..agent.orchestrator import AgentOrchestrator
 
 
 class ACPProtocol:
@@ -42,6 +45,7 @@ class ACPProtocol:
         require_auth: bool = False,
         auth_api_key: str | None = None,
         storage: SessionStorage | None = None,
+        agent_orchestrator: AgentOrchestrator | None = None,
     ) -> None:
         """Инициализирует протокол и хранилище сессий.
 
@@ -49,13 +53,16 @@ class ACPProtocol:
             require_auth: Требовать аутентификацию перед session setup.
             auth_api_key: API ключ для аутентификации.
             storage: Хранилище сессий (по умолчанию InMemoryStorage).
+            agent_orchestrator: Оркестратор LLM-агента для обработки prompts (опционально).
 
         Пример использования:
             protocol = ACPProtocol()
-            # или с кастомным хранилищем:
+            # или с кастомным хранилищем и агентом:
             from acp_server.storage import InMemoryStorage
+            from acp_server.agent.orchestrator import AgentOrchestrator
             storage = InMemoryStorage()
-            protocol = ACPProtocol(storage=storage)
+            agent = AgentOrchestrator(...)
+            protocol = ACPProtocol(storage=storage, agent_orchestrator=agent)
         """
 
         # Инициализировать хранилище (по умолчанию InMemoryStorage)
@@ -65,6 +72,9 @@ class ACPProtocol:
         self._storage = storage
         # Внутренний кэш сессий для совместимости с handlers
         self._sessions: dict[str, SessionState] = {}
+        
+        # Оркестратор LLM-агента для обработки prompt-turns через агента
+        self._agent_orchestrator = agent_orchestrator
         
         # Последние capabilities, согласованные через initialize.
         # Для in-memory demo-сервера это достаточно; по мере роста можно
@@ -283,11 +293,12 @@ class ACPProtocol:
             )
 
         if method == "session/prompt":
-            return prompt.session_prompt(
+            return await prompt.session_prompt(
                 message.id,
                 params,
                 self._sessions,
                 self._config_specs,
+                agent_orchestrator=self._agent_orchestrator,
             )
 
         if method == "session/cancel":
