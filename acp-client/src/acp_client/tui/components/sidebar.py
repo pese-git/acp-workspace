@@ -21,17 +21,17 @@ if TYPE_CHECKING:
 
 class Sidebar(Static):
     """Панель сессий с MVVM интеграцией.
-    
+
     Обязательно требует SessionViewModel для работы. Подписывается на Observable свойства:
     - sessions: список доступных сессий
     - selected_session_id: текущая выбранная сессия
     - is_loading_sessions: флаг загрузки сессий
-    
+
     Примеры использования:
         >>> from acp_client.presentation.session_view_model import SessionViewModel
         >>> session_vm = SessionViewModel(coordinator, event_bus)
         >>> sidebar = Sidebar(session_vm)
-        >>> 
+        >>>
         >>> # Когда SessionViewModel обновляется, sidebar обновляется автоматически
         >>> session_vm.sessions.value = [session1, session2]
     """
@@ -48,27 +48,25 @@ class Sidebar(Static):
 
     def __init__(self, session_vm: SessionViewModel) -> None:
         """Инициализирует Sidebar с обязательным SessionViewModel.
-        
+
         Args:
             session_vm: SessionViewModel для управления состоянием сессий
         """
         super().__init__("", id="sidebar")
         self.session_vm = session_vm
         self._selected_index: int = 0
-        
+
         # Подписываемся на изменения в SessionViewModel
         self.session_vm.sessions.subscribe(self._on_sessions_changed)
-        self.session_vm.selected_session_id.subscribe(
-            self._on_selected_session_changed
-        )
+        self.session_vm.selected_session_id.subscribe(self._on_selected_session_changed)
         self.session_vm.is_loading_sessions.subscribe(self._on_loading_changed)
-        
+
         # Инициализируем UI с текущим состоянием
         self._update_display()
 
     def _on_sessions_changed(self, sessions: list) -> None:
         """Обновить sidebar при изменении списка сессий.
-        
+
         Args:
             sessions: Новый список сессий
         """
@@ -78,7 +76,7 @@ class Sidebar(Static):
 
     def _on_selected_session_changed(self, session_id: str | None) -> None:
         """Обновить sidebar при изменении выбранной сессии.
-        
+
         Args:
             session_id: ID выбранной сессии или None
         """
@@ -87,7 +85,7 @@ class Sidebar(Static):
 
     def _on_loading_changed(self, is_loading: bool) -> None:
         """Обновить sidebar при изменении статуса загрузки.
-        
+
         Args:
             is_loading: True если идет загрузка, False иначе
         """
@@ -102,11 +100,11 @@ class Sidebar(Static):
         sessions = self.session_vm.sessions.value
         if not sessions:
             return
-        
+
         self._selected_index += 1
         if self._selected_index >= len(sessions):
             self._selected_index = 0
-        
+
         # Обновить выбранную сессию в ViewModel
         self._update_selected_session()
 
@@ -115,11 +113,11 @@ class Sidebar(Static):
         sessions = self.session_vm.sessions.value
         if not sessions:
             return
-        
+
         self._selected_index -= 1
         if self._selected_index < 0:
             self._selected_index = len(sessions) - 1
-        
+
         # Обновить выбранную сессию в ViewModel
         self._update_selected_session()
 
@@ -158,10 +156,10 @@ class Sidebar(Static):
         sessions = self.session_vm.sessions.value
         is_loading = self.session_vm.is_loading_sessions.value
         selected_id = self.session_vm.selected_session_id.value
-        
+
         if is_loading:
             return "Сессии загружаются..."
-        
+
         if not sessions:
             return "Сессий пока нет"
 
@@ -177,34 +175,20 @@ class Sidebar(Static):
         """Синхронизирует выделение с выбранной сессией из ViewModel."""
         sessions = self.session_vm.sessions.value
         selected_id = self.session_vm.selected_session_id.value
-        
+
         if not sessions:
             self._selected_index = 0
             return
-        
+
         if selected_id is None:
             self._selected_index = 0
             return
-        
+
         # Найти индекс выбранной сессии
         for index, session in enumerate(sessions):
             if session.sessionId == selected_id:
                 self._selected_index = index
                 return
-        
+
         # Если не нашли, выбрать первую
         self._selected_index = 0
-
-    def set_sessions(
-        self,
-        sessions: list,
-        active_session_id: str | None,
-    ) -> None:
-        """Устанавливает список сессий (для backward compatibility).
-        
-        Args:
-            sessions: Список сессий
-            active_session_id: ID активной сессии
-        """
-        self.session_vm.sessions.value = sessions
-        self.session_vm.selected_session_id.value = active_session_id

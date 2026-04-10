@@ -142,18 +142,13 @@ class ACPMessage(BaseModel):
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ACPMessage:
-        """Десериализует словарь в `ACPMessage` c legacy-совместимостью.
-
-        Вход может содержать старое поле `type`; оно игнорируется.
+        """Десериализует словарь в `ACPMessage`.
 
         Пример использования:
             ACPMessage.from_dict({"jsonrpc": "2.0", "id": "1", "result": {}})
         """
 
-        # В клиенте игнорируем legacy `type`, чтобы принимать старые ответы без падения.
-        normalized = dict(data)
-        normalized.pop("type", None)
-        return cls.model_validate(normalized)
+        return cls.model_validate(data)
 
     def to_json(self) -> str:
         """Сериализует сообщение в компактную JSON-строку для транспорта.
@@ -289,7 +284,7 @@ class SessionMode(BaseModel):
 
 
 class SessionModeState(BaseModel):
-    """Состояние legacy-режимов в ответах `session/new` и `session/load`.
+    """Состояние режимов в ответах `session/new` и `session/load`.
 
     Пример использования:
         SessionModeState.model_validate({"availableModes": [], "currentModeId": "ask"})

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -20,13 +19,13 @@ if TYPE_CHECKING:
 
 class PermissionModal(ModalScreen[str | None]):
     """Показывает список permission-опций и возвращает выбранный optionId.
-    
+
     Интегрирован с PermissionViewModel для управления состоянием:
     - permission_type: тип запрашиваемого разрешения из ViewModel
     - resource: ресурс для которого запрашивается разрешение из ViewModel
     - message: сообщение с описанием запроса из ViewModel
     - is_visible: видимость модального окна из ViewModel
-    
+
     Все изменения UI синхронизируются с ViewModel через Observable паттерн.
     """
 
@@ -44,7 +43,7 @@ class PermissionModal(ModalScreen[str | None]):
         options: list[PermissionOption] | None = None,
     ) -> None:
         """Создает модальное окно запроса разрешения.
-        
+
         Args:
             permission_vm: PermissionViewModel для управления состоянием.
                 Обязательный параметр для MVVM интеграции.
@@ -61,10 +60,10 @@ class PermissionModal(ModalScreen[str | None]):
         self._option_by_id: dict[str, PermissionOption] = {
             option.optionId: option for option in self._options
         }
-        
+
         # Сохраняем unsubscribe функции для очистки при уничтожении
         self._unsubscribers: list[Callable[[], None]] = []
-        
+
         # Подписываемся на изменения ViewModel сразу (не только при on_mount)
         self._subscribe_to_view_model()
 
@@ -80,31 +79,25 @@ class PermissionModal(ModalScreen[str | None]):
 
     def _subscribe_to_view_model(self) -> None:
         """Подписаться на изменения ViewModel.
-        
+
         Устанавливает observers на все Observable свойства ViewModel
         для синхронизации UI при изменениях состояния.
         """
         # Подписываемся на изменение типа разрешения
-        unsub_type = self.permission_vm.permission_type.subscribe(
-            self._on_permission_type_changed
-        )
+        unsub_type = self.permission_vm.permission_type.subscribe(self._on_permission_type_changed)
         self._unsubscribers.append(unsub_type)
-        
+
         # Подписываемся на изменение ресурса
-        unsub_resource = self.permission_vm.resource.subscribe(
-            self._on_resource_changed
-        )
+        unsub_resource = self.permission_vm.resource.subscribe(self._on_resource_changed)
         self._unsubscribers.append(unsub_resource)
-        
+
         # Подписываемся на изменение сообщения
-        unsub_message = self.permission_vm.message.subscribe(
-            self._on_message_changed
-        )
+        unsub_message = self.permission_vm.message.subscribe(self._on_message_changed)
         self._unsubscribers.append(unsub_message)
-    
+
     def _on_permission_type_changed(self, new_type: str) -> None:
         """Обработчик изменения типа разрешения в ViewModel.
-        
+
         Args:
             new_type: Новый тип разрешения.
         """
@@ -117,10 +110,10 @@ class PermissionModal(ModalScreen[str | None]):
             title_widget.update(title_text)
         except Exception:
             pass  # Компонент еще не смонтирован
-    
+
     def _on_resource_changed(self, new_resource: str) -> None:
         """Обработчик изменения ресурса в ViewModel.
-        
+
         Args:
             new_resource: Новый ресурс.
         """
@@ -133,10 +126,10 @@ class PermissionModal(ModalScreen[str | None]):
             title_widget.update(title_text)
         except Exception:
             pass  # Компонент еще не смонтирован
-    
+
     def _on_message_changed(self, new_message: str) -> None:
         """Обработчик изменения сообщения в ViewModel.
-        
+
         Args:
             new_message: Новое сообщение.
         """
@@ -151,35 +144,6 @@ class PermissionModal(ModalScreen[str | None]):
             title_widget.update(title_text)
         except Exception:
             pass  # Компонент еще не смонтирован
-    
-    
-    def show_request(
-        self,
-        permission_type: str,
-        resource: str,
-        message: str = "",
-    ) -> None:
-        """Показать запрос разрешения (обратная совместимость).
-        
-        Старый API для совместимости. Вызывает show_request в ViewModel.
-        
-        Args:
-            permission_type: Тип разрешения.
-            resource: Ресурс для которого запрашивается разрешение.
-            message: Опциональное сообщение.
-        """
-        self.permission_vm.show_request(permission_type, resource, message)
-    
-    def close(self) -> None:
-        """Закрыть модальное окно (обратная совместимость).
-        
-        Старый API для совместимости. Вызывает hide в ViewModel.
-        """
-        self.permission_vm.hide()
-        # dismiss() требует активное приложение, поэтому вызываем его только
-        # если приложение существует
-        with contextlib.suppress(Exception):
-            self.dismiss(None)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Закрывает модал с выбранной опцией или отменой."""

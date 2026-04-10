@@ -16,6 +16,7 @@ from acp_client.tui.components.tool_panel import ToolPanel
 
 class _TestApp(App):
     """Минимальный app для создания Textual контекста в тестах."""
+
     pass
 
 
@@ -52,10 +53,11 @@ def tool_panel(chat_view_model: ChatViewModel, mock_terminal_view_model) -> Tool
 
 # ===== FooterBar Tests =====
 
+
 def test_footer_bar_initializes_with_ui_view_model(ui_view_model: UIViewModel) -> None:
     """Проверить что FooterBar инициализируется с UIViewModel."""
     footer = FooterBar(ui_view_model)
-    
+
     assert footer.ui_vm is ui_view_model
     assert footer.id == "footer"
 
@@ -66,7 +68,7 @@ def test_footer_bar_displays_connection_status(
 ) -> None:
     """Проверить что FooterBar отображает статус соединения."""
     ui_view_model.connection_status.value = ConnectionStatus.CONNECTED
-    
+
     rendered = cast(Any, footer_bar.render()).plain
     assert "connected" in rendered
 
@@ -77,7 +79,7 @@ def test_footer_bar_displays_error_message(
 ) -> None:
     """Проверить что FooterBar отображает ошибку с приоритетом."""
     ui_view_model.error_message.value = "Connection failed"
-    
+
     rendered = cast(Any, footer_bar.render()).plain
     assert "Error" in rendered
     assert "Connection failed" in rendered
@@ -89,7 +91,7 @@ def test_footer_bar_displays_warning_message(
 ) -> None:
     """Проверить что FooterBar отображает предупреждение."""
     ui_view_model.warning_message.value = "Low memory"
-    
+
     rendered = cast(Any, footer_bar.render()).plain
     assert "Warning" in rendered
     assert "Low memory" in rendered
@@ -101,7 +103,7 @@ def test_footer_bar_displays_info_message(
 ) -> None:
     """Проверить что FooterBar отображает информационное сообщение."""
     ui_view_model.info_message.value = "Loading data..."
-    
+
     rendered = cast(Any, footer_bar.render()).plain
     assert "Loading data..." in rendered
 
@@ -113,7 +115,7 @@ def test_footer_bar_error_has_priority_over_warning(
     """Проверить приоритет: ошибка > предупреждение."""
     ui_view_model.error_message.value = "Critical error"
     ui_view_model.warning_message.value = "Low memory"
-    
+
     rendered = cast(Any, footer_bar.render()).plain
     assert "Error" in rendered
     assert "Critical error" in rendered
@@ -127,7 +129,7 @@ def test_footer_bar_warning_has_priority_over_info(
     """Проверить приоритет: предупреждение > информация."""
     ui_view_model.warning_message.value = "Low memory"
     ui_view_model.info_message.value = "Loading..."
-    
+
     rendered = cast(Any, footer_bar.render()).plain
     assert "Warning" in rendered
     assert "Low memory" in rendered
@@ -135,6 +137,7 @@ def test_footer_bar_warning_has_priority_over_info(
 
 
 # ===== ToolPanel Tests =====
+
 
 @pytest.mark.asyncio
 async def test_tool_panel_initializes_with_chat_view_model(
@@ -145,7 +148,7 @@ async def test_tool_panel_initializes_with_chat_view_model(
     app = _TestApp()
     async with app.run_test() as _:
         tool_panel = ToolPanel(chat_view_model, mock_terminal_view_model)
-        
+
         assert tool_panel.chat_vm is chat_view_model
         assert tool_panel.id == "tool-panel"
 
@@ -162,7 +165,7 @@ def test_tool_panel_updates_on_tool_calls_empty(
 ) -> None:
     """Проверить что ToolPanel обновляется когда tool_calls пусто."""
     chat_view_model.tool_calls.value = []
-    
+
     rendered = cast(Any, tool_panel.render()).plain
     assert "нет активных вызовов" in rendered
 
@@ -176,9 +179,9 @@ def test_tool_panel_updates_on_tool_calls_added(
         {"id": "tool_1", "status": "running"},
         {"id": "tool_2", "status": "pending"},
     ]
-    
+
     chat_view_model.tool_calls.value = tool_calls
-    
+
     rendered = cast(Any, tool_panel.render()).plain
     assert "Инструменты:" in rendered
 
@@ -186,13 +189,13 @@ def test_tool_panel_updates_on_tool_calls_added(
 def test_tool_panel_reset_clears_calls(tool_panel: ToolPanel) -> None:
     """Проверить что reset() очищает tool calls."""
     tool_panel.reset()
-    
+
     rendered = cast(Any, tool_panel.render()).plain
     assert "нет активных вызовов" in rendered
 
 
 def test_tool_panel_apply_update_works(tool_panel: ToolPanel) -> None:
     """Проверить что apply_update работает правильно."""
-    # ToolPanel должен иметь метод apply_update для backward compatibility
+    # ToolPanel должен иметь метод apply_update для обработки updates
     assert hasattr(tool_panel, "apply_update")
     assert callable(tool_panel.apply_update)

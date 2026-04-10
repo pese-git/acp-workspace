@@ -20,40 +20,40 @@ if TYPE_CHECKING:
 
 class PlanPanel(Static):
     """Показывает последний полученный план с приоритетами и статусами.
-    
+
     Обязательно требует PlanViewModel для работы. Подписывается на Observable свойства:
     - plan_text: текст плана
     - has_plan: флаг наличия активного плана
-    
+
     Примеры использования:
         >>> from acp_client.presentation.plan_view_model import PlanViewModel
         >>> plan_vm = PlanViewModel()
         >>> plan_panel = PlanPanel(plan_vm)
-        >>> 
+        >>>
         >>> # Когда PlanViewModel обновляется, план отображается автоматически
         >>> plan_vm.set_plan("1. Задача A\\n2. Задача B")
     """
 
     def __init__(self, plan_vm: PlanViewModel) -> None:
         """Инициализирует PlanPanel с обязательным PlanViewModel.
-        
+
         Args:
             plan_vm: PlanViewModel для управления состоянием плана
         """
         super().__init__("План: не получен", id="plan-panel")
         self.plan_vm = plan_vm
         self._entries: list[dict[str, str]] = []
-        
+
         # Подписываемся на изменения в PlanViewModel
         self.plan_vm.plan_text.subscribe(self._on_plan_text_changed)
         self.plan_vm.has_plan.subscribe(self._on_has_plan_changed)
-        
+
         # Инициализируем UI с текущим состоянием
         self._update_display()
 
     def _on_plan_text_changed(self, plan_text: str) -> None:
         """Обновить панель при изменении текста плана.
-        
+
         Args:
             plan_text: Новый текст плана
         """
@@ -61,7 +61,7 @@ class PlanPanel(Static):
 
     def _on_has_plan_changed(self, has_plan: bool) -> None:
         """Обновить панель при изменении статуса наличия плана.
-        
+
         Args:
             has_plan: Есть ли активный план
         """
@@ -81,7 +81,7 @@ class PlanPanel(Static):
 
     def apply_update(self, update: PlanUpdate) -> None:
         """Применяет новый snapshot плана из session/update события.
-        
+
         Args:
             update: PlanUpdate с новыми пунктами плана
         """
@@ -95,18 +95,6 @@ class PlanPanel(Static):
         ]
         # Обновляем план через ViewModel для реактивности
         self.plan_vm.set_plan(self._render_text())
-
-    def set_plan(self, plan: str) -> None:
-        """Устанавливает новый план (обратная совместимость).
-        
-        Args:
-            plan: Текст плана
-        """
-        self.plan_vm.set_plan(plan)
-
-    def clear_plan(self) -> None:
-        """Очищает план (обратная совместимость)."""
-        self.plan_vm.clear_plan()
 
     def _render_text(self) -> str:
         """Формирует компактное представление пунктов плана."""

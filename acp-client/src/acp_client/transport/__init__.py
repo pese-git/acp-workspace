@@ -1,15 +1,6 @@
-"""WebSocket транспортный слой для ACP-клиента."""
+"""Пакет transport оставлен пустым.
 
-from .websocket import (
-    ACPClientWSSession,
-    await_ws_response,
-    perform_ws_authenticate,
-    perform_ws_initialize,
-)
+Актуальная реализация транспорта находится в infrastructure слое.
+"""
 
-__all__ = [
-    "ACPClientWSSession",
-    "await_ws_response",
-    "perform_ws_initialize",
-    "perform_ws_authenticate",
-]
+__all__: list[str] = []

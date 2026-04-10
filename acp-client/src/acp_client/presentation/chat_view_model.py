@@ -17,6 +17,7 @@ from acp_client.presentation.observable import Observable, ObservableCommand
 @dataclass
 class PermissionRequest:
     """Запрос разрешения от сервера."""
+
     request_id: str
     session_id: str
     action: str
@@ -26,23 +27,23 @@ class PermissionRequest:
 
 class ChatViewModel(BaseViewModel):
     """ViewModel для управления чатом в активной сессии.
-    
+
     Хранит состояние чата:
     - messages: история сообщений
     - tool_calls: список tool calls
     - pending_permissions: запросы разрешений в ожидании
     - is_streaming: флаг активного streaming
-    
+
     Пример использования:
         >>> coordinator = SessionCoordinator(...)
         >>> vm = ChatViewModel(coordinator, event_bus)
-        >>> 
+        >>>
         >>> # Подписаться на сообщения
         >>> vm.messages.subscribe(lambda m: print(f"Messages: {m}"))
-        >>> 
+        >>>
         >>> # Отправить prompt
         >>> await vm.send_prompt_cmd.execute("session_1", "Привет!")
-        >>> 
+        >>>
         >>> # Обработать разрешение
         >>> await vm.approve_permission_cmd.execute(
         ...     "session_1",
@@ -58,7 +59,7 @@ class ChatViewModel(BaseViewModel):
         logger: Any | None = None,
     ) -> None:
         """Инициализировать ChatViewModel.
-        
+
         Args:
             coordinator: SessionCoordinator для работы с prompt-turn
             event_bus: EventBus для публикации/подписки на события
@@ -90,6 +91,7 @@ class ChatViewModel(BaseViewModel):
                 PromptCompletedEvent,
                 PromptStartedEvent,
             )
+
             self.on_event(PromptStartedEvent, self._handle_prompt_started)
             self.on_event(PromptCompletedEvent, self._handle_prompt_completed)
             self.on_event(PermissionRequestedEvent, self._handle_permission_requested)
@@ -99,7 +101,7 @@ class ChatViewModel(BaseViewModel):
 
     async def _send_prompt(self, session_id: str, prompt_text: str, **kwargs: Any) -> None:
         """Отправить prompt в сессию.
-        
+
         Args:
             session_id: ID сессии
             prompt_text: Текст prompt
@@ -114,44 +116,12 @@ class ChatViewModel(BaseViewModel):
         self.last_stop_reason.value = None
 
         try:
-            # Trace логи в начале _send_prompt
-            self.logger.info(
-                "ChatViewModel._send_prompt START",
-                session_id=session_id,
-                prompt_length=len(prompt_text),
-                has_kwargs=bool(kwargs),
-                kwargs_keys=list(kwargs.keys()) if kwargs else [],
-            )
-
-            # DEBUG: Проверяем передаются ли callbacks
-            self.logger.debug(
-                "ChatViewModel._send_prompt - kwargs before coordinator",
-                has_kwargs=bool(kwargs),
-                kwargs_keys=list(kwargs.keys()) if kwargs else [],
-            )
-
-            # Trace логи перед вызовом coordinator.send_prompt
-            self.logger.info(
-                "ChatViewModel calling coordinator.send_prompt",
-                session_id=session_id,
-                has_on_update_callback=True,
-            )
-
             # Отправить prompt через coordinator с callback для обработки обновлений
             # SessionCoordinator должен обработать updates и опубликовать события
             await self.coordinator.send_prompt(
-                session_id, 
-                prompt_text, 
-                on_update=self._handle_session_update,
-                **kwargs
+                session_id, prompt_text, on_update=self._handle_session_update, **kwargs
             )
-            
-            # Trace логи после вызова coordinator.send_prompt
-            self.logger.info(
-                "ChatViewModel coordinator.send_prompt COMPLETED",
-                session_id=session_id,
-            )
-            
+
             # Гарантированное добавление streaming текста в историю после завершения
             # (на случай, если PromptCompletedEvent не был опубликован)
             streaming_text = self.streaming_text.value
@@ -174,65 +144,45 @@ class ChatViewModel(BaseViewModel):
 
     def _handle_session_update(self, update_data: dict[str, Any]) -> None:
         """Обработать session/update от сервера.
-        
+
         Обрабатывает различные типы обновлений сессии:
         - agent_message_chunk: добавляет текст ответа агента к streaming_text
         - user_message_chunk: обрабатывает фрагменты сообщений пользователя
         - session_info_update: обновляет информацию о сессии
         - и другие типы согласно протоколу ACP
-        
+
         Args:
             update_data: Данные обновления сессии от сервера
         """
         try:
-            # Trace логи в начале _handle_session_update
-            self.logger.info(
-                "ChatViewModel._handle_session_update CALLED",
-                update_data_keys=list(update_data.keys()) if update_data else [],
-            )
-            
             params = update_data.get("params", {})
             update = params.get("update", {})
             session_update_type = update.get("sessionUpdate")
-            
+
             self.logger.debug(
                 "session_update_received",
                 update_type=session_update_type,
                 update=update,
             )
-            
+
             # Обработка agent_message_chunk - добавляем текст ответа агента
             if session_update_type == "agent_message_chunk":
                 content = update.get("content", {})
                 text = content.get("text", "")
-                
+
                 if text:
-                    # Trace логи при обработке agent_message_chunk
-                    self.logger.info(
-                        "ChatViewModel processing agent_message_chunk",
-                        text_length=len(text),
-                        text_preview=text[:50] if text else "",
-                    )
-                    
                     # Добавляем текст к streaming_text для отображения в реальном времени
                     self.append_streaming_text(text)
-                    
-                    # Trace логи после вызова append_streaming_text
-                    self.logger.info(
-                        "ChatViewModel append_streaming_text CALLED",
-                        text_length=len(text),
-                        current_streaming_text_length=len(self.streaming_text.value),
-                    )
-                    
+
                     self.logger.debug("agent_message_chunk_processed", text_length=len(text))
-            
+
             # Обработка user_message_chunk если нужно
             elif session_update_type == "user_message_chunk":
                 # Пока не требуется обработка
                 pass
-            
+
             # Можно добавить обработку других типов: tool_call, plan_update и т.д.
-            
+
         except Exception as e:
             self.logger.error(
                 "Error handling session update",
@@ -242,7 +192,7 @@ class ChatViewModel(BaseViewModel):
 
     async def _cancel_prompt(self, session_id: str) -> None:
         """Отменить текущий prompt.
-        
+
         Args:
             session_id: ID сессии
         """
@@ -265,7 +215,7 @@ class ChatViewModel(BaseViewModel):
         **kwargs: Any,
     ) -> None:
         """Утвердить разрешение.
-        
+
         Args:
             session_id: ID сессии
             permission_id: ID разрешения
@@ -296,7 +246,7 @@ class ChatViewModel(BaseViewModel):
         **kwargs: Any,
     ) -> None:
         """Отклонить разрешение.
-        
+
         Args:
             session_id: ID сессии
             permission_id: ID разрешения
@@ -330,7 +280,7 @@ class ChatViewModel(BaseViewModel):
 
     def add_message(self, role: str, content: str) -> None:
         """Добавить сообщение в чат.
-        
+
         Args:
             role: Роль ("user", "assistant", "system")
             content: Содержимое сообщения
@@ -342,28 +292,15 @@ class ChatViewModel(BaseViewModel):
 
     def append_streaming_text(self, text: str) -> None:
         """Добавить текст к потоковому выводу.
-        
+
         Args:
             text: Текст для добавления
         """
-        # Trace логи в начале append_streaming_text
-        self.logger.info(
-            "append_streaming_text START",
-            text_length=len(text),
-            current_value_length=len(self.streaming_text.value),
-        )
-        
         self.streaming_text.value += text
-        
-        # Trace логи в конце append_streaming_text
-        self.logger.info(
-            "append_streaming_text DONE",
-            new_value_length=len(self.streaming_text.value),
-        )
 
     def _remove_pending_permission(self, permission_id: str) -> None:
         """Удалить разрешение из pending.
-        
+
         Args:
             permission_id: ID разрешения
         """
@@ -373,32 +310,32 @@ class ChatViewModel(BaseViewModel):
     # Event handlers
     def _handle_prompt_started(self, event: Any) -> None:
         """Обработать начало prompt-turn.
-        
+
         Args:
             event: PromptStartedEvent из EventBus
         """
         self.logger.debug(
             "Prompt started event received - CLEARING streaming_text",
-            session_id=getattr(event, 'session_id', 'unknown'),
+            session_id=getattr(event, "session_id", "unknown"),
         )
         self.is_streaming.value = True
         self.streaming_text.value = ""
 
     def _handle_prompt_completed(self, event: Any) -> None:
         """Обработать завершение prompt-turn.
-        
+
         После завершения streaming сохраняет накопленный текст агента в историю сообщений.
-        
+
         Args:
             event: PromptCompletedEvent из EventBus
         """
         self.logger.debug(
             "Prompt completed event received - STOPPING streaming",
-            session_id=getattr(event, 'session_id', 'unknown'),
-            stop_reason=getattr(event, 'stop_reason', None),
+            session_id=getattr(event, "session_id", "unknown"),
+            stop_reason=getattr(event, "stop_reason", None),
             final_streaming_text_length=len(self.streaming_text.value),
         )
-        
+
         # Сохраняем накопленный streaming текст в историю перед отключением streaming
         streaming_text = self.streaming_text.value
         if streaming_text:
@@ -410,24 +347,24 @@ class ChatViewModel(BaseViewModel):
                 "Agent response saved to message history",
                 text_length=len(streaming_text),
             )
-        
+
         # Отключаем streaming и очищаем буфер
         self.is_streaming.value = False
         self.streaming_text.value = ""
-        self.last_stop_reason.value = getattr(event, 'stop_reason', None)
+        self.last_stop_reason.value = getattr(event, "stop_reason", None)
 
     def _handle_permission_requested(self, event: Any) -> None:
         """Обработать запрос разрешения.
-        
+
         Args:
             event: PermissionRequestedEvent из EventBus
         """
         perm = PermissionRequest(
-            request_id=getattr(event, 'request_id', 'unknown'),
-            session_id=getattr(event, 'session_id', 'unknown'),
-            action=getattr(event, 'action', 'unknown'),
-            resource=getattr(event, 'resource', 'unknown'),
-            description=getattr(event, 'description', ''),
+            request_id=getattr(event, "request_id", "unknown"),
+            session_id=getattr(event, "session_id", "unknown"),
+            action=getattr(event, "action", "unknown"),
+            resource=getattr(event, "resource", "unknown"),
+            description=getattr(event, "description", ""),
         )
         perms = self.pending_permissions.value
         self.pending_permissions.value = list(perms) + [perm]
@@ -439,14 +376,14 @@ class ChatViewModel(BaseViewModel):
 
     def _handle_error_occurred(self, event: Any) -> None:
         """Обработать ошибку.
-        
+
         Args:
             event: ErrorOccurredEvent из EventBus
         """
         self.is_streaming.value = False
-        error_msg = getattr(event, 'error_message', 'Unknown error')
+        error_msg = getattr(event, "error_message", "Unknown error")
         self.logger.error(
             "Error occurred event received",
             error_message=error_msg,
-            error_type=getattr(event, 'error_type', 'unknown'),
+            error_type=getattr(event, "error_type", "unknown"),
         )

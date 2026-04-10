@@ -13,6 +13,7 @@ from acp_client.tui.components.permission_modal import PermissionModal
 
 class _TestApp(App):
     """Минимальный app для создания Textual контекста в тестах."""
+
     pass
 
 
@@ -50,7 +51,7 @@ def test_permission_modal_requires_permission_vm(
     sample_options: list[PermissionOption],
 ) -> None:
     """Проверить что PermissionModal требует обязательный параметр permission_vm.
-    
+
     PermissionModal не может быть инициализирован без PermissionViewModel.
     """
     # PermissionModal должен быть инициализирован с обязательным параметром
@@ -59,7 +60,7 @@ def test_permission_modal_requires_permission_vm(
         title="Test Permission",
         options=sample_options,
     )
-    
+
     assert modal.permission_vm is permission_view_model
     assert modal.permission_vm.permission_type.value == ""
     assert modal.permission_vm.resource.value == ""
@@ -72,7 +73,7 @@ def test_permission_modal_shows_request(
     sample_options: list[PermissionOption],
 ) -> None:
     """Проверить отображение запроса разрешения через ViewModel.
-    
+
     При вызове show_request через ViewModel, состояние должно быть
     обновлено и окно должно быть отмечено как видимое.
     """
@@ -81,14 +82,14 @@ def test_permission_modal_shows_request(
         title="Test Permission",
         options=sample_options,
     )
-    
+
     permission_type = "file_read"
     resource = "/home/user/file.txt"
     message = "Read access needed"
-    
+
     # Показываем запрос разрешения через ViewModel
     permission_view_model.show_request(permission_type, resource, message)
-    
+
     # Проверяем что состояние обновлено
     assert permission_view_model.permission_type.value == permission_type
     assert permission_view_model.resource.value == resource
@@ -101,7 +102,7 @@ def test_permission_modal_updates_on_type_change(
     sample_options: list[PermissionOption],
 ) -> None:
     """Проверить обновление при изменении типа разрешения в ViewModel.
-    
+
     Когда тип разрешения изменяется через ViewModel, модальное окно
     должно обновиться и отразить новый тип.
     """
@@ -110,16 +111,16 @@ def test_permission_modal_updates_on_type_change(
         title="Test Permission",
         options=sample_options,
     )
-    
+
     # Показываем начальный запрос
     initial_type = "file_read"
     permission_view_model.show_request(initial_type, "/home/user/file.txt", "test")
     assert permission_view_model.permission_type.value == initial_type
-    
+
     # Изменяем тип разрешения
     new_type = "file_write"
     permission_view_model._permission_type.value = new_type
-    
+
     # Проверяем что тип обновился
     assert permission_view_model.permission_type.value == new_type
 
@@ -129,7 +130,7 @@ def test_permission_modal_updates_on_resource_change(
     sample_options: list[PermissionOption],
 ) -> None:
     """Проверить обновление при изменении ресурса в ViewModel.
-    
+
     Когда ресурс изменяется через ViewModel, модальное окно
     должно обновиться и отразить новый ресурс.
     """
@@ -138,16 +139,16 @@ def test_permission_modal_updates_on_resource_change(
         title="Test Permission",
         options=sample_options,
     )
-    
+
     # Показываем начальный запрос
     initial_resource = "/home/user/file.txt"
     permission_view_model.show_request("file_read", initial_resource, "test")
     assert permission_view_model.resource.value == initial_resource
-    
+
     # Изменяем ресурс
     new_resource = "/home/user/another_file.txt"
     permission_view_model._resource.value = new_resource
-    
+
     # Проверяем что ресурс обновился
     assert permission_view_model.resource.value == new_resource
 
@@ -157,7 +158,7 @@ def test_permission_modal_hides_on_close(
     sample_options: list[PermissionOption],
 ) -> None:
     """Проверить скрытие модального окна при закрытии.
-    
+
     Когда окно закрывается, флаг is_visible в ViewModel должен
     быть установлен в False.
     """
@@ -166,14 +167,14 @@ def test_permission_modal_hides_on_close(
         title="Test Permission",
         options=sample_options,
     )
-    
+
     # Показываем запрос разрешения
     permission_view_model.show_request("file_read", "/home/user/file.txt", "test")
     assert permission_view_model.is_visible.value is True
-    
+
     # Скрываем модальное окно через метод
     permission_view_model.hide()
-    
+
     # Флаг видимости должен быть сброшен
     assert permission_view_model.is_visible.value is False
 
@@ -183,7 +184,7 @@ def test_permission_modal_clear(
     sample_options: list[PermissionOption],
 ) -> None:
     """Проверить очистку состояния ViewModel.
-    
+
     При вызове clear(), все значения должны быть сброшены в исходное состояние.
     """
     PermissionModal(
@@ -191,62 +192,27 @@ def test_permission_modal_clear(
         title="Test Permission",
         options=sample_options,
     )
-    
+
     # Показываем запрос разрешения с данными
     permission_view_model.show_request(
         "file_read",
         "/home/user/file.txt",
         "Read access needed",
     )
-    
+
     # Проверяем что состояние заполнено
     assert permission_view_model.permission_type.value == "file_read"
     assert permission_view_model.resource.value == "/home/user/file.txt"
     assert permission_view_model.message.value == "Read access needed"
     assert permission_view_model.is_visible.value is True
-    
+
     # Очищаем состояние
     permission_view_model.clear()
-    
+
     # Проверяем что все значения сброшены
     assert permission_view_model.permission_type.value == ""
     assert permission_view_model.resource.value == ""
     assert permission_view_model.message.value == ""
-    assert permission_view_model.is_visible.value is False
-
-
-def test_permission_modal_backward_compatibility(
-    permission_view_model: PermissionViewModel,
-    sample_options: list[PermissionOption],
-) -> None:
-    """Проверить работу старых методов компонента через ViewModel.
-    
-    Методы show_request и close должны работать как раньше,
-    но теперь управляя состоянием через ViewModel.
-    """
-    modal = PermissionModal(
-        permission_vm=permission_view_model,
-        title="Test Permission",
-        options=sample_options,
-    )
-    
-    # Используем старый API show_request
-    permission_type = "file_execute"
-    resource = "/usr/bin/script.sh"
-    message = "Execute permission needed"
-    
-    modal.show_request(permission_type, resource, message)
-    
-    # Проверяем что состояние обновлено через ViewModel
-    assert permission_view_model.permission_type.value == permission_type
-    assert permission_view_model.resource.value == resource
-    assert permission_view_model.message.value == message
-    assert permission_view_model.is_visible.value is True
-    
-    # Используем старый API close
-    modal.close()
-    
-    # Проверяем что окно скрыто
     assert permission_view_model.is_visible.value is False
 
 
@@ -255,19 +221,19 @@ def test_permission_modal_initializes_with_title_and_options(
     sample_options: list[PermissionOption],
 ) -> None:
     """Проверить инициализацию модального окна с параметрами.
-    
+
     Если title и options переданы в конструктор, они должны быть
     сохранены модальным окном.
     """
     test_title = "Request File Permission"
-    
+
     # Создаем модальное окно с параметрами
     modal = PermissionModal(
         permission_vm=permission_view_model,
         title=test_title,
         options=sample_options,
     )
-    
+
     # Проверяем что параметры сохранены
     assert modal._title == test_title
     assert modal._options == sample_options
@@ -279,7 +245,7 @@ def test_permission_modal_initializes_with_message(
     sample_options: list[PermissionOption],
 ) -> None:
     """Проверить инициализацию модального окна без сообщения.
-    
+
     Когда сообщение не передано, оно должно быть пустым по умолчанию.
     """
     PermissionModal(
@@ -287,10 +253,10 @@ def test_permission_modal_initializes_with_message(
         title="Test",
         options=sample_options,
     )
-    
+
     # Показываем запрос без сообщения
     permission_view_model.show_request("file_read", "/path/to/file")
-    
+
     # Проверяем что сообщение пустое
     assert permission_view_model.message.value == ""
 
@@ -301,7 +267,7 @@ async def test_permission_modal_unsubscribes_on_unmount(
     sample_options: list[PermissionOption],
 ) -> None:
     """Проверить отписку от ViewModel при уничтожении компонента.
-    
+
     При вызове on_unmount(), все подписки должны быть очищены.
     """
     # Создаем app контекст для Textual компонентов
@@ -312,13 +278,13 @@ async def test_permission_modal_unsubscribes_on_unmount(
             title="Test",
             options=sample_options,
         )
-        
+
         # Проверяем что подписки установлены (может быть 3 или 4 в зависимости от реализации)
         initial_subs = len(modal._unsubscribers)
         assert initial_subs > 0
-        
+
         # Имитируем уничтожение компонента
         modal.on_unmount()
-        
+
         # Проверяем что подписки очищены
         assert len(modal._unsubscribers) == 0

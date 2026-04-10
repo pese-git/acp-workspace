@@ -44,18 +44,11 @@ python -m acp_client.tui --host 127.0.0.1 --port 8000 --theme dark
 acp-client-tui
 ```
 
-### Запуск CLI клиента
+### Запуск CLI обертки
 
 ```bash
-# Ping сервер
-uv run acp-client --host 127.0.0.1 --port 8000 --method ping
-
-# Echo сообщение
-uv run acp-client --host 127.0.0.1 --port 8000 --method echo --params '{"message":"hello"}'
-
-# Загрузить сессию
-uv run acp-client --host 127.0.0.1 --port 8000 --method session/load \
-  --params '{"sessionId":"sess_1","cwd":"/tmp"}'
+# Запуск TUI через CLI entrypoint
+uv run acp-client --host 127.0.0.1 --port 8000
 ```
 
 ## 🏗️ Архитектура

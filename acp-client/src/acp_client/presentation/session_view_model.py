@@ -15,26 +15,26 @@ from acp_client.presentation.observable import Observable, ObservableCommand
 
 class SessionViewModel(BaseViewModel):
     """ViewModel для управления сессиями ACP.
-    
+
     Хранит состояние сессий и команды для управления ими:
     - sessions: список доступных сессий
     - selected_session_id: ID выбранной сессии
     - is_loading_sessions: флаг загрузки
     - error_message: последняя ошибка
-    
+
     Пример использования:
         >>> coordinator = SessionCoordinator(...)
         >>> vm = SessionViewModel(coordinator, event_bus)
-        >>> 
+        >>>
         >>> # Подписаться на изменения
         >>> vm.sessions.subscribe(lambda s: print(f"Sessions: {s}"))
-        >>> 
+        >>>
         >>> # Загрузить сессии
         >>> await vm.load_sessions_cmd.execute()
-        >>> 
+        >>>
         >>> # Создать новую сессию
         >>> await vm.create_session_cmd.execute("localhost", 8080)
-        >>> 
+        >>>
         >>> # Переключиться на сессию
         >>> await vm.switch_session_cmd.execute("session_id")
     """
@@ -46,7 +46,7 @@ class SessionViewModel(BaseViewModel):
         logger: Any | None = None,
     ) -> None:
         """Инициализировать SessionViewModel.
-        
+
         Args:
             coordinator: SessionCoordinator для работы с сессиями
             event_bus: EventBus для публикации/подписки на события
@@ -75,6 +75,7 @@ class SessionViewModel(BaseViewModel):
                 SessionCreatedEvent,
                 SessionInitializedEvent,
             )
+
             self.on_event(SessionCreatedEvent, self._handle_session_created)
             self.on_event(SessionInitializedEvent, self._handle_session_initialized)
             self.on_event(SessionClosedEvent, self._handle_session_closed)
@@ -83,14 +84,14 @@ class SessionViewModel(BaseViewModel):
 
     async def _load_sessions(self) -> None:
         """Загрузить список сессий от coordinator.
-        
+
         Обновляет sessions и session_count observables.
         """
         self.is_loading_sessions.value = True
         self.error_message.value = None
 
         try:
-            sessions = await self.coordinator.load_sessions()
+            sessions = await self.coordinator.list_sessions()
             self.sessions.value = sessions
             self.session_count.value = len(sessions)
 
@@ -107,14 +108,14 @@ class SessionViewModel(BaseViewModel):
 
     async def _create_session(self, host: str, port: int, **kwargs: Any) -> None:
         """Создать новую сессию.
-        
+
         Args:
             host: Хост сервера
             port: Порт сервера
             **kwargs: Дополнительные параметры сессии (cwd, client_capabilities)
         """
         from pathlib import Path
-        
+
         self.is_loading_sessions.value = True
         self.error_message.value = None
 
@@ -133,11 +134,9 @@ class SessionViewModel(BaseViewModel):
         try:
             # Передаем cwd в координатор
             # Удаляем cwd из kwargs, чтобы избежать дублирования параметра
-            create_kwargs = {k: v for k, v in kwargs.items() if k != 'cwd'}
-            result = await self.coordinator.create_session(
-                host, port, cwd=cwd, **create_kwargs
-            )
-            
+            create_kwargs = {k: v for k, v in kwargs.items() if k != "cwd"}
+            result = await self.coordinator.create_session(host, port, cwd=cwd, **create_kwargs)
+
             # coordinator.create_session возвращает dict, преобразуем в объект для совместимости
             # Создаем простой объект для хранения результата сессии
             class SessionResult:
@@ -150,14 +149,14 @@ class SessionViewModel(BaseViewModel):
                     self.title = f"Session {session_id[-8:]}" if session_id else "New Session"
                     self.server_capabilities = session_data.get("server_capabilities", {})
                     self.is_authenticated = session_data.get("is_authenticated", False)
-            
+
             session = SessionResult(result)
-            
+
             # Добавить новую сессию в список
             sessions = self.sessions.value + [session]
             self.sessions.value = sessions
             self.session_count.value = len(sessions)
-            
+
             # Выбрать новую сессию
             self.selected_session_id.value = session.id
 
@@ -176,13 +175,13 @@ class SessionViewModel(BaseViewModel):
 
     async def _switch_session(self, session_id: str) -> None:
         """Переключиться на другую сессию.
-        
+
         Args:
             session_id: ID сессии для переключения
         """
         # Проверить что сессия существует
         session_exists = any(s.id == session_id for s in self.sessions.value)
-        
+
         if not session_exists:
             error_msg = f"Session {session_id} not found"
             self.error_message.value = error_msg
@@ -196,7 +195,7 @@ class SessionViewModel(BaseViewModel):
 
     async def _delete_session(self, session_id: str) -> None:
         """Удалить сессию.
-        
+
         Args:
             session_id: ID сессии для удаления
         """
@@ -204,12 +203,12 @@ class SessionViewModel(BaseViewModel):
 
         try:
             await self.coordinator.delete_session(session_id)
-            
+
             # Удалить сессию из списка
             sessions = [s for s in self.sessions.value if s.id != session_id]
             self.sessions.value = sessions
             self.session_count.value = len(sessions)
-            
+
             # Если удалена выбранная сессия, выбрать первую оставшуюся или None
             if self.selected_session_id.value == session_id:
                 self.selected_session_id.value = sessions[0].id if sessions else None
@@ -222,7 +221,7 @@ class SessionViewModel(BaseViewModel):
 
     def _handle_session_created(self, event: Any) -> None:
         """Обработать событие создания сессии.
-        
+
         Args:
             event: SessionCreatedEvent из EventBus
         """
@@ -231,26 +230,26 @@ class SessionViewModel(BaseViewModel):
 
     def _handle_session_initialized(self, event: Any) -> None:
         """Обработать событие инициализации сессии.
-        
+
         Args:
             event: SessionInitializedEvent из EventBus
         """
         self.logger.debug(
             "Session initialized event received",
             session_id=event.session_id,
-            capabilities=getattr(event, 'capabilities', {}),
+            capabilities=getattr(event, "capabilities", {}),
         )
 
     def _handle_session_closed(self, event: Any) -> None:
         """Обработать событие закрытия сессии.
-        
+
         Args:
             event: SessionClosedEvent из EventBus
         """
         self.logger.debug(
             "Session closed event received",
             session_id=event.session_id,
-            reason=getattr(event, 'reason', 'unknown'),
+            reason=getattr(event, "reason", "unknown"),
         )
         # Удалить закрытую сессию из списка
         sessions = [s for s in self.sessions.value if s.id != event.session_id]

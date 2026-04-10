@@ -3,13 +3,12 @@
 Команда:
     acp-client --tui [--host HOST] [--port PORT]
 
-Примечание: Legacy HTTP/WS CLI интерфейс был заменен на TUI приложение.
 Для использования Clean Architecture API, используйте DIBootstrapper напрямую.
 
 Пример использования с новым API:
     from acp_client.infrastructure.di_bootstrapper import DIBootstrapper
     from acp_client.application.use_cases import InitializeUseCase
-    
+
     container = DIBootstrapper.build(host="localhost", port=8000)
     use_case = container.resolve(InitializeUseCase)
     result = await use_case.execute()
