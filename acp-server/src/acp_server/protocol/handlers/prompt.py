@@ -9,6 +9,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import structlog
+
 from ...messages import ACPMessage, JsonRpcId
 from ..state import (
     ActiveTurnState,
@@ -29,6 +31,9 @@ from .session import (
 
 if TYPE_CHECKING:
     from ...agent.orchestrator import AgentOrchestrator
+
+# Используем structlog для структурированного логирования
+logger = structlog.get_logger()
 
 
 async def _handle_with_agent(
@@ -153,6 +158,53 @@ async def _handle_with_agent(
     # Завершить turn и отправить response
     session.active_turn = None
     stop_reason = "end_turn"
+    
+    # Логирование финального ответа ассистента из истории
+    for history_entry in reversed(session.history):
+        if isinstance(history_entry, dict) and history_entry.get("role") == "assistant":
+            assistant_text = history_entry.get("text", "")
+            logger.info(
+                "final assistant response in session history",
+                session_id=session_id,
+                message_length=len(assistant_text),
+            )
+            logger.debug(
+                "final assistant response content",
+                content=assistant_text[:200],
+            )
+            break
+    
+    # Логирование содержимого отправляемых сообщений
+    for notification in notifications:
+        if notification.method == "session/update":
+            params = notification.params
+            if (
+                isinstance(params, dict)
+                and "update" in params
+                and isinstance(params["update"], dict)
+                and params["update"].get("sessionUpdate") == "agent_message_chunk"
+            ):
+                # Логирование agent_message_chunk с содержимым ответа
+                content = params["update"].get("content", {})
+                if isinstance(content, dict) and content.get("type") == "text":
+                    message_text = content.get("text", "")
+                    logger.debug(
+                        "agent message chunk being sent",
+                        content=message_text[:200],
+                    )
+    
+    # Логирование отправки ответа клиенту
+    logger.info(
+        "sending response to client",
+        session_id=session_id,
+        stop_reason=stop_reason,
+        num_notifications=len(notifications),
+    )
+    logger.debug(
+        "response details",
+        request_id=str(request_id) if request_id else None,
+        session_title=session.title,
+    )
     
     return ProtocolOutcome(
         response=ACPMessage.response(request_id, {"stopReason": stop_reason}),

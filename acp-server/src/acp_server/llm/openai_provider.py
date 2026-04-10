@@ -123,6 +123,17 @@ class OpenAIProvider(LLMProvider):
             )
 
             parsed_response = self._parse_completion(response)
+            
+            # Логирование полученного ответа от LLM
+            logger.info(
+                "llm response received",
+                response_length=len(parsed_response.text),
+                has_tool_calls=bool(parsed_response.tool_calls),
+            )
+            logger.debug(
+                "llm response content",
+                content=parsed_response.text[:200],
+            )
             logger.debug(
                 "openai completion parsed",
                 response_length=len(parsed_response.text),

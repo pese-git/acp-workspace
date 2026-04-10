@@ -2,12 +2,17 @@
 
 from typing import Any
 
+import structlog
+
 from acp_server.agent.base import AgentContext, AgentResponse, LLMAgent
 from acp_server.agent.naive import NaiveAgent
 from acp_server.agent.state import OrchestratorConfig
 from acp_server.llm.base import LLMMessage, LLMProvider
 from acp_server.protocol.state import SessionState, ToolCallState
 from acp_server.tools.base import ToolRegistry
+
+# Используем structlog для структурированного логирования
+logger = structlog.get_logger()
 
 
 class AgentOrchestrator:
@@ -146,6 +151,17 @@ class AgentOrchestrator:
             "role": "assistant",
             "text": response.text,
         })
+        
+        # Логирование добавленного ответа ассистента в историю
+        logger.info(
+            "assistant message added to session history",
+            session_id=updated_state.session_id,
+            message_length=len(response.text),
+        )
+        logger.debug(
+            "assistant message content",
+            content=response.text[:200],
+        )
 
         # Если есть tool calls, обновить их в состоянии
         if response.tool_calls:

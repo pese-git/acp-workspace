@@ -2,9 +2,14 @@
 
 from typing import Any
 
+import structlog
+
 from acp_server.agent.base import AgentContext, AgentResponse, LLMAgent
 from acp_server.llm.base import LLMMessage, LLMProvider
 from acp_server.tools.base import ToolRegistry
+
+# Используем structlog для структурированного логирования
+logger = structlog.get_logger()
 
 
 class NaiveAgent(LLMAgent):
@@ -87,6 +92,19 @@ class NaiveAgent(LLMAgent):
             response = await self.llm.create_completion(
                 messages=messages,
                 tools=tools_dict if tools_dict else None,
+            )
+            
+            # Логирование полученного от LLM ответа
+            logger.info(
+                "llm response received from agent",
+                iteration=iteration,
+                response_length=len(response.text),
+                has_tool_calls=bool(response.tool_calls),
+                tool_calls_count=len(response.tool_calls),
+            )
+            logger.debug(
+                "llm response text content",
+                content=response.text[:200],
             )
             
             # Если нет tool calls - вернуть ответ
