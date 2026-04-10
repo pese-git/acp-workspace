@@ -12,7 +12,7 @@ from typing import Any
 from acp_client.domain import SessionRepository, TransportService
 from acp_client.infrastructure.logging_config import get_logger
 
-from .dto import CreateSessionRequest, PromptCallbacks, SendPromptRequest
+from .dto import CreateSessionRequest, LoadSessionRequest, PromptCallbacks, SendPromptRequest
 from .use_cases import (
     CreateSessionUseCase,
     InitializeUseCase,
@@ -49,7 +49,7 @@ class SessionCoordinator:
         self.create_session_use_case = CreateSessionUseCase(transport, session_repo)
         self.load_session_use_case = LoadSessionUseCase(transport, session_repo)
         self.send_prompt_use_case = SendPromptUseCase(transport, session_repo)
-        self.list_sessions_use_case = ListSessionsUseCase(session_repo)
+        self.list_sessions_use_case = ListSessionsUseCase(transport, session_repo)
 
     async def initialize(self) -> dict[str, Any]:
         """Инициализирует соединение с сервером.
@@ -110,6 +110,44 @@ class SessionCoordinator:
         self._logger.info("listing_sessions")
         response = await self.list_sessions_use_case.execute()
         return response.sessions
+
+    async def load_session(
+        self,
+        session_id: str,
+        server_host: str,
+        server_port: int,
+        cwd: str | None = None,
+        mcp_servers: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Загружает существующую сессию через `session/load`.
+
+        Аргументы:
+            session_id: ID сессии
+            server_host: Адрес сервера (для совместимости DTO)
+            server_port: Порт сервера (для совместимости DTO)
+            cwd: Абсолютный путь рабочей директории
+            mcp_servers: Список MCP-серверов
+
+        Возвращает:
+            Словарь с данными загруженной сессии и replay updates
+        """
+
+        request = LoadSessionRequest(
+            session_id=session_id,
+            server_host=server_host,
+            server_port=server_port,
+            cwd=cwd,
+            mcp_servers=mcp_servers,
+        )
+
+        self._logger.info("loading_session")
+        response = await self.load_session_use_case.execute(request)
+        return {
+            "session_id": response.session_id,
+            "server_capabilities": response.server_capabilities,
+            "is_authenticated": response.is_authenticated,
+            "replay_updates": response.replay_updates,
+        }
 
     async def delete_session(self, session_id: str) -> None:
         """Удаляет сессию из локального репозитория."""

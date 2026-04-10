@@ -68,14 +68,15 @@ class ACPProtocol:
         # Инициализировать хранилище (по умолчанию InMemoryStorage)
         if storage is None:
             from ..storage import InMemoryStorage
+
             storage = InMemoryStorage()
         self._storage = storage
         # Внутренний кэш сессий для совместимости с handlers
         self._sessions: dict[str, SessionState] = {}
-        
+
         # Оркестратор LLM-агента для обработки prompt-turns через агента
         self._agent_orchestrator = agent_orchestrator
-        
+
         # Последние capabilities, согласованные через initialize.
         # Для in-memory demo-сервера это достаточно; по мере роста можно
         # расширить до connection-scoped хранилища.
@@ -203,9 +204,8 @@ class ACPProtocol:
             # Проверяем требования auth
             if self._require_auth and not self._authenticated:
                 from .handlers.auth import auth_required_error
-                return ProtocolOutcome(
-                    response=auth_required_error(message.id, self._auth_methods)
-                )
+
+                return ProtocolOutcome(response=auth_required_error(message.id, self._auth_methods))
 
             # Валидируем параметры и создаем сессию
             from pathlib import Path
@@ -234,8 +234,7 @@ class ACPProtocol:
             # Создаем сессию
             session_id = f"sess_{uuid4().hex[:12]}"
             config_values = {
-                config_id: str(spec["default"]) 
-                for config_id, spec in self._config_specs.items()
+                config_id: str(spec["default"]) for config_id, spec in self._config_specs.items()
             }
 
             session_state = SessionState(
@@ -258,9 +257,7 @@ class ACPProtocol:
                         "configOptions": session.build_config_options(
                             config_values, self._config_specs
                         ),
-                        "modes": session.build_modes_state(
-                            config_values, self._config_specs
-                        ),
+                        "modes": session.build_modes_state(config_values, self._config_specs),
                     },
                 )
             )
@@ -269,7 +266,7 @@ class ACPProtocol:
             # Обновляем runtime capabilities при загрузке сессии
             session_id = params.get("sessionId")
             if isinstance(session_id, str):
-                session_obj = self._sessions.get(session_id)
+                session_obj = await self._get_session_for_runtime(session_id)
                 if session_obj is not None:
                     session_obj.runtime_capabilities = self._runtime_capabilities
             return session.session_load(
@@ -283,6 +280,9 @@ class ACPProtocol:
             )
 
         if method == "session/list":
+            # Подтягиваем persisted-сессии в кэш, чтобы `session/list` после рестарта
+            # не зависел только от in-memory словаря текущего процесса.
+            await self._hydrate_session_cache_from_storage()
             return ProtocolOutcome(
                 response=session.session_list(
                     message.id,
@@ -465,3 +465,38 @@ class ACPProtocol:
             result=result,
             sessions=self._sessions,
         )
+
+    async def _get_session_for_runtime(self, session_id: str) -> SessionState | None:
+        """Возвращает сессию из кэша или подгружает её из storage по id.
+
+        Пример использования:
+            session = await protocol._get_session_for_runtime("sess_1")
+        """
+
+        cached_session = self._sessions.get(session_id)
+        if cached_session is not None:
+            return cached_session
+
+        loaded_session = await self._storage.load_session(session_id)
+        if loaded_session is not None:
+            self._sessions[session_id] = loaded_session
+        return loaded_session
+
+    async def _hydrate_session_cache_from_storage(self) -> None:
+        """Подгружает все страницы сессий из storage в in-memory кэш.
+
+        Пример использования:
+            await protocol._hydrate_session_cache_from_storage()
+        """
+
+        cursor: str | None = None
+        while True:
+            page, next_cursor = await self._storage.list_sessions(
+                cursor=cursor,
+                limit=self._session_list_page_size,
+            )
+            for session_state in page:
+                self._sessions[session_state.session_id] = session_state
+            if next_cursor is None:
+                break
+            cursor = next_cursor

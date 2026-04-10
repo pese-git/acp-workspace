@@ -95,6 +95,16 @@ class SessionViewModel(BaseViewModel):
             self.sessions.value = sessions
             self.session_count.value = len(sessions)
 
+            # Если текущий выбор отсутствует, автоматически выбираем первую сессию.
+            current_selected_id = self.selected_session_id.value
+            has_selected_session = any(
+                self._extract_session_id(session) == current_selected_id for session in sessions
+            )
+            if sessions and not has_selected_session:
+                first_session_id = self._extract_session_id(sessions[0])
+                if first_session_id is not None:
+                    self.selected_session_id.value = first_session_id
+
             self.logger.info(
                 "Sessions loaded successfully",
                 count=len(sessions),

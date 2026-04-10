@@ -2,6 +2,7 @@ import pytest
 
 from acp_server.messages import ACPMessage
 from acp_server.protocol import ACPProtocol
+from acp_server.storage import JsonFileStorage
 
 
 async def _initialize_with_tool_runtime(protocol: ACPProtocol) -> None:
@@ -122,9 +123,7 @@ async def test_authenticate_requires_api_key_when_server_has_auth_backend() -> N
     assert isinstance(init.response.result, dict)
     method_id = init.response.result["authMethods"][0]["id"]
 
-    missing_key = await protocol.handle(
-        ACPMessage.request("authenticate", {"methodId": method_id})
-    )
+    missing_key = await protocol.handle(ACPMessage.request("authenticate", {"methodId": method_id}))
     assert missing_key.response is not None
     assert missing_key.response.error is not None
     assert missing_key.response.error.message == "Invalid params: apiKey is required"
@@ -835,9 +834,7 @@ async def test_session_list_supports_cursor_pagination() -> None:
     assert len(first_sessions) == 50
     assert isinstance(next_cursor, str)
 
-    second_page = await protocol.handle(
-        ACPMessage.request("session/list", {"cursor": next_cursor})
-    )
+    second_page = await protocol.handle(ACPMessage.request("session/list", {"cursor": next_cursor}))
     assert second_page.response is not None
     assert isinstance(second_page.response.result, dict)
     second_sessions = second_page.response.result["sessions"]
@@ -2709,3 +2706,60 @@ async def test_session_load_replays_tool_call_state() -> None:
         if notification.params is not None
     ]
     assert "tool_call" in replay_updates
+
+
+@pytest.mark.asyncio
+async def test_session_list_reads_persisted_sessions_after_restart(tmp_path) -> None:
+    """Проверяет, что `session/list` видит JSON-сессии после рестарта процесса."""
+
+    storage = JsonFileStorage(tmp_path / "sessions")
+    protocol = ACPProtocol(storage=storage)
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    created_session_id = created.response.result["sessionId"]
+
+    # Имитация рестарта сервера: новый инстанс протокола с тем же storage.
+    restarted_protocol = ACPProtocol(storage=storage)
+    listed = await restarted_protocol.handle(ACPMessage.request("session/list", {}))
+
+    assert listed.response is not None
+    assert isinstance(listed.response.result, dict)
+    sessions = listed.response.result.get("sessions")
+    assert isinstance(sessions, list)
+    assert any(
+        isinstance(item, dict) and item.get("sessionId") == created_session_id for item in sessions
+    )
+
+
+@pytest.mark.asyncio
+async def test_session_load_reads_persisted_session_after_restart(tmp_path) -> None:
+    """Проверяет, что `session/load` поднимает сессию из JSON storage после рестарта."""
+
+    storage = JsonFileStorage(tmp_path / "sessions")
+    protocol = ACPProtocol(storage=storage)
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    created_session_id = created.response.result["sessionId"]
+
+    restarted_protocol = ACPProtocol(storage=storage)
+    loaded = await restarted_protocol.handle(
+        ACPMessage.request(
+            "session/load",
+            {
+                "sessionId": created_session_id,
+                "cwd": "/tmp",
+                "mcpServers": [],
+            },
+        )
+    )
+
+    assert loaded.response is not None
+    assert loaded.response.error is None
+    assert isinstance(loaded.response.result, dict)
+    assert "configOptions" in loaded.response.result

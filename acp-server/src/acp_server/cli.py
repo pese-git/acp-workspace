@@ -47,7 +47,7 @@ def parse_storage_arg(storage_arg: str) -> SessionStorage:
     """
     # Получаем logger для логирования инициализации хранилища
     logger = structlog.get_logger()
-    
+
     if storage_arg == "memory":
         logger.debug("creating in-memory storage backend")
         return InMemoryStorage()
@@ -61,6 +61,18 @@ def parse_storage_arg(storage_arg: str) -> SessionStorage:
     else:
         logger.error("unknown storage backend format", storage_arg=storage_arg)
         raise ValueError(f"Unknown storage backend: {storage_arg}")
+
+
+def describe_storage(storage: SessionStorage) -> str:
+    """Возвращает человеко-читаемое описание backend и его пути.
+
+    Пример:
+        description = describe_storage(storage)
+    """
+
+    if isinstance(storage, JsonFileStorage):
+        return f"json:{storage.base_path.resolve()}"
+    return "memory"
 
 
 def run_server() -> None:
@@ -83,7 +95,7 @@ def run_server() -> None:
     # Инициализируем базовое логирование для вывода ошибок инициализации
     logger = setup_logging(level="INFO", json_format=False)
     logger.debug("acp-server starting up")
-    
+
     # Загружаем переменные окружения из .env файла если он существует
     load_dotenv()
     logger.debug("environment variables loaded from .env")
@@ -210,7 +222,7 @@ def run_server() -> None:
     if args.system_prompt:
         config.agent.system_prompt = args.system_prompt
         cli_overrides.append("system_prompt=***")
-    
+
     if cli_overrides:
         logger.debug("configuration overridden", overrides=", ".join(cli_overrides))
 
@@ -222,7 +234,7 @@ def run_server() -> None:
         auth_api_key = env_api_key if isinstance(env_api_key, str) and env_api_key else None
         if env_api_key:
             logger.debug("auth api key loaded from environment")
-    
+
     if auth_api_key:
         logger.debug("authentication api key configured")
     elif args.require_auth:
@@ -231,7 +243,11 @@ def run_server() -> None:
     # Парсим и создаём storage backend
     logger.debug("initializing storage backend", storage_type=args.storage)
     storage = parse_storage_arg(args.storage)
-    logger.debug("storage backend initialized", storage_type=type(storage).__name__)
+    logger.info(
+        "storage_backend_initialized",
+        storage_type=type(storage).__name__,
+        storage_target=describe_storage(storage),
+    )
 
     # Создаём и запускаем сервер
     logger.debug(

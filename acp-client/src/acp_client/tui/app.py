@@ -195,6 +195,23 @@ class ACPClientApp(App[None]):
             # Обновляем статус подключения в UI
             self._ui_vm.set_connection_status(ConnectionStatus.CONNECTED)
 
+            # После успешного подключения запрашиваем список сессий с сервера,
+            # чтобы sidebar отображал сохраненные сессии сразу при старте.
+            await self._session_vm.load_sessions_cmd.execute()
+            loaded_count = self._session_vm.session_count.value
+            self._app_logger.info(
+                "sessions_loaded_on_startup",
+                count=loaded_count,
+                host=self._host,
+                port=self._port,
+            )
+            if loaded_count == 0:
+                # Явный warning помогает сразу понять, что сервер вернул пустой session/list.
+                self._app_logger.warning(
+                    "session_list_is_empty_on_startup",
+                    hint="Проверьте, что сервер запущен с persistent --storage json:<path>",
+                )
+
         except Exception as e:
             self._app_logger.error(
                 "failed_to_initialize_connection",
