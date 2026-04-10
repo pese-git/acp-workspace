@@ -7,7 +7,9 @@
 - Отслеживание статуса streaming
 """
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from acp_client.presentation.base_view_model import BaseViewModel
@@ -69,6 +71,7 @@ class ChatViewModel(BaseViewModel):
         coordinator: Any,  # SessionCoordinator
         event_bus: Any | None = None,
         logger: Any | None = None,
+        history_dir: Path | str | None = None,
     ) -> None:
         """Инициализировать ChatViewModel.
 
@@ -76,9 +79,29 @@ class ChatViewModel(BaseViewModel):
             coordinator: SessionCoordinator для работы с prompt-turn
             event_bus: EventBus для публикации/подписки на события
             logger: Logger для логирования
+            history_dir: Директория локального persistence истории
+                (по умолчанию ~/.acp-client/history)
         """
         super().__init__(event_bus, logger)
         self.coordinator = coordinator
+
+        # Локальный storage истории нужен для восстановления UI без network roundtrip.
+        resolved_history_dir = (
+            Path.home() / ".acp-client" / "history" if history_dir is None else Path(history_dir)
+        )
+        self._history_dir = resolved_history_dir
+        try:
+            self._history_dir.mkdir(parents=True, exist_ok=True)
+            self.logger.info(
+                "chat_history_storage_initialized",
+                history_dir=str(self._history_dir.resolve()),
+            )
+        except OSError as error:
+            self.logger.warning(
+                "chat_history_dir_unavailable",
+                history_dir=str(self._history_dir),
+                error=str(error),
+            )
 
         # Observable свойства
         self.messages: Observable[list[Any]] = Observable([])
@@ -377,19 +400,76 @@ class ChatViewModel(BaseViewModel):
         self.is_streaming.value = state.is_streaming
         self.last_stop_reason.value = state.last_stop_reason
 
+    def restore_session_from_replay(
+        self,
+        session_id: str,
+        replay_updates: list[dict[str, Any]],
+    ) -> None:
+        """Восстанавливает состояние чата по replay updates от `session/load`.
+
+        Args:
+            session_id: ID сессии, для которой применяем replay
+            replay_updates: Список raw-уведомлений `session/update`
+        """
+
+        # Полная пересборка сообщений из server-side истории исключает
+        # зависимость от локального history-кэша клиента.
+        rebuilt_messages: list[dict[str, str]] = []
+
+        for update_data in replay_updates:
+            params = update_data.get("params", {})
+            if params.get("sessionId") != session_id:
+                continue
+
+            update = params.get("update", {})
+            update_type = update.get("sessionUpdate")
+            content = update.get("content")
+            if not isinstance(content, dict):
+                continue
+
+            text = content.get("text")
+            if not isinstance(text, str) or text == "":
+                continue
+
+            if update_type == "user_message_chunk":
+                rebuilt_messages.append({"role": "user", "content": text})
+                continue
+            if update_type == "agent_message_chunk":
+                role = "system" if self._is_system_ack_chunk(text) else "assistant"
+                rebuilt_messages.append({"role": role, "content": text})
+
+        # Записываем пересобранное состояние в кэш конкретной сессии.
+        state = self._get_or_create_session_state(session_id)
+        state.messages = rebuilt_messages
+        state.streaming_text = ""
+        state.is_streaming = False
+        self._session_states[session_id] = state
+        self._persist_messages_to_local_storage(session_id, rebuilt_messages)
+
+        # Если сессия активна в UI, синхронизируем observables сразу.
+        if self._active_session_id == session_id:
+            self.messages.value = list(rebuilt_messages)
+            self.streaming_text.value = ""
+            self.is_streaming.value = False
+
     def _persist_active_state(self) -> None:
         """Сохраняет текущее состояние чата для активной сессии."""
 
         if self._active_session_id is None:
             return
 
-        self._session_states[self._active_session_id] = ChatSessionState(
+        state = ChatSessionState(
             messages=list(self.messages.value),
             tool_calls=list(self.tool_calls.value),
             pending_permissions=list(self.pending_permissions.value),
             streaming_text=self.streaming_text.value,
             is_streaming=self.is_streaming.value,
             last_stop_reason=self.last_stop_reason.value,
+        )
+        self._session_states[self._active_session_id] = state
+        self._persist_messages_to_local_storage(
+            self._active_session_id,
+            state.messages,
         )
 
     def _get_or_create_session_state(self, session_id: str) -> ChatSessionState:
@@ -399,8 +479,10 @@ class ChatViewModel(BaseViewModel):
         if state is not None:
             return state
 
+        persisted_messages = self._load_messages_from_local_storage(session_id)
+
         state = ChatSessionState(
-            messages=[],
+            messages=persisted_messages,
             tool_calls=[],
             pending_permissions=[],
             streaming_text="",
@@ -409,6 +491,72 @@ class ChatViewModel(BaseViewModel):
         )
         self._session_states[session_id] = state
         return state
+
+    def _history_file_path(self, session_id: str) -> Path:
+        """Возвращает путь JSON-файла истории для указанной сессии."""
+
+        safe_session_id = session_id.replace("/", "_").replace("\\", "_")
+        return self._history_dir / f"{safe_session_id}.json"
+
+    def _persist_messages_to_local_storage(
+        self,
+        session_id: str,
+        messages: list[Any],
+    ) -> None:
+        """Сохраняет сообщения сессии в локальный JSON storage."""
+
+        serializable_messages = [
+            message
+            for message in messages
+            if isinstance(message, dict)
+            and isinstance(message.get("role"), str)
+            and isinstance(message.get("content"), str)
+        ]
+        file_path = self._history_file_path(session_id)
+        try:
+            file_path.write_text(
+                json.dumps({"messages": serializable_messages}, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except OSError as error:
+            self.logger.warning(
+                "chat_history_save_failed",
+                session_id=session_id,
+                path=str(file_path),
+                error=str(error),
+            )
+
+    def _load_messages_from_local_storage(self, session_id: str) -> list[dict[str, str]]:
+        """Загружает сообщения сессии из локального JSON storage."""
+
+        file_path = self._history_file_path(session_id)
+        if not file_path.exists():
+            return []
+
+        try:
+            payload = json.loads(file_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            self.logger.warning(
+                "chat_history_load_failed",
+                session_id=session_id,
+                path=str(file_path),
+                error=str(error),
+            )
+            return []
+
+        raw_messages = payload.get("messages") if isinstance(payload, dict) else None
+        if not isinstance(raw_messages, list):
+            return []
+
+        normalized_messages: list[dict[str, str]] = []
+        for message in raw_messages:
+            if not isinstance(message, dict):
+                continue
+            role = message.get("role")
+            content = message.get("content")
+            if isinstance(role, str) and isinstance(content, str):
+                normalized_messages.append({"role": role, "content": content})
+        return normalized_messages
 
     def _append_streaming_text_to_session(self, session_id: str, text: str) -> None:
         """Добавляет streaming chunk в состояние указанной сессии."""

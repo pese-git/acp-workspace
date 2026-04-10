@@ -9,10 +9,15 @@ from acp_client.presentation.chat_view_model import ChatViewModel
 
 
 @pytest.fixture
-def chat_view_model() -> ChatViewModel:
+def chat_view_model(tmp_path) -> ChatViewModel:
     """Создает ChatViewModel для тестов."""
 
-    return ChatViewModel(coordinator=None, event_bus=EventBus(), logger=None)
+    return ChatViewModel(
+        coordinator=None,
+        event_bus=EventBus(),
+        logger=None,
+        history_dir=tmp_path / "history",
+    )
 
 
 def test_chat_state_isolated_between_sessions(chat_view_model: ChatViewModel) -> None:
@@ -108,3 +113,62 @@ def test_system_ack_chunk_separated_from_assistant_text(chat_view_model: ChatVie
     )
 
     assert chat_view_model.streaming_text.value == "Hello from LLM"
+
+
+def test_restore_session_from_replay_rebuilds_messages(chat_view_model: ChatViewModel) -> None:
+    """Replay updates из `session/load` восстанавливают историю сообщений."""
+
+    chat_view_model.set_active_session("sess_replay")
+    chat_view_model.restore_session_from_replay(
+        "sess_replay",
+        [
+            {
+                "params": {
+                    "sessionId": "sess_replay",
+                    "update": {
+                        "sessionUpdate": "user_message_chunk",
+                        "content": {"type": "text", "text": "hello"},
+                    },
+                }
+            },
+            {
+                "params": {
+                    "sessionId": "sess_replay",
+                    "update": {
+                        "sessionUpdate": "agent_message_chunk",
+                        "content": {"type": "text", "text": "world"},
+                    },
+                }
+            },
+        ],
+    )
+
+    assert chat_view_model.messages.value == [
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": "world"},
+    ]
+
+
+def test_chat_history_is_persisted_to_local_storage(tmp_path) -> None:
+    """История сообщений сохраняется и восстанавливается из локального storage."""
+
+    history_dir = tmp_path / "history"
+
+    first_vm = ChatViewModel(
+        coordinator=None,
+        event_bus=EventBus(),
+        logger=None,
+        history_dir=history_dir,
+    )
+    first_vm.set_active_session("sess_local")
+    first_vm.add_message("user", "persist me")
+
+    second_vm = ChatViewModel(
+        coordinator=None,
+        event_bus=EventBus(),
+        logger=None,
+        history_dir=history_dir,
+    )
+    second_vm.set_active_session("sess_local")
+
+    assert second_vm.messages.value == [{"role": "user", "content": "persist me"}]
