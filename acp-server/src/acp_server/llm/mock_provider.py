@@ -4,7 +4,12 @@
 from collections.abc import AsyncIterator
 from typing import Any
 
+import structlog
+
 from acp_server.llm.base import LLMMessage, LLMProvider, LLMResponse, LLMToolCall
+
+# Получаем структурированный logger
+logger = structlog.get_logger()
 
 
 class MockLLMProvider(LLMProvider):
@@ -32,7 +37,7 @@ class MockLLMProvider(LLMProvider):
 
     async def initialize(self, config: dict[str, Any]) -> None:
         """Mock инициализация."""
-        pass
+        logger.debug("mock llm provider initialized", config=config)
 
     async def create_completion(
         self,
@@ -44,11 +49,26 @@ class MockLLMProvider(LLMProvider):
         self.last_messages = messages
         self.last_tools = tools
 
-        return LLMResponse(
+        logger.debug(
+            "mock llm create_completion called",
+            num_messages=len(messages),
+            num_tools=len(tools) if tools else 0,
+            tool_calls_count=len(self.tool_calls),
+        )
+
+        response = LLMResponse(
             text=self.response,
             tool_calls=self.tool_calls,
             stop_reason="end_turn" if not self.tool_calls else "tool_use",
         )
+        
+        logger.debug(
+            "mock llm completion response created",
+            response_length=len(self.response),
+            stop_reason=response.stop_reason,
+        )
+        
+        return response
 
     async def stream_completion(  # type: ignore[override]
         self,
@@ -59,6 +79,12 @@ class MockLLMProvider(LLMProvider):
         """Вернуть mock потоковый ответ."""
         self.last_messages = messages
         self.last_tools = tools
+
+        logger.debug(
+            "mock llm stream_completion called",
+            num_messages=len(messages),
+            num_tools=len(tools) if tools else 0,
+        )
 
         yield LLMResponse(
             text=self.response,

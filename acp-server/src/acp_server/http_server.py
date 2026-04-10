@@ -30,6 +30,21 @@ from .tools.registry import SimpleToolRegistry
 logger = structlog.get_logger()
 
 
+def _truncate_payload(payload: str, max_length: int = 500) -> str:
+    """Обрезает payload для логирования, сохраняя значимую часть.
+    
+    Args:
+        payload: Строка payload для обрезки
+        max_length: Максимальная длина результата
+        
+    Returns:
+        Обрезанный payload или полный, если он короче max_length
+    """
+    if len(payload) > max_length:
+        return payload[:max_length]
+    return payload
+
+
 class ACPHttpServer:
     """Транспортный слой ACP поверх aiohttp (WebSocket-only).
 
@@ -73,6 +88,15 @@ class ACPHttpServer:
         self.config = config or AppConfig()
         # Оркестратор агента инициализируется в методе run()
         self._agent_orchestrator: AgentOrchestrator | None = None
+        
+        # Логируем инициализацию сервера
+        logger.debug(
+            "acp http server initialized",
+            host=host,
+            port=port,
+            require_auth=require_auth,
+            has_auth_key=bool(auth_api_key),
+        )
 
     async def _initialize_llm_provider(self) -> LLMProvider | None:
         """Инициализирует LLM провайдера на основе конфигурации.
@@ -83,10 +107,12 @@ class ACPHttpServer:
         Пример использования:
             provider = await server._initialize_llm_provider()
         """
+        logger.debug("initializing llm provider", provider_type=self.config.llm.provider)
         llm_provider: LLMProvider | None = None
 
         if self.config.llm.provider == "openai":
             # Инициализируем OpenAI провайдера
+            logger.debug("configuring openai provider", model=self.config.llm.model)
             openai_provider = OpenAIProvider()
             config_dict = {
                 "api_key": self.config.llm.api_key,
@@ -98,6 +124,7 @@ class ACPHttpServer:
                 config_dict["base_url"] = self.config.llm.base_url
 
             await openai_provider.initialize(config_dict)
+            logger.debug("openai provider initialized", model=self.config.llm.model)
             llm_provider = openai_provider
             logger.info(
                 "openai llm provider initialized",
@@ -195,6 +222,13 @@ class ACPHttpServer:
         remote_addr = request.remote or "unknown"
         start_time = time.time()
         
+        # Логируем установку нового WebSocket подключения
+        logger.info(
+            "ws connection request received",
+            connection_id=connection_id,
+            remote_addr=remote_addr,
+        )
+        
         # Логируем подключение клиента
         logger.info(
             "ws connection established",
@@ -227,6 +261,12 @@ class ACPHttpServer:
                         acp_request = ACPMessage.from_json(message.data)
                         method_name = acp_request.method
                         request_id = str(acp_request.id) if acp_request.id is not None else None
+                        
+                        # Логируем получение данных с payload
+                        conn_logger.debug(
+                            "message received",
+                            payload=_truncate_payload(message.data),
+                        )
                         
                         if method_name is None:
                             outcome = protocol.handle_client_response(acp_request)
@@ -307,15 +347,39 @@ class ACPHttpServer:
                             )
                         )
 
+                    # Отправляем уведомления
                     for notification in outcome.notifications:
-                        await ws.send_str(notification.to_json())
+                        notification_json = notification.to_json()
+                        await ws.send_str(notification_json)
+                        conn_logger.debug(
+                            "notification sent",
+                            method=notification.method,
+                            payload=_truncate_payload(notification_json),
+                        )
 
+                    # Отправляем основной ответ
                     if outcome.response is not None:
-                        await ws.send_str(outcome.response.to_json())
+                        response_json = outcome.response.to_json()
+                        await ws.send_str(response_json)
+                        conn_logger.debug(
+                            "response sent",
+                            request_id=request_id,
+                            has_error=outcome.response.error is not None,
+                            payload=_truncate_payload(response_json),
+                        )
+                    
+                    # Отправляем дополнительные ответы
                     for followup_response in outcome.followup_responses:
-                        await ws.send_str(followup_response.to_json())
+                        followup_json = followup_response.to_json()
+                        await ws.send_str(followup_json)
+                        conn_logger.debug(
+                            "followup response sent",
+                            request_id=followup_response.id,
+                            payload=_truncate_payload(followup_json),
+                        )
 
                     if method_name == "shutdown":
+                        conn_logger.info("shutdown requested")
                         await ws.close()
                         break
                 elif message.type in {WSMsgType.ERROR, WSMsgType.CLOSE, WSMsgType.CLOSING}:

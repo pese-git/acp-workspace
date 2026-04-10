@@ -2,16 +2,17 @@
 # mypy: ignore-errors
 
 import json
-import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
+import structlog
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletion
 
 from acp_server.llm.base import LLMMessage, LLMProvider, LLMResponse, LLMToolCall
 
-logger = logging.getLogger(__name__)
+# Используем structlog для структурированного логирования
+logger = structlog.get_logger()
 
 
 class OpenAIProvider(LLMProvider):
@@ -42,6 +43,8 @@ class OpenAIProvider(LLMProvider):
                 "base_url": str (опционально),
             }
         """
+        logger.debug("initializing openai provider")
+        
         api_key = config.get("api_key")
         self._model = config.get("model", "gpt-4o")
         self._temperature = config.get("temperature", 0.7)
@@ -55,7 +58,13 @@ class OpenAIProvider(LLMProvider):
             base_url=base_url,  # Если None, использует дефолтный
         )
 
-        logger.info(f"OpenAI провайдер инициализирован: model={self._model}")
+        logger.info(
+            "openai provider initialized",
+            model=self._model,
+            temperature=self._temperature,
+            max_tokens=self._max_tokens,
+            has_base_url=bool(base_url),
+        )
 
     async def create_completion(  # type: ignore[no-untyped-def]
         self,
@@ -77,6 +86,13 @@ class OpenAIProvider(LLMProvider):
             msg = "Провайдер не инициализирован"
             raise RuntimeError(msg)
 
+        logger.debug(
+            "openai create_completion request starting",
+            num_messages=len(messages),
+            has_tools=bool(tools),
+            num_tools=len(tools) if tools else 0,
+        )
+
         # Преобразовать сообщения в формат OpenAI
         openai_messages = [
             {"role": msg.role, "content": msg.content}
@@ -97,14 +113,31 @@ class OpenAIProvider(LLMProvider):
             request_params["tool_choice"] = "auto"
 
         try:
+            logger.debug("sending request to openai api")
             response: ChatCompletion = await self._client.chat.completions.create(  # type: ignore[arg-type]
                 **request_params
             )
+            logger.debug(
+                "received openai api response",
+                finish_reason=response.choices[0].finish_reason if response.choices else None,
+            )
 
-            return self._parse_completion(response)
+            parsed_response = self._parse_completion(response)
+            logger.debug(
+                "openai completion parsed",
+                response_length=len(parsed_response.text),
+                tool_calls_count=len(parsed_response.tool_calls),
+                stop_reason=parsed_response.stop_reason,
+            )
+            
+            return parsed_response
 
         except Exception as e:
-            logger.error(f"Ошибка при вызове OpenAI: {e}")
+            logger.error(
+                "openai api error",
+                error=str(e),
+                exc_info=True,
+            )
             raise
 
     async def stream_completion(  # type: ignore[no-untyped-def,override]
@@ -120,6 +153,13 @@ class OpenAIProvider(LLMProvider):
         if self._client is None:
             msg = "Провайдер не инициализирован"
             raise RuntimeError(msg)
+
+        logger.debug(
+            "openai stream_completion request starting",
+            num_messages=len(messages),
+            has_tools=bool(tools),
+            num_tools=len(tools) if tools else 0,
+        )
 
         # Преобразовать сообщения
         openai_messages = [
@@ -141,21 +181,39 @@ class OpenAIProvider(LLMProvider):
 
         try:
             # Получить потоковый ответ от OpenAI
+            logger.debug("sending streaming request to openai api")
             stream = await self._client.chat.completions.create(  # type: ignore[arg-type]
                 **request_params
             )
             buffer = ""
+            chunk_count = 0
             async for chunk in stream:  # type: ignore[union-attr]
+                chunk_count += 1
                 if chunk.choices[0].delta.content:
                     buffer += chunk.choices[0].delta.content
+                    logger.debug(
+                        "openai stream chunk received",
+                        chunk_count=chunk_count,
+                        buffer_length=len(buffer),
+                    )
                     yield LLMResponse(
                         text=buffer,
                         tool_calls=[],
                         stop_reason="streaming",
                     )
+            
+            logger.debug(
+                "openai stream completed",
+                total_chunks=chunk_count,
+                final_length=len(buffer),
+            )
 
         except Exception as e:
-            logger.error(f"Ошибка при потоковом вызове OpenAI: {e}")
+            logger.error(
+                "openai stream error",
+                error=str(e),
+                exc_info=True,
+            )
             raise
 
     def _parse_completion(self, response: ChatCompletion) -> LLMResponse:  # type: ignore[no-untyped-def]  # noqa: C901

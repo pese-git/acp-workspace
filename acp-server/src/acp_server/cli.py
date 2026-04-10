@@ -6,6 +6,8 @@
     acp-server --host 127.0.0.1 --port 8080
     acp-server --log-level DEBUG
     acp-server --log-level INFO --log-json
+    acp-server --log-level DEBUG --log-file default
+    acp-server --log-level INFO --log-json --log-file /var/log/acp-server.log
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ import asyncio
 import os
 from pathlib import Path
 
+import structlog
 from dotenv import load_dotenv
 
 from .config import AppConfig
@@ -42,13 +45,21 @@ def parse_storage_arg(storage_arg: str) -> SessionStorage:
     Пример:
         storage = parse_storage_arg("json:~/.acp/sessions")
     """
+    # Получаем logger для логирования инициализации хранилища
+    logger = structlog.get_logger()
+    
     if storage_arg == "memory":
+        logger.debug("creating in-memory storage backend")
         return InMemoryStorage()
     elif storage_arg.startswith("json:"):
         path_str = storage_arg[5:]  # Убрать префикс "json:"
         path = Path(path_str).expanduser()
-        return JsonFileStorage(path)
+        logger.debug("creating json file storage backend", path=str(path))
+        storage = JsonFileStorage(path)
+        logger.debug("json file storage initialized", path=str(path))
+        return storage
     else:
+        logger.error("unknown storage backend format", storage_arg=storage_arg)
         raise ValueError(f"Unknown storage backend: {storage_arg}")
 
 
@@ -69,8 +80,13 @@ def run_server() -> None:
         # Загружает .env из текущей директории
         run_server()
     """
+    # Инициализируем базовое логирование для вывода ошибок инициализации
+    logger = setup_logging(level="INFO", json_format=False)
+    logger.debug("acp-server starting up")
+    
     # Загружаем переменные окружения из .env файла если он существует
     load_dotenv()
+    logger.debug("environment variables loaded from .env")
 
     parser = argparse.ArgumentParser(prog="acp-server")
     parser.add_argument("--host", default="127.0.0.1")
@@ -98,6 +114,11 @@ def run_server() -> None:
         "--log-json",
         action="store_true",
         help="Использовать JSON формат для логов (для production). По умолчанию консольный формат.",
+    )
+    parser.add_argument(
+        "--log-file",
+        default=None,
+        help="Путь к файлу логов. 'default' для ~/.acp-server/logs/acp-server.log",
     )
     parser.add_argument(
         "--storage",
@@ -142,37 +163,83 @@ def run_server() -> None:
         help="Системный промпт для агента. Переопределяет ACP_SYSTEM_PROMPT",
     )
     args = parser.parse_args()
+    logger.debug("command line arguments parsed")
 
-    # Инициализируем логирование перед запуском сервера
-    setup_logging(level=args.log_level, json_format=args.log_json)
+    # Инициализируем логирование перед запуском сервера с поддержкой сохранения в файл
+    logger = setup_logging(
+        level=args.log_level,
+        json_format=args.log_json,
+        log_file=args.log_file or None,
+    )
+    logger.info(
+        "logging configured",
+        level=args.log_level,
+        json_format=args.log_json,
+        log_file=args.log_file or "console only",
+    )
 
     # Загружаем конфигурацию из переменных окружения
+    logger.debug("loading application configuration")
     config = AppConfig.from_env()
+    logger.debug(
+        "application configuration loaded",
+        llm_provider=config.llm.provider,
+        has_api_key=bool(config.llm.api_key),
+    )
 
     # Переопределяем конфиг из аргументов командной строки если указаны
+    cli_overrides = []
     if args.llm_provider:
         config.llm.provider = args.llm_provider
+        cli_overrides.append(f"llm_provider={args.llm_provider}")
     if args.llm_model:
         config.llm.model = args.llm_model
+        cli_overrides.append(f"llm_model={args.llm_model}")
     if args.llm_api_key:
         config.llm.api_key = args.llm_api_key
+        cli_overrides.append("llm_api_key=***")
     if args.llm_base_url:
         config.llm.base_url = args.llm_base_url
+        cli_overrides.append(f"llm_base_url={args.llm_base_url}")
     if args.llm_temperature is not None:
         config.llm.temperature = args.llm_temperature
+        cli_overrides.append(f"llm_temperature={args.llm_temperature}")
     if args.llm_max_tokens is not None:
         config.llm.max_tokens = args.llm_max_tokens
+        cli_overrides.append(f"llm_max_tokens={args.llm_max_tokens}")
     if args.system_prompt:
         config.agent.system_prompt = args.system_prompt
+        cli_overrides.append("system_prompt=***")
+    
+    if cli_overrides:
+        logger.debug("configuration overridden", overrides=", ".join(cli_overrides))
 
+    # Обработка аутентификации
+    logger.debug("processing authentication configuration", require_auth=args.require_auth)
     auth_api_key = args.auth_api_key
     if not isinstance(auth_api_key, str) or not auth_api_key:
         env_api_key = os.getenv("ACP_SERVER_API_KEY")
         auth_api_key = env_api_key if isinstance(env_api_key, str) and env_api_key else None
+        if env_api_key:
+            logger.debug("auth api key loaded from environment")
+    
+    if auth_api_key:
+        logger.debug("authentication api key configured")
+    elif args.require_auth:
+        logger.warning("authentication required but no api key configured")
 
     # Парсим и создаём storage backend
+    logger.debug("initializing storage backend", storage_type=args.storage)
     storage = parse_storage_arg(args.storage)
+    logger.debug("storage backend initialized", storage_type=type(storage).__name__)
 
+    # Создаём и запускаем сервер
+    logger.debug(
+        "initializing http server",
+        host=args.host,
+        port=args.port,
+        require_auth=args.require_auth,
+    )
     server = ACPHttpServer(
         host=args.host,
         port=args.port,
@@ -181,5 +248,14 @@ def run_server() -> None:
         storage=storage,
         config=config,
     )
+    logger.debug("http server initialized, preparing to start")
 
-    asyncio.run(server.run())
+    # Запускаем сервер
+    try:
+        logger.info("starting acp-server", host=args.host, port=args.port)
+        asyncio.run(server.run())
+    except KeyboardInterrupt:
+        logger.info("server interrupted by user")
+    except Exception as e:
+        logger.error("server error", error=str(e), exc_info=True)
+        raise
