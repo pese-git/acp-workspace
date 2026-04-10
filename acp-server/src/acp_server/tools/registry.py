@@ -3,10 +3,10 @@
 from collections.abc import Callable
 from typing import Any
 
-from acp_server.tools.base import ToolDefinition, ToolExecutionResult
+from acp_server.tools.base import ToolDefinition, ToolExecutionResult, ToolRegistry
 
 
-class SimpleToolRegistry:
+class SimpleToolRegistry(ToolRegistry):
     """Простой реестр инструментов с хранением в памяти.
     
     Хранит определения инструментов и их обработчики (handlers).
@@ -106,3 +106,58 @@ class SimpleToolRegistry:
                 success=False,
                 error=error_msg,
             )
+
+    def register_tool(
+        self,
+        name: str,
+        description: str,
+        parameters: dict[str, Any],
+        kind: str,
+        executor: Callable,
+        requires_permission: bool = True,
+    ) -> None:
+        """Регистрация инструмента через интерфейс ToolRegistry."""
+        tool = ToolDefinition(
+            name=name,
+            description=description,
+            parameters=parameters,
+            kind=kind,
+            requires_permission=requires_permission,
+        )
+        self.register(tool, executor)
+
+    def get_available_tools(
+        self,
+        session_id: str,
+        include_permission_required: bool = True,
+    ) -> list[ToolDefinition]:
+        """Получить доступные инструменты для сессии.
+        
+        В упрощенной реализации возвращает все инструменты.
+        """
+        # Для простого реестра - возвращаем все инструменты
+        tools = list(self._tools.values())
+        if not include_permission_required:
+            tools = [t for t in tools if not t.requires_permission]
+        return tools
+
+    def to_llm_tools(self, tools: list[ToolDefinition]) -> list[dict[str, Any]]:
+        """Преобразовать определения инструментов для LLM."""
+        return [
+            {
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.parameters,
+            }
+            for tool in tools
+        ]
+
+    async def execute_tool(
+        self,
+        session_id: str,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> ToolExecutionResult:
+        """Выполнить инструмент (async версия для интерфейса ToolRegistry)."""
+        # В упрощенной реализации просто вызываем синхронную версию
+        return self.execute(tool_name, arguments)
