@@ -8,9 +8,11 @@ from acp_server.tools.base import (
     ToolExecutionResult,
     ToolRegistry,
 )
+from acp_server.tools.registry import SimpleToolRegistry
 
 __all__ = [
     "ToolRegistry",
     "ToolDefinition",
     "ToolExecutionResult",
+    "SimpleToolRegistry",
 ]
