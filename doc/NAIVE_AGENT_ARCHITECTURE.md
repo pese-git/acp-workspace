@@ -495,15 +495,67 @@ class AgentOrchestrator:
 
 ### 3.1.1 Правильная модель выполнения tool calls (согласно ACP)
 
+Согласно [ACP Protocol: Tool Calls](../doc/Agent%20Client%20Protocol/protocol/08-Tool%20Calls.md):
+
+> **Из ACP Protocol:**
+> Tool calls represent actions that language models request Agents to perform during a prompt turn. When an LLM determines it needs to interact with external systems—like reading files, running code, or fetching data—it generates tool calls that the Agent executes on its behalf.
+> 
+> Agents report tool calls through `session/update` notifications, allowing Clients to display real-time progress and results to users.
+
 **Ключевая концепция:** Tool calls **выполняются на Agent (сервере)**, но Agent может использовать **Client RPC методы** (fs/*, terminal/*) для доступа к ресурсам клиента.
 
-**Поток выполнения:**
+**Поток выполнения (согласно ACP):**
 
 1. **LLM генерирует tool calls** → Agent получает их в ответе
 2. **Agent отправляет tool call клиенту** → через `session/update` (sessionUpdate: "tool_call")
 3. **Agent может запросить разрешение** → через `session/request_permission` если нужно
 4. **Agent выполняет tool** → используя Client RPC методы или локальную логику
 5. **Agent отправляет результат клиенту** → через `session/update` (sessionUpdate: "tool_call_update")
+
+**Пример session/update для tool call (из ACP протокола):**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "session/update",
+  "params": {
+    "sessionId": "sess_abc123def456",
+    "update": {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "call_001",
+      "title": "Reading configuration file",
+      "kind": "read",
+      "status": "pending"
+    }
+  }
+}
+```
+
+**Пример обновления статуса tool call:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "session/update",
+  "params": {
+    "sessionId": "sess_abc123def456",
+    "update": {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "call_001",
+      "status": "completed",
+      "content": [
+        {
+          "type": "content",
+          "content": {
+            "type": "text",
+            "text": "Configuration loaded successfully"
+          }
+        }
+      ]
+    }
+  }
+}
+```
 
 ### 3.2 Структура NaiveAgent
 
@@ -1024,7 +1076,15 @@ def __init__(
 
 Файл: `acp-server/src/acp_server/protocol/handlers/prompt.py`
 
-**Согласно ACP протоколу ([`08-Tool Calls.md`](doc/Agent%20Client%20Protocol/protocol/08-Tool%20Calls.md)):**
+**Согласно ACP протоколу ([Tool Calls](../doc/Agent%20Client%20Protocol/protocol/08-Tool%20Calls.md) и [Prompt Turn](../doc/Agent%20Client%20Protocol/protocol/05-Prompt%20Turn.md)):**
+
+> **Из ACP Prompt Turn:**
+> If there are no pending tool calls, the turn ends and the Agent **MUST** respond to the original `session/prompt` request with a `StopReason`. If the model requested tool calls, these are also reported immediately through `session/update` notifications.
+
+**Согласно ACP Tool Calls:**
+
+> **Из ACP Tool Calls:**
+> The Agent **SHOULD** report it to the Client when the language model requests a tool invocation. Agents report tool calls through `session/update` notifications, allowing Clients to display real-time progress and results to users.
 
 Правильный flow обработки tool calls:
 
@@ -1228,9 +1288,190 @@ async def notify_tool_call_update(
 
 ---
 
-## 7. Точки расширения
+## 6.3 Интеграция с session/request_permission
 
-### 7.1 Добавление нового LLM провайдера
+Согласно [ACP Protocol: Tool Calls - Requesting Permission](../doc/Agent%20Client%20Protocol/protocol/08-Tool%20Calls.md):
+
+> **Из ACP Protocol:**
+> The Agent **MAY** request permission from the user before executing a tool call by calling the `session/request_permission` method. Clients **MAY** automatically allow or reject permission requests according to the user settings.
+
+**Пример запроса разрешения (из ACP протокола):**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 5,
+  "method": "session/request_permission",
+  "params": {
+    "sessionId": "sess_abc123def456",
+    "toolCall": {
+      "toolCallId": "call_001"
+    },
+    "options": [
+      {
+        "optionId": "allow-once",
+        "name": "Allow once",
+        "kind": "allow_once"
+      },
+      {
+        "optionId": "reject-once",
+        "name": "Reject",
+        "kind": "reject_once"
+      }
+    ]
+  }
+}
+```
+
+**Ответ клиента:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 5,
+  "result": {
+    "outcome": {
+      "outcome": "selected",
+      "optionId": "allow-once"
+    }
+  }
+}
+```
+
+## 6.4 Client RPC методы согласно ACP
+
+Согласно [ACP Protocol: Overview](../doc/Agent%20Client%20Protocol/protocol/01-Overview.md), Agent может использовать следующие Client RPC методы:
+
+### Файловая система (из [09-File System.md](../doc/Agent%20Client%20Protocol/protocol/09-File%20System.md))
+
+> **Из ACP File System:**
+> The filesystem methods allow Agents to read and write text files within the Client's environment. These methods enable Agents to access unsaved editor state and allow Clients to track file modifications made during agent execution.
+
+**Методы:**
+- `fs/read_text_file` - Прочитать текстовый файл (включая unsaved изменения)
+- `fs/write_text_file` - Записать или обновить текстовый файл
+
+**Пример чтения файла (из ACP протокола):**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "method": "fs/read_text_file",
+  "params": {
+    "sessionId": "sess_abc123def456",
+    "path": "/home/user/project/src/main.py",
+    "line": 10,
+    "limit": 50
+  }
+}
+```
+
+**Ответ клиента:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "result": {
+    "content": "def hello_world():\n    print('Hello, world!')\n"
+  }
+}
+```
+
+### Терминал (из [10-Terminal.md](../doc/Agent%20Client%20Protocol/protocol/10-Terminal.md))
+
+> **Из ACP Terminals:**
+> The terminal methods allow Agents to execute shell commands within the Client's environment. These methods enable Agents to run build processes, execute scripts, and interact with command-line tools while providing real-time output streaming and process control.
+
+**Методы:**
+- `terminal/create` - Создать новый терминал и выполнить команду
+- `terminal/output` - Получить текущий вывод терминала
+- `terminal/wait_for_exit` - Ожидать завершения команды
+- `terminal/kill` - Завершить команду
+- `terminal/release` - Освободить ресурсы терминала
+
+**Пример создания терминала (из ACP протокола):**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 5,
+  "method": "terminal/create",
+  "params": {
+    "sessionId": "sess_abc123def456",
+    "command": "npm",
+    "args": ["test", "--coverage"],
+    "env": [
+      {
+        "name": "NODE_ENV",
+        "value": "test"
+      }
+    ],
+    "cwd": "/home/user/project",
+    "outputByteLimit": 1048576
+  }
+}
+```
+
+**Ответ клиента с Terminal ID:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 5,
+  "result": {
+    "terminalId": "term_xyz789"
+  }
+}
+```
+
+**Пример встраивания терминала в tool call (для отображения живого вывода):**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "session/update",
+  "params": {
+    "sessionId": "sess_abc123def456",
+    "update": {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "call_002",
+      "title": "Running tests",
+      "kind": "execute",
+      "status": "in_progress",
+      "content": [
+        {
+          "type": "terminal",
+          "terminalId": "term_xyz789"
+        }
+      ]
+    }
+  }
+}
+```
+
+## 7. Архитектура ACPProtocol согласно ACP
+
+Согласно [ACP Protocol: Overview](../doc/Agent%20Client%20Protocol/protocol/01-Overview.md):
+
+> **Из ACP Overview:**
+> The Agent Client Protocol allows Agents and Clients to communicate by exposing methods that each side can call and sending notifications to inform each other of events. The protocol follows the JSON-RPC 2.0 specification with two types of messages: Methods (Request-response pairs) and Notifications (One-way messages).
+
+**Message Flow согласно ACP:**
+
+1. **Initialization Phase** - Client инициализирует connection
+2. **Session Setup** - Client создает или загружает сессию
+3. **Prompt Turn** - Основной цикл взаимодействия:
+   - Client отправляет `session/prompt`
+   - Agent отправляет `session/update` notifications для прогресса
+   - Agent запрашивает разрешения через `session/request_permission` если нужно
+   - Agent может использовать Client RPC методы (fs/*, terminal/*)
+   - Agent отправляет окончательный результат с `StopReason`
+
+## 8. Точки расширения
+
+### 8.1 Добавление нового LLM провайдера
 
 1. Создать класс, наследующий `LLMProvider`
 2. Реализовать:
@@ -1251,7 +1492,7 @@ class ClaudeProvider(LLMProvider):
         pass
 ```
 
-### 7.2 Добавление нового агентного фреймворка
+### 8.2 Добавление нового агентного фреймворка
 
 1. Создать класс, наследующий `LLMAgent`
 2. Реализовать методы интерфейса
@@ -1270,7 +1511,7 @@ class LangChainAgent(LLMAgent):
         pass
 ```
 
-### 7.3 Расширение ToolRegistry
+### 8.3 Расширение ToolRegistry
 
 1. Наследовать `ToolRegistry`
 2. Переопределить `get_available_tools()` для специальной логики фильтрации

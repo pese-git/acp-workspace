@@ -833,9 +833,14 @@ make check
 
 #### Важное уточнение: Архитектура инструментов согласно ACP
 
-Согласно [Agent Client Protocol](../doc/Agent%20Client%20Protocol/protocol/08-Tool%20Calls.md):
+Согласно [ACP Protocol: Tool Calls](../doc/Agent%20Client%20Protocol/protocol/08-Tool%20Calls.md):
+
+> **Из ACP Protocol:**
+> Tool calls represent actions that language models request Agents to perform during a prompt turn. When an LLM determines it needs to interact with external systems—like reading files, running code, or fetching data—it generates tool calls that the Agent executes on its behalf.
+
+**Key points согласно ACP:**
 - **Tool calls выполняются на Agent (сервере)**
-- **Agent может использовать Client RPC методы** для доступа к ресурсам клиента
+- **Agent может использовать Client RPC методы** для доступа к ресурсам клиента (см. [09-File System.md](../doc/Agent%20Client%20Protocol/protocol/09-File%20System.md) и [10-Terminal.md](../doc/Agent%20Client%20Protocol/protocol/10-Terminal.md))
 - **Tool calls отправляются клиенту через `session/update`** для отображения прогресса
 - **Клиент НЕ выполняет tool calls** - он только предоставляет RPC методы
 
@@ -1984,16 +1989,29 @@ make check
 
 #### Важное: Tool Call Flow согласно ACP
 
-Согласно [Agent Client Protocol](../doc/Agent%20Client%20Protocol/protocol/08-Tool%20Calls.md):
+Согласно [ACP Protocol: Tool Calls](../doc/Agent%20Client%20Protocol/protocol/08-Tool%20Calls.md) и [ACP Protocol: Prompt Turn](../doc/Agent%20Client%20Protocol/protocol/05-Prompt%20Turn.md):
 
-1. **Agent генерирует tool call** -> отправляет через `session/update` с `sessionUpdate: "tool_call"`
-2. **Client получает notification** -> может выполнить инструмент локально
-3. **Client отправляет результат** -> через `session/update` с `tool_call_update`
-4. **Agent обрабатывает результат** -> добавляет в историю, продолжает обработку
+> **Из ACP Protocol:**
+> When the language model requests a tool invocation, the Agent **SHOULD** report it to the Client. Agents report tool calls through `session/update` notifications, allowing Clients to display real-time progress and results to users.
+
+**Flow обработки tool calls согласно ACP (из Prompt Turn):**
+
+```
+1. LLM генерирует tool calls → Agent получает их в ответе
+2. Agent отправляет tool call клиенту → через session/update (sessionUpdate: "tool_call")
+3. Agent может запросить разрешение → через session/request_permission если нужно
+4. Agent выполняет tool → используя Client RPC методы или локальную логику
+5. Agent отправляет результат клиенту → через session/update (sessionUpdate: "tool_call_update")
+6. Agent добавляет результат в историю и может выполнить follow-up prompt
+```
 
 **Инструменты:**
 - **Client-side** (filesystem, terminal, search): Agent описывает в tool call, клиент выполняет
+  - `fs/read_text_file` - Прочитать файл (см. [09-File System.md](../doc/Agent%20Client%20Protocol/protocol/09-File%20System.md))
+  - `fs/write_text_file` - Записать файл (см. [09-File System.md](../doc/Agent%20Client%20Protocol/protocol/09-File%20System.md))
+  - `terminal/create`, `terminal/output`, `terminal/wait_for_exit` - Работа с терминалом (см. [10-Terminal.md](../doc/Agent%20Client%20Protocol/protocol/10-Terminal.md))
 - **Server-side** (API, логика): Agent выполняет в `handle_tool_execution()`
+  - `echo`, `info`, `process_data` - логика на сервере
 
 #### Файлы для модификации
 
@@ -2084,6 +2102,81 @@ async def session_prompt(protocol: ACPProtocol, request: Request) -> ProtocolOut
     )
 ```
 
+#### Примеры сообщений согласно ACP протоколу
+
+**Пример 1: Agent отправляет tool call клиенту (из ACP 08-Tool Calls.md)**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "session/update",
+  "params": {
+    "sessionId": "sess_abc123def456",
+    "update": {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "call_001",
+      "title": "Reading configuration file",
+      "kind": "read",
+      "status": "pending"
+    }
+  }
+}
+```
+
+**Пример 2: Agent обновляет статус tool call по завершении (из ACP 08-Tool Calls.md)**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "session/update",
+  "params": {
+    "sessionId": "sess_abc123def456",
+    "update": {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "call_001",
+      "status": "completed",
+      "content": [
+        {
+          "type": "content",
+          "content": {
+            "type": "text",
+            "text": "Configuration loaded successfully"
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+**Пример 3: Agent запрашивает разрешение на выполнение tool call (из ACP 08-Tool Calls.md)**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 5,
+  "method": "session/request_permission",
+  "params": {
+    "sessionId": "sess_abc123def456",
+    "toolCall": {
+      "toolCallId": "call_001"
+    },
+    "options": [
+      {
+        "optionId": "allow-once",
+        "name": "Allow once",
+        "kind": "allow_once"
+      },
+      {
+        "optionId": "reject-once",
+        "name": "Reject",
+        "kind": "reject_once"
+      }
+    ]
+  }
+}
+```
+
 #### Новый метод в ACPProtocol
 
 ```python
@@ -2097,11 +2190,13 @@ async def notify_tool_call(
     Согласно ACP протоколу, tool calls отправляются через session/update,
     а не в результате prompt.
     
+    Формат сообщения соответствует ACP 08-Tool Calls.md
+    
     Args:
         session_id: ID сессии
         tool_call: Определение инструмента для выполнения на клиенте
     """
-    # Создать session/update notification
+    # Создать session/update notification согласно ACP
     update_notification = {
         "jsonrpc": "2.0",
         "method": "session/update",
