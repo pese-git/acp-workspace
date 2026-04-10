@@ -9,6 +9,7 @@ from typing import Any
 
 import aiofiles
 
+from ..exceptions import StorageError
 from ..protocol.state import (
     ActiveTurnState,
     ClientRuntimeCapabilities,
@@ -16,7 +17,7 @@ from ..protocol.state import (
     SessionState,
     ToolCallState,
 )
-from .base import SessionStorage, StorageError
+from .base import SessionStorage
 
 
 class JsonFileStorage(SessionStorage):

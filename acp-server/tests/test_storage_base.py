@@ -8,8 +8,9 @@ from abc import ABC
 
 import pytest
 
+from acp_server.exceptions import StorageError
 from acp_server.protocol.state import SessionState
-from acp_server.storage.base import SessionStorage, StorageError
+from acp_server.storage.base import SessionStorage
 
 
 class TestSessionStorageAbstraction:
