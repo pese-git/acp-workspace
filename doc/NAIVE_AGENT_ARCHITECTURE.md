@@ -1,5 +1,29 @@
 # Наивная архитектура LLM-агента для ACP Server
 
+## Scope наивной реализации
+
+**Важно:** Наивная архитектура описывает **минимальную реализацию** LLM-агента для ACP Server.
+
+### Что включено в наивную реализацию:
+- ✅ Базовая интеграция с LLM провайдерами (OpenAI, Mock)
+- ✅ Простая обработка prompt turns
+- ✅ Управление историей сообщений в памяти
+- ✅ Регистрация и выполнение инструментов (tool calls)
+- ✅ Интеграция с session/update для отправки tool calls
+- ✅ Интеграция с session/request_permission для запроса разрешений
+- ✅ Обратная совместимость (opt-in через переменные окружения)
+
+### Что НЕ включено (будет в следующих итерациях):
+- ❌ RooCode функции (режимы, TodoManager, SubtaskDelegator)
+- ❌ File restrictions и advanced permission system
+- ❌ Потоковое обновление ответов (streaming)
+- ❌ Retry логика при сбоях API
+- ❌ Кэширование LLM ответов
+- ❌ Advanced prompt engineering и few-shot примеры
+- ❌ Интеграция с agent/plan (план выполнения)
+
+---
+
 ## 1. Обзор архитектуры
 
 Данный документ описывает детальную архитектуру наивной реализации LLM-агента для acp-server с минимальной связанностью между компонентами и обеспечением обратной совместимости.
@@ -465,9 +489,21 @@ class AgentOrchestrator:
 **Характеристики:**
 - Хранит историю сообщений в памяти (dict по session_id)
 - Прямой вызов LLM API через провайдер
-- Обработка tool calls в простом цикле
+- Простая обработка tool calls согласно ACP протоколу
 - Минимум переиспользуемого кода
 - Легко понять и модифицировать
+
+### 3.1.1 Правильная модель выполнения tool calls (согласно ACP)
+
+**Ключевая концепция:** Tool calls **выполняются на Agent (сервере)**, но Agent может использовать **Client RPC методы** (fs/*, terminal/*) для доступа к ресурсам клиента.
+
+**Поток выполнения:**
+
+1. **LLM генерирует tool calls** → Agent получает их в ответе
+2. **Agent отправляет tool call клиенту** → через `session/update` (sessionUpdate: "tool_call")
+3. **Agent может запросить разрешение** → через `session/request_permission` если нужно
+4. **Agent выполняет tool** → используя Client RPC методы или локальную логику
+5. **Agent отправляет результат клиенту** → через `session/update` (sessionUpdate: "tool_call_update")
 
 ### 3.2 Структура NaiveAgent
 
@@ -984,64 +1020,83 @@ def __init__(
     self._agent_orchestrator = agent_orchestrator
 ```
 
-### 6.2 Модификация session_prompt()
+### 6.2 Модификация session_prompt() - правильная обработка tool calls
 
 Файл: `acp-server/src/acp_server/protocol/handlers/prompt.py`
 
-**Текущий код (строки 111-125):**
+**Согласно ACP протоколу ([`08-Tool Calls.md`](doc/Agent%20Client%20Protocol/protocol/08-Tool%20Calls.md)):**
 
-```python
-# Текущий простой ACK ответ
-agent_text = f"ACK: {text_preview}"
-update = ACPMessage.notification(
-    "session/update",
-    {
-        "sessionId": session_id,
-        "update": {
-            "sessionUpdate": "agent_message_chunk",
-            "content": {
-                "type": "text",
-                "text": agent_text,
-            },
-        },
-    },
-)
-notifications.append(update)
-```
-
-**Новый код с делегированием агенту:**
+Правильный flow обработки tool calls:
 
 ```python
 # Если агент включен, делегировать ему
 if protocol._agent_orchestrator and protocol._agent_orchestrator.is_enabled():
-    # Получить ответ от агента
+    # Получить ответ от агента (включает text + tool_calls)
     agent_response = await protocol._agent_orchestrator.handle_prompt(
         session_state=session,
         prompt_content=prompt,
         session_config=session.config_values,
     )
     
-    # Отправить текст агента
-    update = ACPMessage.notification(
-        "session/update",
-        {
-            "sessionId": session_id,
-            "update": {
-                "sessionUpdate": "agent_message_chunk",
-                "content": {
-                    "type": "text",
-                    "text": agent_response.text,
+    # 1. Отправить текстовый ответ клиенту
+    if agent_response.text:
+        update = ACPMessage.notification(
+            "session/update",
+            {
+                "sessionId": session_id,
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {
+                        "type": "text",
+                        "text": agent_response.text,
+                    },
                 },
             },
-        },
-    )
-    notifications.append(update)
+        )
+        notifications.append(update)
     
-    # Если есть tool calls, обработать их
+    # 2. Обработать tool calls согласно ACP протоколу
     if agent_response.tool_calls:
         for tool_call in agent_response.tool_calls:
-            # ... логика обработки tool calls ...
-            pass
+            # Отправить tool call клиенту для отображения прогресса
+            await protocol.notify_tool_call(
+                session_id=session_id,
+                tool_call_id=tool_call.id,
+                tool_name=tool_call.name,
+                status="pending",
+                raw_input=tool_call.arguments,
+            )
+            
+            # Запросить разрешение если требуется
+            if requires_permission(tool_call.name):
+                permission = await protocol.request_permission(
+                    session_id=session_id,
+                    tool_call_id=tool_call.id,
+                    tool_name=tool_call.name,
+                )
+                if permission.outcome != "allow":
+                    # Отправить отказ клиенту
+                    await protocol.notify_tool_call_update(
+                        session_id=session_id,
+                        tool_call_id=tool_call.id,
+                        status="rejected",
+                    )
+                    continue
+            
+            # Выполнить tool через orchestrator
+            result = await protocol._agent_orchestrator.handle_tool_execution(
+                session_id=session_id,
+                tool_name=tool_call.name,
+                arguments=tool_call.arguments,
+            )
+            
+            # Отправить результат клиенту
+            await protocol.notify_tool_call_update(
+                session_id=session_id,
+                tool_call_id=tool_call.id,
+                status="completed",
+                content=[{"type": "text", "text": result.get("output", "")}],
+            )
 else:
     # Обратная совместимость: простой ACK
     agent_text = f"ACK: {text_preview}"
@@ -1061,11 +1116,115 @@ else:
     notifications.append(update)
 ```
 
+**Новые методы в ACPProtocol:**
+
+```python
+async def notify_tool_call(
+    self,
+    session_id: str,
+    tool_call_id: str,
+    tool_name: str,
+    status: str = "pending",
+    raw_input: dict | None = None,
+) -> None:
+    """Отправить tool call клиенту через session/update.
+    
+    Согласно ACP протоколу, это уведомляет клиента о том, что 
+    сервер начинает выполнять инструмент.
+    """
+    update = {
+        "jsonrpc": "2.0",
+        "method": "session/update",
+        "params": {
+            "sessionId": session_id,
+            "update": {
+                "sessionUpdate": "tool_call",
+                "toolCallId": tool_call_id,
+                "title": tool_name,
+                "kind": self._get_tool_kind(tool_name),
+                "status": status,
+                "rawInput": raw_input or {},
+            },
+        },
+    }
+    await self.send_notification(session_id, update)
+
+async def request_permission(
+    self,
+    session_id: str,
+    tool_call_id: str,
+    tool_name: str,
+) -> PermissionResponse:
+    """Запросить разрешение на выполнение инструмента.
+    
+    Согласно ACP протоколу, агент может запросить разрешение пользователя
+    перед выполнением опасного инструмента.
+    """
+    request_msg = {
+        "jsonrpc": "2.0",
+        "id": self._next_request_id(),
+        "method": "session/request_permission",
+        "params": {
+            "sessionId": session_id,
+            "toolCall": {
+                "toolCallId": tool_call_id,
+                "name": tool_name,
+            },
+            "options": [
+                {
+                    "optionId": "allow-once",
+                    "name": "Allow once",
+                    "kind": "allow_once",
+                },
+                {
+                    "optionId": "reject-once",
+                    "name": "Reject",
+                    "kind": "reject_once",
+                },
+            ],
+        },
+    }
+    response = await self.send_request(session_id, request_msg)
+    return PermissionResponse(
+        outcome="allow" if response.get("optionId") == "allow-once" else "reject"
+    )
+
+async def notify_tool_call_update(
+    self,
+    session_id: str,
+    tool_call_id: str,
+    status: str,
+    content: list | None = None,
+) -> None:
+    """Отправить обновление статуса выполнения tool call.
+    
+    Согласно ACP протоколу, это уведомляет клиента о прогрессе или 
+    завершении выполнения инструмента.
+    """
+    update = {
+        "jsonrpc": "2.0",
+        "method": "session/update",
+        "params": {
+            "sessionId": session_id,
+            "update": {
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": tool_call_id,
+                "status": status,
+                "content": content or [],
+            },
+        },
+    }
+    await self.send_notification(session_id, update)
+```
+
 **Ключевые моменты:**
 - Проверка `is_enabled()` - агент опциональный
-- Асинхронный вызов `handle_prompt()`
-- Обработка `agent_response.tool_calls` по аналогии с существующей логикой
+- Асинхронный вызов `handle_prompt()` 
+- Отправка tool calls клиенту через `session/update`
+- Запрос разрешений через `session/request_permission`
+- Обработка результатов tool calls
 - Fallback на простой ACK если агент disabled
+- Интеграция с Permission System для опасных операций
 
 ---
 
@@ -1167,6 +1326,46 @@ graph TD
     style K fill:#fff3e0,stroke:#e65100,stroke-width:2px
 ```
 
+```mermaid
+graph TD
+    Protocol["ACPProtocol<br/>handle message"]
+    Handler["session_prompt<br/>Handler"]
+    Check{Agent<br/>Enabled?}
+    Orch["AgentOrchestrator<br/>handle_prompt"]
+    Agent["LLMAgent<br/>Naive"]
+    Provider["LLMProvider<br/>OpenAI"]
+    Registry["ToolRegistry<br/>Simple"]
+    State["SessionState<br/>existing"]
+    ACK["Simple ACK<br/>backward compat"]
+    LLMAPI["LLM API<br/>OpenAI"]
+    ToolExec["Tool Executor<br/>FS/Terminal"]
+    
+    Protocol -->|session/prompt| Handler
+    Handler -->|check| Check
+    Check -->|yes| Orch
+    Check -->|no| ACK
+    
+    Orch --> Agent
+    Orch --> Provider
+    Orch --> Registry
+    Orch -->|reads| State
+    
+    Agent -->|uses| Provider
+    Agent -->|uses| Registry
+    
+    Provider -->|calls| LLMAPI
+    Registry -->|executes| ToolExec
+    
+    style Orch fill:#e1f5ff,stroke:#01579b,stroke-width:2px
+    style Agent fill:#e1f5ff,stroke:#01579b,stroke-width:2px
+    style Provider fill:#e1f5ff,stroke:#01579b,stroke-width:2px
+    style Registry fill:#e1f5ff,stroke:#01579b,stroke-width:2px
+    style LLMAPI fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    style ToolExec fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    style ACK fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+```
+
+ASCII диаграмма (deprecated):
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    ACP Protocol Layer                        │

@@ -826,24 +826,32 @@ make check
 
 Реализовать реестр инструментов в соответствии с ACP протоколом:
 - SimpleToolRegistry для описания доступных инструментов
-- Разделение инструментов на server-side и client-side
+- Tool calls выполняются на Agent (сервере)
+- Agent использует Client RPC методы (fs/*, terminal/*) для доступа к ресурсам
 - Интеграция с Permission System
 - Базовые встроенные инструменты
 
-#### Важное уточнение: Архитектура инструментов
+#### Важное уточнение: Архитектура инструментов согласно ACP
 
 Согласно [Agent Client Protocol](../doc/Agent%20Client%20Protocol/protocol/08-Tool%20Calls.md):
-- **Server (Agent)** - мозг: генерирует tool calls через `session/update`
-- **Client** - руки: может выполнять инструменты локально
+- **Tool calls выполняются на Agent (сервере)**
+- **Agent может использовать Client RPC методы** для доступа к ресурсам клиента
+- **Tool calls отправляются клиенту через `session/update`** для отображения прогресса
+- **Клиент НЕ выполняет tool calls** - он только предоставляет RPC методы
 
-**Инструменты делятся на:**
-1. **Client-side инструменты** - файловая система, терминал, поиск (выполняются на клиенте)
-2. **Server-side инструменты** - API вызовы, логика, обработка (выполняются на сервере)
+**Правильная архитектура:**
+
+Tool calls в LLM ответе обрабатываются так:
+1. **LLM генерирует tool call** (например, "fs/read_text_file")
+2. **Agent отправляет tool call клиенту** через `session/update` (sessionUpdate: "tool_call")
+3. **Agent может запросить разрешение** через `session/request_permission` если нужно
+4. **Agent выполняет tool** - использует Client RPC для доступа или локальную логику
+5. **Agent отправляет результат** через `session/update` (sessionUpdate: "tool_call_update")
 
 **ToolRegistry на сервере:**
 - Регистрирует доступные инструменты (определяет какие инструменты может использовать LLM)
-- Server-side инструменты выполняются в `handle_tool_execution()`
-- Client-side инструменты - клиент выполняет сам на основе `session/update` notifications
+- Выполняет tool calls через метод `execute_tool()`
+- Может использовать Client RPC методы для доступа к ресурсам клиента
 - Agent запрашивает разрешение через `session/request_permission` если нужно
 
 #### Файлы для создания
@@ -875,15 +883,14 @@ logger = logging.getLogger(__name__)
 class SimpleToolRegistry(ToolRegistry):
     """Простая реализация реестра инструментов.
     
-    Хранит определения инструментов (как server-side, так и client-side),
-    управляет доступом в зависимости от прав сессии.
+    Управляет регистрацией инструментов и их выполнением на Agent.
+    Согласно ACP протоколу, все tool calls выполняются на Agent (сервере).
     """
 
     def __init__(self):
         """Инициализация реестра."""
-        # Инструменты: name -> (определение, executor или None для client-side)
+        # Инструменты: name -> (определение, executor)
         self._tools: dict[str, tuple[ToolDefinition, Callable | None]] = {}
-        self._sessions: dict[str, SessionState] = {}
 
     def register_tool(
         self,
@@ -893,7 +900,6 @@ class SimpleToolRegistry(ToolRegistry):
         kind: str,
         executor: Callable | None = None,
         requires_permission: bool = True,
-        is_client_side: bool = False,
     ) -> None:
         """Регистрация инструмента.
         
@@ -901,10 +907,10 @@ class SimpleToolRegistry(ToolRegistry):
             name: Уникальное имя инструмента
             description: Человеческое описание
             parameters: JSON Schema параметров
-            kind: Категория (terminal, filesystem, read, edit, etc.)
-            executor: Async callable для выполнения (None для client-side)
-            requires_permission: Требуется ли разрешение
-            is_client_side: Выполняется ли на клиенте
+            kind: Категория (terminal, filesystem, read, edit, execute, etc.)
+            executor: Async callable для выполнения на Agent
+                     (None если executor будет реализован позже с использованием Client RPC)
+            requires_permission: Требуется ли разрешение пользователя
         """
         definition = ToolDefinition(
             name=name,
@@ -914,15 +920,12 @@ class SimpleToolRegistry(ToolRegistry):
             requires_permission=requires_permission,
         )
         self._tools[name] = (definition, executor)
-        
-        tool_type = "client-side" if is_client_side else "server-side"
-        logger.debug(f"Инструмент зарегистрирован: {name} ({tool_type})")
+        logger.debug(f"Инструмент зарегистрирован: {name}")
 
     def get_available_tools(
         self,
         session_id: str,
         include_permission_required: bool = True,
-        server_only: bool = False,
     ) -> list[ToolDefinition]:
         """Получить доступные инструменты для сессии.
         
@@ -932,20 +935,15 @@ class SimpleToolRegistry(ToolRegistry):
             session_id: ID сессии
             include_permission_required: Включать ли инструменты,
                 требующие разрешения
-            server_only: Включать только server-side инструменты
             
         Returns:
             Список доступных инструментов
         """
         available = []
 
-        for definition, executor in self._tools.values():
+        for definition, _ in self._tools.values():
             # Пропустить инструменты, требующие разрешения если их исключать
             if definition.requires_permission and not include_permission_required:
-                continue
-            
-            # Пропустить client-side если нужны только server-side
-            if server_only and executor is None:
                 continue
 
             # TODO: Проверить права сессии через SessionState.permissions
@@ -956,8 +954,7 @@ class SimpleToolRegistry(ToolRegistry):
     def to_llm_tools(self, tools: list[ToolDefinition]) -> list[dict[str, Any]]:
         """Преобразовать определения инструментов в формат OpenAI.
         
-        Включает как server-side, так и client-side инструменты.
-        LLM может генерировать tool calls для всех типов.
+        LLM может генерировать tool calls для всех зарегистрированных инструментов.
         
         Args:
             tools: Список определений инструментов
@@ -986,10 +983,10 @@ class SimpleToolRegistry(ToolRegistry):
         tool_name: str,
         arguments: dict[str, Any],
     ) -> ToolExecutionResult:
-        """Выполнить server-side инструмент.
+        """Выполнить инструмент на Agent.
         
-        Client-side инструменты (файловая система, терминал) не выполняются здесь.
-        Они обрабатываются клиентом на основе session/update notifications.
+        Согласно ACP протоколу, tool calls выполняются на Agent.
+        Agent может использовать Client RPC методы для доступа к ресурсам.
         
         Args:
             session_id: ID сессии
@@ -997,8 +994,7 @@ class SimpleToolRegistry(ToolRegistry):
             arguments: Аргументы для выполнения
             
         Returns:
-            Результат выполнения (для server-side инструментов)
-            или None (для client-side инструментов)
+            Результат выполнения инструмента
         """
         if tool_name not in self._tools:
             return ToolExecutionResult(
@@ -1008,11 +1004,11 @@ class SimpleToolRegistry(ToolRegistry):
 
         definition, executor = self._tools[tool_name]
 
-        # Если это client-side инструмент, не выполняем на сервере
+        # Если executor не реализован, вернуть ошибку
         if executor is None:
             return ToolExecutionResult(
-                success=True,
-                output="Client-side tool - executed by client",
+                success=False,
+                error=f"Executor для {tool_name} не реализован",
             )
 
         # TODO: Проверить разрешения через Permission System
@@ -1034,13 +1030,13 @@ class SimpleToolRegistry(ToolRegistry):
 ```python
 """Встроенные ACP инструменты.
 
-Согласно ACP протоколу, инструменты делятся на:
-1. Server-side инструменты - выполняются на сервере (есть executor)
-2. Client-side инструменты - выполняются на клиенте (executor=None)
+Согласно ACP протоколу, tool calls выполняются на Agent (сервере).
+Agent может использовать Client RPC методы (fs/*, terminal/*) для доступа к ресурсам.
 
-Примеры:
-- Server-side: echo, info, API вызовы, обработка данных
-- Client-side: read_file, write_file, execute_command, terminal/create
+Примеры инструментов:
+- echo, info - простая логика на сервере
+- fs/read_text_file, fs/write_text_file - используют Client RPC для доступа к файлам
+- terminal/create - используют Client RPC для выполнения команд на клиенте
 """
 
 from typing import Any
@@ -1048,12 +1044,13 @@ from typing import Any
 from acp_server.tools.base import ToolExecutionResult
 
 
-# ============================================================================
-# Server-side инструменты (выполняются на сервере)
-# ============================================================================
+# Встроенные инструменты для тестирования
 
 async def echo_tool(session_id: str, arguments: dict[str, Any]) -> ToolExecutionResult:
-    """Echo инструмент для тестирования (server-side)."""
+    """Echo инструмент для тестирования.
+    
+    Выполняется на Agent (сервере).
+    """
     message = arguments.get("message", "")
     return ToolExecutionResult(
         success=True,
@@ -1062,7 +1059,10 @@ async def echo_tool(session_id: str, arguments: dict[str, Any]) -> ToolExecution
 
 
 async def info_tool(session_id: str, arguments: dict[str, Any]) -> ToolExecutionResult:
-    """Информация о сессии (server-side)."""
+    """Информация о сессии.
+    
+    Выполняется на Agent (сервере).
+    """
     return ToolExecutionResult(
         success=True,
         output=f"Session ID: {session_id}",
@@ -1072,7 +1072,10 @@ async def info_tool(session_id: str, arguments: dict[str, Any]) -> ToolExecution
 async def process_data_tool(
     session_id: str, arguments: dict[str, Any]
 ) -> ToolExecutionResult:
-    """Обработка данных на сервере (server-side)."""
+    """Обработка данных.
+    
+    Выполняется на Agent (сервере).
+    """
     data = arguments.get("data", "")
     # Здесь может быть сложная логика обработки
     result = f"Processed: {data.upper()}"
@@ -1082,14 +1085,9 @@ async def process_data_tool(
     )
 
 
-# ============================================================================
-# Client-side инструменты (выполняются на клиенте)
-# Примечание: executor=None, т.к. клиент выполняет сам
-# ============================================================================
-
-# Встроенные инструменты
+# Встроенные инструменты согласно ACP протоколу
 BUILTIN_TOOLS = {
-    # Server-side инструменты (с executor)
+    # Простые инструменты (выполняются на сервере)
     "echo": {
         "name": "echo",
         "description": "Echo инструмент для тестирования",
@@ -1105,7 +1103,7 @@ BUILTIN_TOOLS = {
         },
         "kind": "other",
         "executor": echo_tool,
-        "is_client_side": False,
+        "requires_permission": False,
     },
     "info": {
         "name": "info",
@@ -1117,11 +1115,11 @@ BUILTIN_TOOLS = {
         },
         "kind": "other",
         "executor": info_tool,
-        "is_client_side": False,
+        "requires_permission": False,
     },
     "process_data": {
         "name": "process_data",
-        "description": "Обработать данные на сервере",
+        "description": "Обработать данные",
         "parameters": {
             "type": "object",
             "properties": {
@@ -1134,19 +1132,16 @@ BUILTIN_TOOLS = {
         },
         "kind": "other",
         "executor": process_data_tool,
-        "is_client_side": False,
+        "requires_permission": False,
     },
     
-    # Client-side инструменты (executor=None)
-    # Согласно ACP протоколу, эти методы вызываются агентом на клиенте:
-    # - fs/read_text_file (09-File System.md)
-    # - fs/write_text_file (09-File System.md)
-    # - terminal/create (10-Terminal.md)
-    # LLM может генерировать tool calls для них,
-    # но реальное выполнение происходит на клиенте
+    # Инструменты для работы с файловой системой
+    # Согласно ACP протоколу (09-File System.md),
+    # Agent генерирует tool calls для этих инструментов.
+    # Agent выполняет их, используя Client RPC методы.
     "fs/read_text_file": {
         "name": "fs/read_text_file",
-        "description": "Прочитать текстовый файл из файловой системы клиента",
+        "description": "Прочитать текстовый файл",
         "parameters": {
             "type": "object",
             "properties": {
@@ -1166,12 +1161,12 @@ BUILTIN_TOOLS = {
             "required": ["path"],
         },
         "kind": "read",
-        "executor": None,  # Client-side - выполняется через fs/read_text_file RPC
-        "is_client_side": True,
+        "executor": None,  # Будет реализован с использованием Client RPC
+        "requires_permission": True,
     },
     "fs/write_text_file": {
         "name": "fs/write_text_file",
-        "description": "Записать текстовый файл в файловую систему клиента",
+        "description": "Записать текстовый файл",
         "parameters": {
             "type": "object",
             "properties": {
@@ -1187,12 +1182,17 @@ BUILTIN_TOOLS = {
             "required": ["path", "content"],
         },
         "kind": "edit",
-        "executor": None,  # Client-side - выполняется через fs/write_text_file RPC
-        "is_client_side": True,
+        "executor": None,  # Будет реализован с использованием Client RPC
+        "requires_permission": True,
     },
+    
+    # Инструменты для работы с терминалом
+    # Согласно ACP протоколу (10-Terminal.md),
+    # Agent генерирует tool calls для выполнения команд.
+    # Agent выполняет их, используя Client RPC методы.
     "terminal/create": {
         "name": "terminal/create",
-        "description": "Создать терминал и выполнить команду в окружении клиента",
+        "description": "Создать терминал и выполнить команду",
         "parameters": {
             "type": "object",
             "properties": {
@@ -1224,8 +1224,8 @@ BUILTIN_TOOLS = {
             "required": ["command"],
         },
         "kind": "execute",
-        "executor": None,  # Client-side - выполняется через terminal/create RPC
-        "is_client_side": True,
+        "executor": None,  # Будет реализован с использованием Client RPC
+        "requires_permission": True,
     },
 }
 ```
