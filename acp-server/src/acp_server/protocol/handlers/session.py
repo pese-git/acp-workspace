@@ -9,9 +9,9 @@ import base64
 import json
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 from ...messages import ACPMessage, JsonRpcId
+from ..session_factory import SessionFactory
 from ..state import ClientRuntimeCapabilities, ProtocolOutcome, SessionState
 
 
@@ -78,15 +78,23 @@ def session_new(
             message="Invalid params: mcpServers must be an array",
         )
 
-    session_id = f"sess_{uuid4().hex[:12]}"
+    # Создаем сессию через фабрику
     config_values = {
         config_id: str(spec["default"]) for config_id, spec in config_specs.items()
     }
 
+    session_state = SessionFactory.create_session(
+        cwd=cwd,
+        mcp_servers=mcp_servers,
+        config_values=config_values,
+        available_commands=build_default_commands(),
+        runtime_capabilities=runtime_capabilities,
+    )
+
     return ACPMessage.response(
         request_id,
         {
-            "sessionId": session_id,
+            "sessionId": session_state.session_id,
             "configOptions": build_config_options(config_values, config_specs),
             "modes": build_modes_state(config_values, config_specs),
         },

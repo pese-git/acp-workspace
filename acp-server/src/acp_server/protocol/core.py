@@ -18,6 +18,7 @@ from .handlers import (
     prompt,
     session,
 )
+from .session_factory import SessionFactory
 from .state import (
     ClientRuntimeCapabilities,
     ProtocolOutcome,
@@ -201,66 +202,39 @@ class ACPProtocol:
             return ProtocolOutcome(response=response)
 
         if method == "session/new":
-            # Проверяем требования auth
-            if self._require_auth and not self._authenticated:
-                from .handlers.auth import auth_required_error
-
-                return ProtocolOutcome(response=auth_required_error(message.id, self._auth_methods))
-
-            # Валидируем параметры и создаем сессию
-            from pathlib import Path
-            from uuid import uuid4
-
-            cwd = params.get("cwd")
-            if not isinstance(cwd, str) or not Path(cwd).is_absolute():
-                return ProtocolOutcome(
-                    response=ACPMessage.error_response(
-                        message.id,
-                        code=-32602,
-                        message="Invalid params: cwd must be an absolute path",
-                    )
-                )
-
-            mcp_servers = params.get("mcpServers", [])
-            if not isinstance(mcp_servers, list):
-                return ProtocolOutcome(
-                    response=ACPMessage.error_response(
-                        message.id,
-                        code=-32602,
-                        message="Invalid params: mcpServers must be an array",
-                    )
-                )
-
-            # Создаем сессию
-            session_id = f"sess_{uuid4().hex[:12]}"
-            config_values = {
-                config_id: str(spec["default"]) for config_id, spec in self._config_specs.items()
-            }
-
-            session_state = SessionState(
-                session_id=session_id,
-                cwd=cwd,
-                mcp_servers=[srv for srv in mcp_servers if isinstance(srv, dict)],
-                config_values=config_values,
-                available_commands=session.build_default_commands(),
-                runtime_capabilities=self._runtime_capabilities,
+            # Используем обработчик из handlers для валидации и создания ответа
+            response_msg = session.session_new(
+                message.id,
+                params,
+                self._require_auth,
+                self._authenticated,
+                self._config_specs,
+                self._auth_methods,
+                self._runtime_capabilities,
             )
-            await self._storage.save_session(session_state)
-            # Обновляем внутренний кэш для синхронной работы handlers
-            self._sessions[session_id] = session_state
 
-            return ProtocolOutcome(
-                response=ACPMessage.response(
-                    message.id,
-                    {
-                        "sessionId": session_id,
-                        "configOptions": session.build_config_options(
-                            config_values, self._config_specs
-                        ),
-                        "modes": session.build_modes_state(config_values, self._config_specs),
-                    },
-                )
-            )
+            # Если создание прошло успешно, сохраняем в storage и кэш
+            if response_msg.result is not None:
+                session_id = response_msg.result.get("sessionId")
+                if isinstance(session_id, str):
+                    # Создаем сессию через фабрику для сохранения
+                    config_values = {
+                        config_id: str(spec["default"])
+                        for config_id, spec in self._config_specs.items()
+                    }
+                    session_state = SessionFactory.create_session(
+                        cwd=params.get("cwd", ""),
+                        mcp_servers=params.get("mcpServers", []),
+                        config_values=config_values,
+                        available_commands=session.build_default_commands(),
+                        runtime_capabilities=self._runtime_capabilities,
+                        session_id=session_id,
+                    )
+                    await self._storage.save_session(session_state)
+                    # Обновляем внутренний кэш для синхронной работы handlers
+                    self._sessions[session_id] = session_state
+
+            return ProtocolOutcome(response=response_msg)
 
         if method == "session/load":
             # Обновляем runtime capabilities при загрузке сессии
