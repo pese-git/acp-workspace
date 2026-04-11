@@ -294,9 +294,20 @@ def test_update_session_state_simple(
 
     # Проверить добавление сообщений в историю
     assert len(updated.history) == 2
-    assert updated.history[0]["role"] == "user"
-    assert updated.history[1]["role"] == "assistant"
-    assert updated.history[1]["text"] == "Agent response"
+    # Конвертировать Pydantic модели в dict если необходимо для проверки
+    h0 = (
+        updated.history[0].model_dump()  # type: ignore[call-non-callable]
+        if hasattr(updated.history[0], "model_dump")
+        else updated.history[0]
+    )
+    h1 = (
+        updated.history[1].model_dump()  # type: ignore[call-non-callable]
+        if hasattr(updated.history[1], "model_dump")
+        else updated.history[1]
+    )
+    assert h0["role"] == "user"
+    assert h1["role"] == "assistant"
+    assert h1["text"] == "Agent response"
 
 
 def test_update_session_state_with_tool_calls(
@@ -351,8 +362,18 @@ def test_update_session_state_preserves_existing_history(
 
     # Проверить, что старые сообщения сохранены
     assert len(updated.history) == 4
-    assert updated.history[0]["text"] == "First message"
-    assert updated.history[1]["text"] == "First response"
+    h0 = (
+        updated.history[0].model_dump()  # type: ignore[call-non-callable]
+        if hasattr(updated.history[0], "model_dump")
+        else updated.history[0]
+    )
+    h1 = (
+        updated.history[1].model_dump()  # type: ignore[call-non-callable]
+        if hasattr(updated.history[1], "model_dump")
+        else updated.history[1]
+    )
+    assert h0["text"] == "First message"
+    assert h1["text"] == "First response"
 
 
 # ============================================================================
@@ -375,8 +396,12 @@ async def test_process_prompt_simple(
     assert updated_state.session_id == "test-session-1"
     assert len(updated_state.history) > 0
     # История должна содержать user и assistant сообщения
-    assert any(h["role"] == "user" for h in updated_state.history)
-    assert any(h["role"] == "assistant" for h in updated_state.history)
+    def get_role(h):
+        h_dict = h.model_dump() if hasattr(h, "model_dump") else h
+        return h_dict.get("role")
+    
+    assert any(get_role(h) == "user" for h in updated_state.history)
+    assert any(get_role(h) == "assistant" for h in updated_state.history)
 
 
 @pytest.mark.asyncio
@@ -430,8 +455,12 @@ async def test_process_prompt_with_tool_call(
     # Проверить что состояние было обновлено с историей
     assert len(updated_state.history) > 0
     # История должна содержать assistant сообщение с финальным ответом
+    def get_history_role(h):
+        h_dict = h.model_dump() if hasattr(h, "model_dump") else h
+        return h_dict.get("role")
+    
     assistant_messages = [
-        h for h in updated_state.history if h.get("role") == "assistant"
+        h for h in updated_state.history if get_history_role(h) == "assistant"
     ]
     assert len(assistant_messages) > 0
 

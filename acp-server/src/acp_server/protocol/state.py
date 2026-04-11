@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from ..messages import ACPMessage, JsonRpcId
+from ..models import AvailableCommand, HistoryMessage, PlanStep
 
 
 @dataclass(slots=True)
@@ -34,7 +35,7 @@ class SessionState:
     # Значения конфигурационных опций в рамках этой сессии.
     config_values: dict[str, str] = field(default_factory=dict)
     # Упрощенная история, достаточная для текущих update-сценариев.
-    history: list[dict[str, Any]] = field(default_factory=list)
+    history: list[HistoryMessage | dict[str, Any]] = field(default_factory=list)
     # Текущее активное выполнение prompt-turn (если есть).
     active_turn: ActiveTurnState | None = None
     # Локальный счетчик для стабильной генерации toolCallId.
@@ -42,9 +43,9 @@ class SessionState:
     # Реестр созданных tool calls и их состояний.
     tool_calls: dict[str, ToolCallState] = field(default_factory=dict)
     # Набор доступных slash-команд для `available_commands_update`.
-    available_commands: list[dict[str, Any]] = field(default_factory=list)
+    available_commands: list[AvailableCommand | dict[str, Any]] = field(default_factory=list)
     # Последний опубликованный план выполнения для `session/update: plan`.
-    latest_plan: list[dict[str, str]] = field(default_factory=list)
+    latest_plan: list[PlanStep | dict[str, Any]] = field(default_factory=list)
     # Персистентные permission-решения по kind (например, allow_always).
     permission_policy: dict[str, str] = field(default_factory=dict)
     # Идентификаторы permission-запросов, отмененных через `session/cancel`.

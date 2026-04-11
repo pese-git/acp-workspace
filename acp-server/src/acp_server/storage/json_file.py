@@ -10,6 +10,7 @@ from typing import Any
 import aiofiles
 
 from ..exceptions import StorageError
+from ..models import AvailableCommand, HistoryMessage, PlanStep
 from ..protocol.state import (
     ActiveTurnState,
     ClientRuntimeCapabilities,
@@ -156,6 +157,32 @@ class JsonFileStorage(SessionStorage):
 
     def _serialize_session(self, session: SessionState) -> dict[str, Any]:
         """Сериализует SessionState в dict для JSON."""
+        # Сериализовать историю, преобразуя Pydantic модели в dict
+        history_serialized: list[dict[str, Any]] = []
+        for entry in session.history:
+            if isinstance(entry, HistoryMessage):
+                # Использовать model_dump() для Pydantic моделей
+                history_serialized.append(entry.model_dump(exclude_none=False))
+            else:
+                # Оставить dict как есть
+                history_serialized.append(entry)
+
+        # Сериализовать доступные команды
+        available_commands_serialized: list[dict[str, Any]] = []
+        for cmd in session.available_commands:
+            if isinstance(cmd, AvailableCommand):
+                available_commands_serialized.append(cmd.model_dump(exclude_none=False))
+            else:
+                available_commands_serialized.append(cmd)
+
+        # Сериализовать план
+        latest_plan_serialized: list[dict[str, Any]] = []
+        for step in session.latest_plan:
+            if isinstance(step, PlanStep):
+                latest_plan_serialized.append(step.model_dump(exclude_none=False))
+            else:
+                latest_plan_serialized.append(step)
+
         return {
             "session_id": session.session_id,
             "cwd": session.cwd,
@@ -163,7 +190,7 @@ class JsonFileStorage(SessionStorage):
             "title": session.title,
             "updated_at": session.updated_at,
             "config_values": session.config_values,
-            "history": session.history,
+            "history": history_serialized,
             "active_turn": (
                 self._serialize_active_turn(session.active_turn)
                 if session.active_turn
@@ -173,8 +200,8 @@ class JsonFileStorage(SessionStorage):
             "tool_calls": {
                 k: self._serialize_tool_call(v) for k, v in session.tool_calls.items()
             },
-            "available_commands": session.available_commands,
-            "latest_plan": session.latest_plan,
+            "available_commands": available_commands_serialized,
+            "latest_plan": latest_plan_serialized,
             "permission_policy": session.permission_policy,
             "cancelled_permission_requests": list(session.cancelled_permission_requests),
             "cancelled_client_rpc_requests": list(session.cancelled_client_rpc_requests),
@@ -187,6 +214,41 @@ class JsonFileStorage(SessionStorage):
 
     def _deserialize_session(self, data: dict[str, Any]) -> SessionState:
         """Десериализует dict в SessionState."""
+        # Десериализовать историю, преобразуя dict в Pydantic модели
+        history_deserialized: list[HistoryMessage | dict[str, Any]] = []
+        for entry in data.get("history", []):
+            if isinstance(entry, dict):
+                try:
+                    # Попытаться создать HistoryMessage из dict
+                    history_deserialized.append(HistoryMessage.model_validate(entry))
+                except Exception:
+                    # Если не получается, оставить как dict
+                    history_deserialized.append(entry)
+            else:
+                history_deserialized.append(entry)
+
+        # Десериализовать доступные команды
+        available_commands_deserialized: list[AvailableCommand | dict[str, Any]] = []
+        for cmd in data.get("available_commands", []):
+            if isinstance(cmd, dict):
+                try:
+                    available_commands_deserialized.append(AvailableCommand.model_validate(cmd))
+                except Exception:
+                    available_commands_deserialized.append(cmd)
+            else:
+                available_commands_deserialized.append(cmd)
+
+        # Десериализовать план
+        latest_plan_deserialized: list[PlanStep | dict[str, Any]] = []
+        for step in data.get("latest_plan", []):
+            if isinstance(step, dict):
+                try:
+                    latest_plan_deserialized.append(PlanStep.model_validate(step))
+                except Exception:
+                    latest_plan_deserialized.append(step)
+            else:
+                latest_plan_deserialized.append(step)
+
         return SessionState(
             session_id=data["session_id"],
             cwd=data["cwd"],
@@ -194,7 +256,7 @@ class JsonFileStorage(SessionStorage):
             title=data.get("title"),
             updated_at=data.get("updated_at", datetime.now(UTC).isoformat()),
             config_values=data.get("config_values", {}),
-            history=data.get("history", []),
+            history=history_deserialized,
             active_turn=(
                 self._deserialize_active_turn(data["active_turn"])
                 if data.get("active_turn")
@@ -205,8 +267,8 @@ class JsonFileStorage(SessionStorage):
                 k: self._deserialize_tool_call(v)
                 for k, v in data.get("tool_calls", {}).items()
             },
-            available_commands=data.get("available_commands", []),
-            latest_plan=data.get("latest_plan", []),
+            available_commands=available_commands_deserialized,
+            latest_plan=latest_plan_deserialized,
             permission_policy=data.get("permission_policy", {}),
             cancelled_permission_requests=set(
                 data.get("cancelled_permission_requests", [])

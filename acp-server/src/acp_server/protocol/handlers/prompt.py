@@ -26,6 +26,7 @@ from .permissions import (
     resolve_remembered_permission_decision,
 )
 from .session import (
+    _serialize_available_commands,
     session_info_notification,
 )
 
@@ -149,7 +150,9 @@ async def _handle_with_agent(
                 "sessionId": session_id,
                 "update": {
                     "sessionUpdate": "available_commands_update",
-                    "availableCommands": session.available_commands,
+                    "availableCommands": _serialize_available_commands(
+                        session.available_commands
+                    ),
                 },
             },
         )
@@ -359,7 +362,7 @@ async def session_prompt(
             directives=directives,
             text_preview=text_preview,
         )
-        session.latest_plan = plan_entries
+        session.latest_plan = plan_entries  # type: ignore[assignment]
         notifications.append(
             ACPMessage.notification(
                 "session/update",
@@ -563,7 +566,9 @@ async def session_prompt(
                 "sessionId": session_id,
                 "update": {
                     "sessionUpdate": "available_commands_update",
-                    "availableCommands": session.available_commands,
+                    "availableCommands": _serialize_available_commands(
+                        session.available_commands
+                    ),
                 },
             },
         )

@@ -183,7 +183,7 @@ class AgentOrchestrator:
 
     def _convert_to_llm_messages(
         self,
-        history: list[dict[str, Any]],
+        history: list[dict[str, Any]] | list,
     ) -> list[LLMMessage]:
         """Преобразовать историю из SessionState в формат LLMMessage.
 
@@ -196,15 +196,21 @@ class AgentOrchestrator:
         messages: list[LLMMessage] = []
 
         for entry in history:
+            # Конвертировать Pydantic модель в dict если необходимо
+            entry_dict = (
+                entry if isinstance(entry, dict)
+                else entry.model_dump()  # type: ignore[attr-defined]
+            )
+
             # Определить роль сообщения
-            role = entry.get("role", "user")
+            role = entry_dict.get("role", "user")
             if role not in ("system", "user", "assistant", "tool"):
                 role = "user"
 
             # Получить содержимое сообщения
-            content = entry.get("text", "")
+            content = entry_dict.get("text", "")
             if not content:
-                content = entry.get("content", "")
+                content = entry_dict.get("content", "")
 
             # Создать LLMMessage
             if content:

@@ -15,6 +15,24 @@ from ...messages import ACPMessage, JsonRpcId
 from ..state import ClientRuntimeCapabilities, ProtocolOutcome, SessionState
 
 
+def _serialize_available_commands(
+    commands: list,
+) -> list[dict[str, Any]]:
+    """Сериализует список available_commands для JSON.
+    
+    Преобразует Pydantic модели в dict для JSON сериализации.
+    """
+    result: list[dict[str, Any]] = []
+    for cmd in commands:
+        if isinstance(cmd, dict):
+            result.append(cmd)
+        elif hasattr(cmd, "model_dump"):
+            result.append(cmd.model_dump(exclude_none=False))
+        else:
+            result.append(cmd)
+    return result
+
+
 def session_new(
     request_id: JsonRpcId | None,
     params: dict[str, Any],
@@ -256,7 +274,9 @@ def session_load(
                 "sessionId": session_id,
                 "update": {
                     "sessionUpdate": "available_commands_update",
-                    "availableCommands": session.available_commands,
+                    "availableCommands": _serialize_available_commands(
+                        session.available_commands
+                    ),
                 },
             },
         )
@@ -470,6 +490,7 @@ def build_default_commands() -> list[dict[str, Any]]:
     """
 
     # Базовый список slash-команд для демонстрации протокольного update.
+    # Возвращаем list[dict[str, Any]] которая совместима с list[AvailableCommand | dict[str, Any]]
     return [
         {
             "name": "status",
@@ -479,4 +500,4 @@ def build_default_commands() -> list[dict[str, Any]]:
             "name": "mode",
             "description": "Показать и изменить режим сессии",
         },
-    ]
+    ]  # type: ignore[return-value]
