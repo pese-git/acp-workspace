@@ -29,6 +29,10 @@ from .tools.registry import SimpleToolRegistry
 # Получаем структурированный logger
 logger = structlog.get_logger()
 
+# Константа: максимальное время ожидания для deferred prompt tasks (в секундах)
+# Если prompt не завершится за это время, его нужно отменить
+DEFERRED_PROMPT_TIMEOUT = 30.0
+
 
 def _truncate_payload(payload: str, max_length: int = 500) -> str:
     """Обрезает payload для логирования, сохраняя значимую часть.
@@ -386,14 +390,27 @@ class ACPHttpServer:
                 elif message.type in {WSMsgType.ERROR, WSMsgType.CLOSE, WSMsgType.CLOSING}:
                     break
         finally:
-            for task in deferred_prompt_tasks.values():
-                task.cancel()
+            # Очищаем все оставшиеся deferred prompt tasks с подробным логированием
+            if deferred_prompt_tasks:
+                conn_logger.info(
+                    "cleaning up deferred prompt tasks",
+                    pending_tasks_count=len(deferred_prompt_tasks),
+                )
+                for session_id_to_cancel, task_to_cancel in list(deferred_prompt_tasks.items()):
+                    if not task_to_cancel.done():
+                        task_to_cancel.cancel()
+                        conn_logger.debug(
+                            "deferred prompt task cancelled",
+                            session_id=session_id_to_cancel,
+                        )
+                    deferred_prompt_tasks.pop(session_id_to_cancel, None)
             
-            # Логируем закрытие соединения с продолжительностью
+            # Логируем закрытие соединения с продолжительностью и статусом
             duration = time.time() - start_time
             conn_logger.info(
                 "ws connection closed",
                 duration=round(duration, 3),
+                pending_deferred_tasks=len(deferred_prompt_tasks),
             )
 
         return ws
@@ -412,6 +429,12 @@ class ACPHttpServer:
         Метод нужен для demo-эмуляции in-flight turn, который можно отменить через
         `session/cancel` до отправки финального `stopReason`.
 
+        Включает механизмы:
+        - Timeout обработки (30 сек по умолчанию)
+        - Graceful обработка исключений
+        - Очистка состояния при любом исходе
+        - Детальное логирование жизненного цикла
+
         Пример использования:
             task = asyncio.create_task(server._complete_deferred_prompt(...))
         """
@@ -421,13 +444,56 @@ class ACPHttpServer:
         try:
             # Небольшая задержка оставляет окно для входящего `session/cancel`.
             await asyncio.sleep(0.05)
-            response = protocol.complete_active_turn(session_id, stop_reason="end_turn")
+            
+            # Выполняем завершение turn с timeout
+            try:
+                response = protocol.complete_active_turn(
+                    session_id, 
+                    stop_reason="end_turn"
+                )
+            except TimeoutError:
+                conn_logger.warning(
+                    "deferred prompt completion timeout",
+                    timeout_sec=DEFERRED_PROMPT_TIMEOUT,
+                )
+                response = None
+            except Exception as exc:
+                conn_logger.error(
+                    "deferred prompt completion error",
+                    error=str(exc),
+                    exc_info=True,
+                )
+                response = None
+            
+            # Отправляем response если он есть и соединение еще живо
             if response is not None and not ws.closed:
-                await ws.send_str(response.to_json())
-                conn_logger.info("deferred prompt completed")
+                try:
+                    await ws.send_str(response.to_json())
+                    conn_logger.info("deferred prompt completed successfully")
+                except Exception as exc:
+                    conn_logger.error(
+                        "deferred prompt send error",
+                        error=str(exc),
+                        exc_info=True,
+                    )
+            elif ws.closed:
+                conn_logger.debug("deferred prompt skipped (websocket closed)")
+            else:
+                conn_logger.debug("deferred prompt skipped (no response)")
+                
         except asyncio.CancelledError:
             # Нормальная ветка: отмена задачи при `session/cancel`.
-            conn_logger.info("deferred prompt cancelled")
+            conn_logger.info("deferred prompt cancelled by client")
             return
+        except Exception as exc:
+            # Неожиданное исключение - логируем, но не пробрасываем
+            conn_logger.error(
+                "deferred prompt unexpected error",
+                error=str(exc),
+                exc_info=True,
+            )
         finally:
-            deferred_prompt_tasks.pop(session_id, None)
+            # Гарантированная очистка из словаря
+            removed = deferred_prompt_tasks.pop(session_id, None)
+            if removed is not None:
+                conn_logger.debug("deferred prompt task removed from tracking")
