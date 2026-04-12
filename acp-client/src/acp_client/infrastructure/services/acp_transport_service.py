@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator, Callable
 from typing import Any
@@ -55,6 +56,10 @@ class ACPTransportService(TransportService):
         self._transport: WebSocketTransport | None = None
         # Сохраняем server capabilities после инициализации
         self._server_capabilities: dict[str, Any] | None = None
+        # Мьютекс для синхронизации доступа к receive()
+        # Предотвращает "Concurrent call to receive() is not allowed" при
+        # одновременных запросах от разных сессий на одном WebSocket соединении
+        self._receive_lock = asyncio.Lock()
         self._logger = structlog.get_logger("acp_transport_service")
 
     async def __aenter__(self) -> ACPTransportService:
@@ -180,6 +185,9 @@ class ACPTransportService(TransportService):
         Если соединение потеряно, генерирует ошибку (переподключение должно
         происходить на более высоком уровне через send()).
 
+        Использует мьютекс для синхронизации доступа к WebSocket, предотвращая
+        конкурентные вызовы receive() от разных сессий/запросов.
+
         Возвращает:
             JSON-RPC сообщение из сервера
 
@@ -191,21 +199,30 @@ class ACPTransportService(TransportService):
             self._logger.error("not_connected")
             raise RuntimeError(msg)
 
-        self._logger.debug("waiting_for_message")
+        # Используем мьютекс для синхронизации доступа к WebSocket
+        # Это предотвращает "Concurrent call to receive() is not allowed"
+        # когда несколько сессий/запросов пытаются читать одновременно
+        async with self._receive_lock:
+            self._logger.debug("waiting_for_message")
 
-        try:
-            # Получаем текстовое сообщение из транспорта и парсим JSON
-            assert self._transport is not None
-            json_message = await self._transport.receive_text()
-            message = json.loads(json_message)
-            self._logger.debug("message_received", message_id=message.get("id"))
-            return message
-        except Exception as e:
-            self._logger.error("receive_failed", error=str(e))
-            # Отмечаем что соединение потеряно при ошибке приема
-            self._transport = None
-            msg = f"Failed to receive message: {e}"
-            raise RuntimeError(msg) from e
+            try:
+                # Получаем текстовое сообщение из транспорта и парсим JSON
+                assert self._transport is not None
+                json_message = await self._transport.receive_text()
+                message = json.loads(json_message)
+                message_id = message.get("id")
+                self._logger.debug(
+                    "message_received",
+                    message_id=message_id,
+                    length=len(json_message),
+                )
+                return message
+            except Exception as e:
+                self._logger.error("receive_failed", error=str(e))
+                # Отмечаем что соединение потеряно при ошибке приема
+                self._transport = None
+                msg = f"Failed to receive message: {e}"
+                raise RuntimeError(msg) from e
 
     def listen(self) -> AsyncIterator[dict[str, Any]]:
         """Слушает входящие сообщения с сервера.
