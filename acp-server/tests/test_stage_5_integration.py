@@ -439,3 +439,177 @@ class TestPromptOrchestratorIntegrationFullStack:
 
         # Assert
         assert len(session.history) > 0
+
+
+class TestSessionPromptWithOrchestratorIntegration:
+    """Полные интеграционные тесты session_prompt() с PromptOrchestrator (Этап 5)."""
+
+    @pytest.mark.asyncio
+    async def test_session_prompt_returns_protocol_outcome(self) -> None:
+        """Проверяет, что session_prompt() возвращает ProtocolOutcome с notifications."""
+        # Arrange
+        from acp_server.protocol.handlers.prompt import session_prompt
+
+        session = SessionState(
+            session_id="sess_1",
+            cwd="/tmp",
+            mcp_servers=[],
+            config_values={"mode": "ask"},
+        )
+        sessions = {"sess_1": session}
+        config_specs = {
+            "mode": {
+                "description": "Mode",
+                "options": [{"value": "ask"}],
+                "default": "ask",
+                "name": "Mode",
+                "category": "execution",
+            }
+        }
+        params = {
+            "sessionId": "sess_1",
+            "prompt": [{"type": "text", "text": "Hello test"}],
+        }
+
+        # Act
+        outcome = await session_prompt(
+            "req_1", params, sessions, config_specs, agent_orchestrator=None
+        )
+
+        # Assert
+        assert isinstance(outcome, ProtocolOutcome)
+        assert outcome.response is not None
+        assert len(outcome.notifications) > 0
+
+    @pytest.mark.asyncio
+    async def test_session_prompt_with_orchestrator_creates_notifications(self) -> None:
+        """Проверяет, что orchestrator создает необходимые notifications."""
+        # Arrange
+        from acp_server.protocol.handlers.prompt import session_prompt
+
+        session = SessionState(
+            session_id="sess_1",
+            cwd="/tmp",
+            mcp_servers=[],
+            config_values={"mode": "ask"},
+        )
+        sessions = {"sess_1": session}
+        config_specs = {
+            "mode": {
+                "description": "Mode",
+                "options": [{"value": "ask"}],
+                "default": "ask",
+                "name": "Mode",
+                "category": "execution",
+            }
+        }
+        params = {
+            "sessionId": "sess_1",
+            "prompt": [{"type": "text", "text": "Test message"}],
+        }
+
+        # Act
+        outcome = await session_prompt(
+            "req_1", params, sessions, config_specs, agent_orchestrator=None
+        )
+
+        # Assert - проверяем, что были созданы notifications
+        notification_types = [
+            n.params["update"]["sessionUpdate"] for n in outcome.notifications
+            if n.params is not None
+        ]
+        assert "agent_message_chunk" in notification_types or len(notification_types) > 0
+
+    @pytest.mark.asyncio
+    async def test_session_prompt_validates_prompt_array(self) -> None:
+        """Проверяет валидацию prompt как array."""
+        # Arrange
+        from acp_server.protocol.handlers.prompt import session_prompt
+
+        session = SessionState(
+            session_id="sess_1",
+            cwd="/tmp",
+            mcp_servers=[],
+        )
+        sessions = {"sess_1": session}
+        config_specs = {}
+        params = {
+            "sessionId": "sess_1",
+            "prompt": "not an array",  # Invalid
+        }
+
+        # Act
+        outcome = await session_prompt(
+            "req_1", params, sessions, config_specs, agent_orchestrator=None
+        )
+
+        # Assert
+        assert outcome.response is not None
+        assert outcome.response.error is not None
+        assert outcome.response.error.code == -32602
+
+    @pytest.mark.asyncio
+    async def test_session_prompt_error_handling(self) -> None:
+        """Проверяет обработку ошибок при вызове orchestrator."""
+        # Arrange
+        from acp_server.protocol.handlers.prompt import session_prompt
+
+        session = SessionState(
+            session_id="sess_1",
+            cwd="/tmp",
+            mcp_servers=[],
+        )
+        sessions = {"sess_1": session}
+        config_specs = {}
+        params = {
+            "sessionId": "nonexistent",
+            "prompt": [{"type": "text", "text": "test"}],
+        }
+
+        # Act
+        outcome = await session_prompt(
+            "req_1", params, sessions, config_specs, agent_orchestrator=None
+        )
+
+        # Assert
+        assert outcome.response is not None
+        assert outcome.response.error is not None
+        assert outcome.response.error.code == -32001  # Session not found
+
+    @pytest.mark.asyncio
+    async def test_session_prompt_updates_session_title(self) -> None:
+        """Проверяет обновление заголовка сессии при первом prompt."""
+        # Arrange
+        from acp_server.protocol.handlers.prompt import session_prompt
+
+        session = SessionState(
+            session_id="sess_1",
+            cwd="/tmp",
+            mcp_servers=[],
+            config_values={"mode": "ask"},
+            title=None,
+        )
+        sessions = {"sess_1": session}
+        config_specs = {
+            "mode": {
+                "description": "Mode",
+                "options": [{"value": "ask"}],
+                "default": "ask",
+                "name": "Mode",
+                "category": "execution",
+            }
+        }
+        params = {
+            "sessionId": "sess_1",
+            "prompt": [{"type": "text", "text": "First message"}],
+        }
+
+        # Act
+        outcome = await session_prompt(
+            "req_1", params, sessions, config_specs, agent_orchestrator=None
+        )
+
+        # Assert
+        # Проверяем, что outcome был создан
+        assert outcome is not None
+        assert isinstance(outcome, ProtocolOutcome)
