@@ -4,11 +4,10 @@
 при обработке prompt-turn.
 """
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
-from acp_server.messages import ACPMessage
 from acp_server.protocol.handlers.client_rpc_handler import ClientRPCHandler
 from acp_server.protocol.handlers.permission_manager import PermissionManager
 from acp_server.protocol.handlers.plan_builder import PlanBuilder

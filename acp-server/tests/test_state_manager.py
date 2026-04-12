@@ -3,7 +3,7 @@
 Проверяет корректность управления состоянием сессии и историей.
 """
 
-from datetime import UTC, datetime
+from datetime import datetime
 
 import pytest
 

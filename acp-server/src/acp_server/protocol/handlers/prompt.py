@@ -21,20 +21,65 @@ from ..state import (
     SessionState,
     ToolCallState,
 )
+from .client_rpc_handler import ClientRPCHandler
+from .permission_manager import PermissionManager
 from .permissions import (
     build_permission_options,
     resolve_remembered_permission_decision,
 )
+from .plan_builder import PlanBuilder
+from .prompt_orchestrator import PromptOrchestrator
 from .session import (
     _serialize_available_commands,
     session_info_notification,
 )
+from .state_manager import StateManager
+from .tool_call_handler import ToolCallHandler
+from .turn_lifecycle_manager import TurnLifecycleManager
 
 if TYPE_CHECKING:
     from ...agent.orchestrator import AgentOrchestrator
 
 # Используем structlog для структурированного логирования
 logger = structlog.get_logger()
+
+
+def create_prompt_orchestrator() -> PromptOrchestrator:
+    """Создает полностью инициализированный PromptOrchestrator со всеми компонентами.
+    
+    Инициирует и собирает все необходимые компоненты:
+    - StateManager: управление состоянием сессии
+    - PlanBuilder: построение планов
+    - TurnLifecycleManager: управление фазами turn
+    - ToolCallHandler (Этап 2): управление tool calls
+    - PermissionManager (Этап 2): управление разрешениями
+    - ClientRPCHandler (Этап 2): управление client RPC запросами
+    
+    Returns:
+        PromptOrchestrator: Готовый к использованию оркестратор
+        
+    Пример использования:
+        orchestrator = create_prompt_orchestrator()
+        outcome = await orchestrator.handle_prompt(...)
+    """
+    state_manager = StateManager()
+    plan_builder = PlanBuilder()
+    turn_lifecycle_manager = TurnLifecycleManager()
+    tool_call_handler = ToolCallHandler()
+    permission_manager = PermissionManager()
+    client_rpc_handler = ClientRPCHandler()
+    
+    orchestrator = PromptOrchestrator(
+        state_manager=state_manager,
+        plan_builder=plan_builder,
+        turn_lifecycle_manager=turn_lifecycle_manager,
+        tool_call_handler=tool_call_handler,
+        permission_manager=permission_manager,
+        client_rpc_handler=client_rpc_handler,
+    )
+    
+    logger.debug("PromptOrchestrator created with all components")
+    return orchestrator
 
 
 async def _handle_with_agent(

@@ -10,7 +10,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ...messages import ACPMessage
-from ..state import PendingClientRequestState, PreparedFsClientRequest, PromptDirectives, SessionState
+from ..state import (
+    PendingClientRequestState,
+    PreparedFsClientRequest,
+    PromptDirectives,
+    SessionState,
+)
 
 if TYPE_CHECKING:
     pass
