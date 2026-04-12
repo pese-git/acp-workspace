@@ -31,7 +31,9 @@ def session() -> SessionState:
 class TestPermissionManagerDecision:
     """Тесты определения необходимости permission request."""
 
-    def test_should_request_for_default(self, manager: PermissionManager, session: SessionState) -> None:
+    def test_should_request_for_default(
+        self, manager: PermissionManager, session: SessionState
+    ) -> None:
         """Проверяет, что по умолчанию нужен permission request."""
         # tool_kind не в policy
         assert manager.should_request_permission(session, "execute") is True
@@ -73,7 +75,9 @@ class TestPermissionManagerRemembered:
         decision = manager.get_remembered_permission(session, "execute")
         assert decision == "reject"
 
-    def test_get_remembered_default_ask(self, manager: PermissionManager, session: SessionState) -> None:
+    def test_get_remembered_default_ask(
+        self, manager: PermissionManager, session: SessionState
+    ) -> None:
         """Проверяет получение default 'ask' решения."""
         decision = manager.get_remembered_permission(session, "execute")
         assert decision == "ask"

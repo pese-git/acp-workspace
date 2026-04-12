@@ -37,7 +37,9 @@ def session() -> SessionState:
 class TestToolCallHandlerCreation:
     """Тесты создания tool calls."""
 
-    def test_create_tool_call_incremental_id(self, handler: ToolCallHandler, session: SessionState) -> None:
+    def test_create_tool_call_incremental_id(
+        self, handler: ToolCallHandler, session: SessionState
+    ) -> None:
         """Проверяет генерацию монотонных ID при создании tool calls."""
         # Создаем несколько tool calls
         id1 = handler.create_tool_call(session, title="First", kind="execute")
@@ -49,7 +51,9 @@ class TestToolCallHandlerCreation:
         assert id2 == "call_002"
         assert id3 == "call_003"
 
-    def test_create_tool_call_records_in_session(self, handler: ToolCallHandler, session: SessionState) -> None:
+    def test_create_tool_call_records_in_session(
+        self, handler: ToolCallHandler, session: SessionState
+    ) -> None:
         """Проверяет, что созданный tool call записывается в session.tool_calls."""
         tool_call_id = handler.create_tool_call(session, title="Demo", kind="execute")
 
@@ -62,7 +66,9 @@ class TestToolCallHandlerCreation:
         assert tool_call.status == "pending"
         assert tool_call.content == []
 
-    def test_create_tool_call_increments_counter(self, handler: ToolCallHandler, session: SessionState) -> None:
+    def test_create_tool_call_increments_counter(
+        self, handler: ToolCallHandler, session: SessionState
+    ) -> None:
         """Проверяет, что счетчик tool_call_counter увеличивается."""
         initial_counter = session.tool_call_counter
         handler.create_tool_call(session, title="Test", kind="other")
@@ -72,7 +78,9 @@ class TestToolCallHandlerCreation:
 class TestToolCallHandlerStatusUpdates:
     """Тесты обновления статуса tool call."""
 
-    def test_update_pending_to_in_progress(self, handler: ToolCallHandler, session: SessionState) -> None:
+    def test_update_pending_to_in_progress(
+        self, handler: ToolCallHandler, session: SessionState
+    ) -> None:
         """Проверяет переход pending → in_progress."""
         tool_call_id = handler.create_tool_call(session, title="Test", kind="execute")
         
@@ -80,7 +88,9 @@ class TestToolCallHandlerStatusUpdates:
         
         assert session.tool_calls[tool_call_id].status == "in_progress"
 
-    def test_update_in_progress_to_completed(self, handler: ToolCallHandler, session: SessionState) -> None:
+    def test_update_in_progress_to_completed(
+        self, handler: ToolCallHandler, session: SessionState
+    ) -> None:
         """Проверяет переход in_progress → completed."""
         tool_call_id = handler.create_tool_call(session, title="Test", kind="execute")
         handler.update_tool_call_status(session, tool_call_id, "in_progress")
@@ -91,7 +101,9 @@ class TestToolCallHandlerStatusUpdates:
         assert session.tool_calls[tool_call_id].status == "completed"
         assert session.tool_calls[tool_call_id].content == content
 
-    def test_update_pending_to_cancelled(self, handler: ToolCallHandler, session: SessionState) -> None:
+    def test_update_pending_to_cancelled(
+        self, handler: ToolCallHandler, session: SessionState
+    ) -> None:
         """Проверяет переход pending → cancelled."""
         tool_call_id = handler.create_tool_call(session, title="Test", kind="execute")
         
@@ -99,7 +111,9 @@ class TestToolCallHandlerStatusUpdates:
         
         assert session.tool_calls[tool_call_id].status == "cancelled"
 
-    def test_update_pending_to_failed(self, handler: ToolCallHandler, session: SessionState) -> None:
+    def test_update_pending_to_failed(
+        self, handler: ToolCallHandler, session: SessionState
+    ) -> None:
         """Проверяет переход pending → failed."""
         tool_call_id = handler.create_tool_call(session, title="Test", kind="execute")
         
@@ -142,7 +156,9 @@ class TestToolCallHandlerStatusUpdates:
         
         assert session.tool_calls[tool_call_id].content == content
 
-    def test_update_nonexistent_tool_call(self, handler: ToolCallHandler, session: SessionState) -> None:
+    def test_update_nonexistent_tool_call(
+        self, handler: ToolCallHandler, session: SessionState
+    ) -> None:
         """Проверяет, что обновление несуществующего tool call игнорируется."""
         # Попытаемся обновить несуществующий tool call
         handler.update_tool_call_status(session, "nonexistent", "completed")
@@ -175,7 +191,9 @@ class TestToolCallHandlerExecutorMode:
         # Проверяем статусы в session
         assert session.tool_calls[tool_call_id].status == "completed"
 
-    def test_executor_mode_leave_running(self, handler: ToolCallHandler, session: SessionState) -> None:
+    def test_executor_mode_leave_running(
+        self, handler: ToolCallHandler, session: SessionState
+    ) -> None:
         """Проверяет executor mode с leave_running=True."""
         tool_call_id = handler.create_tool_call(session, title="Test", kind="execute")
         
@@ -211,7 +229,9 @@ class TestToolCallHandlerPolicyMode:
         assert len(updates) == 2
         assert session.tool_calls[tool_call_id].status == "completed"
 
-    def test_policy_rejected_cancelled(self, handler: ToolCallHandler, session: SessionState) -> None:
+    def test_policy_rejected_cancelled(
+        self, handler: ToolCallHandler, session: SessionState
+    ) -> None:
         """Проверяет policy mode с отказом: pending → cancelled."""
         tool_call_id = handler.create_tool_call(session, title="Test", kind="execute")
         
@@ -251,7 +271,9 @@ class TestToolCallHandlerCancellation:
         assert session.tool_calls[id2].status == "completed"  # не изменился
         assert session.tool_calls[id3].status == "cancelled"
 
-    def test_cancel_ignores_completed_tools(self, handler: ToolCallHandler, session: SessionState) -> None:
+    def test_cancel_ignores_completed_tools(
+        self, handler: ToolCallHandler, session: SessionState
+    ) -> None:
         """Проверяет, что отмена игнорирует завершенные tool calls."""
         id1 = handler.create_tool_call(session, title="Test", kind="execute")
         handler.update_tool_call_status(session, id1, "in_progress")
@@ -374,7 +396,9 @@ class TestToolCallHandlerCapabilities:
         )
         assert handler.can_run_tools(session) is False
 
-    def test_can_run_tools_with_none_capabilities(self, handler: ToolCallHandler, session: SessionState) -> None:
+    def test_can_run_tools_with_none_capabilities(
+        self, handler: ToolCallHandler, session: SessionState
+    ) -> None:
         """Проверяет can_run_tools когда runtime_capabilities не установлены."""
         session.runtime_capabilities = None
         assert handler.can_run_tools(session) is False

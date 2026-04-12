@@ -69,46 +69,29 @@ class TestSessionPromptValidation:
         self, sessions: dict[str, SessionState]
     ) -> None:
         """Возвращает ошибку при отсутствии sessionId."""
-        # Act
-        outcome = pytest.main(
-            [
-                "-v",
-                __file__,
-            ]
-        )  # Используем sync для тестирования
-
+        # Placeholder для тестирования отсутствия sessionId
         # Для асинхронной функции понадобится pytest-asyncio
-        # Пока используем простой вызов с проверкой
         assert True  # placeholder
 
     def test_session_prompt_invalid_session_id_type(
         self, sessions: dict[str, SessionState]
     ) -> None:
         """Возвращает ошибку при неправильном типе sessionId."""
-        # Arrange
-        params = {"sessionId": 123, "prompt": []}  # sessionId должен быть str
-
-        # Assert
+        # sessionId должен быть str, а не int
         assert True  # placeholder
 
     def test_session_prompt_session_not_found(
         self, sessions: dict[str, SessionState]
     ) -> None:
         """Возвращает ошибку при отсутствии сессии."""
-        # Arrange
-        params = {"sessionId": "nonexistent", "prompt": []}
-
-        # Assert
+        # Попытаемся использовать несуществующий sessionId
         assert True  # placeholder
 
     def test_session_prompt_invalid_prompt_type(
         self, sessions: dict[str, SessionState]
     ) -> None:
         """Возвращает ошибку при неправильном типе prompt."""
-        # Arrange
-        params = {"sessionId": "sess_1", "prompt": "not_a_list"}
-
-        # Assert
+        # prompt должен быть list, а не string
         assert True  # placeholder
 
 
@@ -188,9 +171,6 @@ class TestSessionPromptComponentIntegration:
         self, orchestrator: PromptOrchestrator, session: SessionState
     ) -> None:
         """StateManager корректно обновляет состояние сессии."""
-        # Arrange
-        original_updated_at = session.updated_at
-
         # Act - обновляем заголовок сессии
         orchestrator.state_manager.update_session_title(
             session=session,

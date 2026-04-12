@@ -83,7 +83,9 @@ class TestClientRPCHandlerCapabilities:
         )
         assert handler.can_use_fs_rpc(session, "fs_write") is False
 
-    def test_can_use_fs_rpc_none_capabilities(self, handler: ClientRPCHandler, session: SessionState) -> None:
+    def test_can_use_fs_rpc_none_capabilities(
+        self, handler: ClientRPCHandler, session: SessionState
+    ) -> None:
         """Проверяет can_use_fs_rpc когда runtime_capabilities не установлены."""
         session.runtime_capabilities = None
         assert handler.can_use_fs_rpc(session, "fs_read") is False
@@ -107,7 +109,9 @@ class TestClientRPCHandlerCapabilities:
         )
         assert handler.can_use_terminal_rpc(session) is False
 
-    def test_can_use_terminal_none_capabilities(self, handler: ClientRPCHandler, session: SessionState) -> None:
+    def test_can_use_terminal_none_capabilities(
+        self, handler: ClientRPCHandler, session: SessionState
+    ) -> None:
         """Проверяет can_use_terminal_rpc когда runtime_capabilities не установлены."""
         session.runtime_capabilities = None
         assert handler.can_use_terminal_rpc(session) is False
@@ -123,7 +127,9 @@ class TestClientRPCHandlerCapabilities:
         )
         assert handler.can_run_tools(session) is True
 
-    def test_can_run_tools_with_terminal_only(self, handler: ClientRPCHandler, session: SessionState) -> None:
+    def test_can_run_tools_with_terminal_only(
+        self, handler: ClientRPCHandler, session: SessionState
+    ) -> None:
         """Проверяет can_run_tools с только terminal capability."""
         session.runtime_capabilities = ClientRuntimeCapabilities(
             terminal=True,
@@ -143,7 +149,9 @@ class TestClientRPCHandlerCapabilities:
         )
         assert handler.can_run_tools(session) is False
 
-    def test_can_run_tools_none_capabilities(self, handler: ClientRPCHandler, session: SessionState) -> None:
+    def test_can_run_tools_none_capabilities(
+        self, handler: ClientRPCHandler, session: SessionState
+    ) -> None:
         """Проверяет can_run_tools когда runtime_capabilities не установлены."""
         session.runtime_capabilities = None
         assert handler.can_run_tools(session) is False

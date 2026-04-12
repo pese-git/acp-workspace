@@ -92,7 +92,8 @@ class ToolCallHandler:
         Args:
             session: Состояние сессии
             title: Название для UI (e.g., "Tool execution")
-            kind: Категория tool (read, edit, delete, move, search, execute, think, fetch, switch_mode, other)
+            kind: Категория tool (read, edit, delete, move, search, execute,
+                think, fetch, switch_mode, other)
         
         Returns:
             ID вида "call_NNN" (e.g., "call_001", "call_002")
