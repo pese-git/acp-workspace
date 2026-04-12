@@ -33,6 +33,46 @@ def _serialize_available_commands(
     return result
 
 
+def _cleanup_session_state(session: SessionState) -> None:
+    """Очищает незавершенные операции при переключении сессии.
+    
+    Выполняет следующие действия для безопасного переключения:
+    1. Отменяет active turn, если он активен
+    2. Отмечает все pending tool calls как cancelled
+    3. Добавляет permission request IDs в cancelled_permission_requests
+    4. Добавляет RPC request IDs в cancelled_client_rpc_requests
+    
+    Аргументы:
+        session: SessionState для очистки.
+    
+    Пример использования:
+        _cleanup_session_state(session)
+    """
+    # Завершить active turn
+    if session.active_turn is not None:
+        session.active_turn.cancel_requested = True
+        session.active_turn.phase = "cancelled"
+        
+        # Если был permission request, отменить его
+        if session.active_turn.permission_request_id is not None:
+            session.cancelled_permission_requests.add(
+                session.active_turn.permission_request_id
+            )
+        
+        # Если был pending client request, отменить его
+        if session.active_turn.pending_client_request is not None:
+            session.cancelled_client_rpc_requests.add(
+                session.active_turn.pending_client_request.request_id
+            )
+        
+        session.active_turn = None
+    
+    # Отметить все pending tool calls как cancelled
+    for _tool_call_id, tool_call in session.tool_calls.items():
+        if tool_call.status == "pending":
+            tool_call.status = "cancelled"
+
+
 def session_new(
     request_id: JsonRpcId | None,
     params: dict[str, Any],
@@ -176,6 +216,10 @@ def session_load(
                 message=f"Session not found: {session_id}",
             )
         )
+
+    # Очистить незавершенные операции перед переключением контекста.
+    # Это предотвращает race conditions и утечки памяти при переключении сессий.
+    _cleanup_session_state(session)
 
     # При загрузке фиксируем актуальный контекст клиента.
     session.cwd = cwd
