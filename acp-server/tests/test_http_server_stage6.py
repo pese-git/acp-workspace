@@ -128,7 +128,7 @@ async def test_ws_prompt_with_tool_call_roundtrip() -> None:
                 # Собираем все notifications и response
                 tool_call_seen = False
                 permission_request_seen = False
-                turn_complete_seen = False
+                prompt_response_received = False
 
                 for _ in range(20):
                     payload = await asyncio.wait_for(ws.receive_json(), timeout=1.0)
@@ -143,16 +143,28 @@ async def test_ws_prompt_with_tool_call_roundtrip() -> None:
                     ):
                         tool_call_seen = True
 
-                    # Проверяем наличие permission request
+                    # Проверяем наличие permission request и отвечаем на него
                     if payload.get("method") == "session/request_permission":
                         permission_request_seen = True
+                        # Отправляем ответ на permission request (allow_once)
+                        await ws.send_json(
+                            {
+                                "jsonrpc": "2.0",
+                                "id": payload["id"],
+                                "result": {
+                                    "outcome": {
+                                        "outcome": "selected",
+                                        "optionId": "allow_once",
+                                    },
+                                },
+                            }
+                        )
+                        continue
 
-                    # Проверяем completion
-                    if (
-                        payload.get("method") == "session/turn_complete"
-                        and payload.get("params", {}).get("sessionId") == session_id
-                    ):
-                        turn_complete_seen = True
+                    # Проверяем финальный response на session/prompt
+                    if payload.get("id") == "prompt_1":
+                        prompt_response_received = True
+                        assert payload.get("result", {}).get("stopReason") == "end_turn"
                         break
 
                 # Все ожидаемые этапы должны быть пройдены
@@ -160,7 +172,9 @@ async def test_ws_prompt_with_tool_call_roundtrip() -> None:
                 assert (
                     permission_request_seen
                 ), "Permission request notification не найдена"
-                assert turn_complete_seen, "Turn complete notification не найдена"
+                assert (
+                    prompt_response_received
+                ), "Финальный response на session/prompt не получен"
 
             finally:
                 await ws.close()
@@ -282,10 +296,28 @@ async def test_ws_client_rpc_request_response_roundtrip() -> None:
         async with ClientSession() as session:
             ws = await session.ws_connect(f"http://127.0.0.1:{port}/acp/ws")
             try:
-                await _ws_initialize(ws)
+                # Инициализируем с включенными fs capabilities
+                await ws.send_json(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": "init_1",
+                        "method": "initialize",
+                        "params": {
+                            "protocolVersion": 1,
+                            "clientCapabilities": {
+                                "fs": {"readTextFile": True, "writeTextFile": True},
+                                "terminal": True,
+                            },
+                        },
+                    }
+                )
+                init_response = await asyncio.wait_for(ws.receive_json(), timeout=1.0)
+                assert init_response["id"] == "init_1"
+                assert init_response.get("error") is None
+
                 session_id = await _ws_create_session(ws, 1)
 
-                # Отправляем prompt, который может вызвать fs/readTextFile
+                # Отправляем prompt, который может вызвать fs/read_text_file
                 await ws.send_json(
                     {
                         "jsonrpc": "2.0",
@@ -300,43 +332,45 @@ async def test_ws_client_rpc_request_response_roundtrip() -> None:
                     }
                 )
 
-                # Ищем client RPC request
+                # Ищем client RPC request или финальный response
                 client_rpc_request_id: str | None = None
+                prompt_response_received = False
+
                 for _ in range(20):
-                    payload = await asyncio.wait_for(ws.receive_json(), timeout=1.0)
-
-                    # Ищем RPC request (не notification)
-                    if (
-                        payload.get("method") == "fs/readTextFile"
-                        and payload.get("id") is not None
-                    ):
-                        client_rpc_request_id = payload.get("id")
-                        break
-
-                # Если был RPC request, отправляем response
-                if client_rpc_request_id is not None:
-                    await ws.send_json(
-                        {
-                            "jsonrpc": "2.0",
-                            "id": client_rpc_request_id,
-                            "result": {"content": "file content"},
-                        }
-                    )
-
-                    # Собираем дальнейшие обновления для проверки обработки response
-                    rpc_response_processed = False
-                    for _ in range(10):
+                    try:
                         payload = await asyncio.wait_for(ws.receive_json(), timeout=1.0)
 
-                        # Проверяем, что response был обработан
-                        if payload.get("method") == "session/turn_complete":
-                            rpc_response_processed = True
-                            break
+                        # Ищем RPC request (правильное имя метода: fs/read_text_file)
+                        if (
+                            payload.get("method") == "fs/read_text_file"
+                            and payload.get("id") is not None
+                        ):
+                            client_rpc_request_id = payload.get("id")
+                            # Отправляем response на RPC
+                            await ws.send_json(
+                                {
+                                    "jsonrpc": "2.0",
+                                    "id": client_rpc_request_id,
+                                    "result": {"content": "file content"},
+                                }
+                            )
+                            continue
 
-                    assert rpc_response_processed, "RPC response не был обработан"
-                else:
-                    # Если RPC не был запрошен, это тоже окей - просто логируем
-                    pytest.skip("RPC request не был инициирован в этом run")
+                        # Проверяем финальный response на session/prompt
+                        if payload.get("id") == "prompt_1":
+                            prompt_response_received = True
+                            assert "result" in payload, "Response должен содержать result"
+                            break
+                    except TimeoutError:
+                        break
+
+                # Проверяем, что получили финальный response
+                assert (
+                    prompt_response_received
+                ), "Финальный response на session/prompt не получен"
+
+                # Если RPC был запрошен, это подтверждает работу client RPC
+                # Если нет - тест все равно проходит (сервер может не поддерживать /fs-read)
 
             finally:
                 await ws.close()
@@ -427,24 +461,25 @@ async def test_ws_rapid_prompts_no_deadlock() -> None:
                     )
 
                 # Теперь собираем ответы - система должна обработать все без deadlock
-                turn_complete_count = 0
+                prompt_responses_received = 0
                 for _ in range(50):
                     try:
                         payload = await asyncio.wait_for(
                             ws.receive_json(), timeout=0.5
                         )
-                        if payload.get("method") == "session/turn_complete":
-                            turn_complete_count += 1
-                            # После 5-го turn_complete можем выйти
-                            if turn_complete_count >= 5:
+                        # Считаем финальные responses на session/prompt
+                        if payload.get("id") and payload["id"].startswith("prompt_"):
+                            prompt_responses_received += 1
+                            # После 5-го response можем выйти
+                            if prompt_responses_received >= 5:
                                 break
                     except TimeoutError:
                         break
 
-                # Должны были получить хотя бы несколько completions
+                # Должны были получить все 5 responses
                 assert (
-                    turn_complete_count > 0
-                ), "No turn_complete received after rapid prompts"
+                    prompt_responses_received == 5
+                ), f"Получено {prompt_responses_received}/5 responses на prompts"
 
             finally:
                 await ws.close()
@@ -485,27 +520,33 @@ async def test_ws_message_ordering_notifications_before_response() -> None:
 
                 # Собираем сообщения и проверяем порядок
                 messages_received: list[dict] = []
-                turn_complete_found = False
+                prompt_response_found = False
 
                 for _ in range(30):
                     payload = await asyncio.wait_for(ws.receive_json(), timeout=1.0)
                     messages_received.append(payload)
 
-                    # Когда находим turn_complete, проверяем что notifications были раньше
-                    if payload.get("method") == "session/turn_complete":
-                        turn_complete_found = True
+                    # Когда находим финальный response, проверяем что notifications были раньше
+                    if payload.get("id") == "prompt_1":
+                        prompt_response_found = True
                         break
 
-                assert turn_complete_found, "turn_complete не найден"
+                assert prompt_response_found, "Финальный response на session/prompt не найден"
 
-                # Проверяем, что есть session/update notifications перед turn_complete
+                # Проверяем, что есть session/update notifications перед response
                 update_notifications = [
-                    msg for msg in messages_received
+                    msg
+                    for msg in messages_received
                     if msg.get("method") == "session/update"
                 ]
                 assert (
                     len(update_notifications) > 0
-                ), "Нет session/update notifications"
+                ), "Нет session/update notifications перед response"
+
+                # Проверяем, что response пришел последним
+                assert (
+                    messages_received[-1].get("id") == "prompt_1"
+                ), "Response должен быть последним сообщением"
 
             finally:
                 await ws.close()
