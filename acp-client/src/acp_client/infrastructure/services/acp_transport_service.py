@@ -6,11 +6,17 @@
 - Отправку сообщений
 - Получение ответов
 - Обработку асинхронных уведомлений
+
+Архитектура:
+- Background Receive Loop: единственный вызов receive() на WebSocket
+- Message Router: маршрутизация по типам сообщений
+- Routing Queues: распределение по очередям для конкурентных запросов
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from collections.abc import AsyncIterator, Callable
 from typing import Any
@@ -19,6 +25,11 @@ import structlog
 
 from acp_client.domain import TransportService
 from acp_client.infrastructure.message_parser import MessageParser
+from acp_client.infrastructure.services.background_receive_loop import (
+    BackgroundReceiveLoop,
+)
+from acp_client.infrastructure.services.message_router import MessageRouter
+from acp_client.infrastructure.services.routing_queues import RoutingQueues
 from acp_client.infrastructure.transport import WebSocketTransport
 from acp_client.messages import ACPMessage
 
@@ -56,10 +67,15 @@ class ACPTransportService(TransportService):
         self._transport: WebSocketTransport | None = None
         # Сохраняем server capabilities после инициализации
         self._server_capabilities: dict[str, Any] | None = None
-        # Мьютекс для синхронизации доступа к receive()
-        # Предотвращает "Concurrent call to receive() is not allowed" при
-        # одновременных запросах от разных сессий на одном WebSocket соединении
-        self._receive_lock = asyncio.Lock()
+        
+        # Infrastructure для управления конкурентными вызовами receive()
+        # Background Receive Loop: единственный вызов receive() на WebSocket
+        self._background_loop: BackgroundReceiveLoop | None = None
+        # Message Router: маршрутизация по типам сообщений
+        self._router: MessageRouter | None = None
+        # Routing Queues: распределение по очередям
+        self._queues: RoutingQueues | None = None
+        
         self._logger = structlog.get_logger("acp_transport_service")
 
     async def __aenter__(self) -> ACPTransportService:
@@ -89,11 +105,11 @@ class ACPTransportService(TransportService):
             self._logger.warning("error_in_context_exit", error=str(e))
 
     async def connect(self) -> None:
-        """Устанавливает соединение с сервером.
+        """Устанавливает соединение с сервером и запускает background receive loop.
 
         Создает WebSocket транспорт (если его еще нет) и открывает соединение.
-        Переиспользует существующий транспорт для переподключения.
-        Соединение остается открытым и должно быть закрыто явно через disconnect().
+        Инициализирует routing infrastructure и запускает background loop для
+        единственного вызова receive() на WebSocket.
 
         Raises:
             RuntimeError: При ошибке подключения
@@ -114,10 +130,31 @@ class ACPTransportService(TransportService):
             # Вызов __aenter__() устанавливает _ws и _http_session
             # При переподключении это переиспользует существующий объект
             await self._transport.__aenter__()
-            self._logger.info("connected_to_server", host=self.host, port=self.port)
+            
+            # Инициализируем routing infrastructure
+            self._router = MessageRouter()
+            self._queues = RoutingQueues()
+            self._background_loop = BackgroundReceiveLoop(
+                self._transport,
+                self._router,
+                self._queues,
+            )
+            
+            # Запускаем background loop - единственный вызов receive() на WebSocket
+            await self._background_loop.start()
+            
+            self._logger.info(
+                "connected_to_server",
+                host=self.host,
+                port=self.port,
+                background_loop_running=self._background_loop.is_running(),
+            )
         except Exception as e:
-            # При ошибке очищаем ссылку на транспорт чтобы создать новый при следующей попытке
+            # При ошибке очищаем ресурсы
             self._transport = None
+            self._background_loop = None
+            self._queues = None
+            self._router = None
             self._logger.error("connection_failed", host=self.host, port=self.port, error=str(e))
             msg = f"Failed to connect to {self.host}:{self.port}: {e}"
             raise RuntimeError(msg) from e
@@ -125,7 +162,11 @@ class ACPTransportService(TransportService):
     async def disconnect(self) -> None:
         """Разрывает соединение с сервером.
 
-        Закрывает WebSocket транспорт и освобождает ресурсы.
+        Graceful shutdown:
+        1. Останавливает background receive loop
+        2. Очищает routing infrastructure
+        3. Закрывает WebSocket транспорт
+        4. Освобождает все ресурсы
         """
         if not self.is_connected():
             self._logger.debug("not_connected", host=self.host, port=self.port)
@@ -133,15 +174,32 @@ class ACPTransportService(TransportService):
 
         try:
             self._logger.debug("closing_connection", host=self.host, port=self.port)
+            
+            # Сначала останавливаем background loop - это главное
+            # Иначе он будет пытаться читать из закрытого транспорта
+            if self._background_loop is not None:
+                self._logger.debug("stopping_background_loop")
+                await self._background_loop.stop()
+            
+            # Очищаем очереди чтобы разбудить все ждущие операции
+            if self._queues is not None:
+                await self._queues.clear_all()
+            
+            # Потом закрываем транспорт
             # Правильно вызываем __aexit__ для корректного закрытия соединения
             # Это завершает context manager и освобождает все ресурсы
             if self._transport is not None:
                 await self._transport.__aexit__(None, None, None)
+            
             self._logger.info("connection_closed", host=self.host, port=self.port)
         except Exception as e:
             self._logger.warning("disconnect_error", error=str(e), host=self.host, port=self.port)
         finally:
+            # Окончательная очистка ресурсов
             self._transport = None
+            self._background_loop = None
+            self._queues = None
+            self._router = None
 
     async def send(self, message: dict[str, Any]) -> None:
         """Отправляет сообщение на сервер.
@@ -178,15 +236,23 @@ class ACPTransportService(TransportService):
             msg = f"Failed to send message: {e}"
             raise RuntimeError(msg) from e
 
-    async def receive(self) -> dict[str, Any]:
-        """Получает одно сообщение с сервера.
+    async def receive(self, request_id: str | None = None) -> dict[str, Any]:
+        """Получает одно сообщение с сервера из очереди RPC ответов.
 
-        Это блокирующая операция, ожидающая сообщение.
-        Если соединение потеряно, генерирует ошибку (переподключение должно
-        происходить на более высоком уровне через send()).
+        Архитектура:
+        - Background loop единственный получает из transport.receive_text()
+        - Маршрутизирует в очереди на основе Message Router
+        - receive() получает из соответствующей очереди
 
-        Использует мьютекс для синхронизации доступа к WebSocket, предотвращая
-        конкурентные вызовы receive() от разных сессий/запросов.
+        Поддерживает две режима:
+        1. С request_id: получает RPC ответ на конкретный запрос из response_queues[request_id]
+        2. Без request_id: получает асинхронное уведомление из notification_queue
+
+        Использует Message Router и Routing Queues для распределения
+        конкурентных запросов на одном WebSocket соединении.
+
+        Аргументы:
+            request_id: ID конкретного RPC запроса (опционально)
 
         Возвращает:
             JSON-RPC сообщение из сервера
@@ -199,30 +265,52 @@ class ACPTransportService(TransportService):
             self._logger.error("not_connected")
             raise RuntimeError(msg)
 
-        # Используем мьютекс для синхронизации доступа к WebSocket
-        # Это предотвращает "Concurrent call to receive() is not allowed"
-        # когда несколько сессий/запросов пытаются читать одновременно
-        async with self._receive_lock:
-            self._logger.debug("waiting_for_message")
+        if self._queues is None:
+            msg = "Routing queues not initialized"
+            self._logger.error("queues_not_initialized")
+            raise RuntimeError(msg)
 
-            try:
-                # Получаем текстовое сообщение из транспорта и парсим JSON
-                assert self._transport is not None
-                json_message = await self._transport.receive_text()
-                message = json.loads(json_message)
-                message_id = message.get("id")
-                self._logger.debug(
-                    "message_received",
-                    message_id=message_id,
-                    length=len(json_message),
+        try:
+            # Выбираем очередь в зависимости от request_id
+            if request_id is not None:
+                # Получаем ответ на конкретный RPC запрос
+                self._logger.debug("waiting_for_rpc_response", request_id=request_id)
+                # Получаем или создаем очередь для этого request_id
+                response_queue = await self._queues.get_or_create_response_queue(request_id)
+                message = await asyncio.wait_for(
+                    response_queue.get(),
+                    timeout=300.0,
                 )
-                return message
-            except Exception as e:
-                self._logger.error("receive_failed", error=str(e))
-                # Отмечаем что соединение потеряно при ошибке приема
-                self._transport = None
-                msg = f"Failed to receive message: {e}"
-                raise RuntimeError(msg) from e
+            else:
+                # Получаем асинхронное уведомление
+                self._logger.debug("waiting_for_notification")
+                message = await asyncio.wait_for(
+                    self._queues.notification_queue.get(),
+                    timeout=300.0,
+                )
+
+            message_id = message.get("id")
+            self._logger.debug(
+                "message_received_from_queue",
+                message_id=message_id,
+                request_id=request_id,
+                has_result="result" in message,
+                has_error="error" in message,
+            )
+            return message
+        except TimeoutError:
+            self._logger.error("receive_timeout", request_id=request_id)
+            msg = "Timeout waiting for message from server"
+            raise RuntimeError(msg) from None
+        except Exception as e:
+            self._logger.error(
+                "receive_failed",
+                error=str(e),
+                error_type=type(e).__name__,
+                request_id=request_id,
+            )
+            msg = f"Failed to receive message: {e}"
+            raise RuntimeError(msg) from e
 
     def listen(self) -> AsyncIterator[dict[str, Any]]:
         """Слушает входящие сообщения с сервера.
@@ -331,10 +419,14 @@ class ACPTransportService(TransportService):
         on_terminal_release: Callable[[str], None] | None = None,
         on_terminal_kill: Callable[[str], bool] | None = None,
     ) -> dict[str, Any]:
-        """Выполняет request с обработкой callbacks.
+        """Выполняет request с обработкой callbacks используя routing queues.
 
-        Это специальный метод, который объединяет отправку запроса
-        с обработкой асинхронных событий (session/update, permission и т.д.)
+        Архитектура:
+        1. Создает очередь для этого request_id (или использует существующую)
+        2. Отправляет request
+        3. Ждет ответа из очереди для этого request_id
+        4. Обрабатывает асинхронные события (updates, permissions)
+        5. Несколько конкурентных запросов могут работать параллельно
 
         Аргументы:
             method: Метод для вызова
@@ -362,6 +454,11 @@ class ACPTransportService(TransportService):
                 self._logger.error("request_with_callbacks_reconnect_failed", error=str(e))
                 raise RuntimeError(msg) from e
 
+        if self._queues is None:
+            msg = "Routing queues not initialized"
+            self._logger.error("queues_not_initialized")
+            raise RuntimeError(msg)
+
         self._logger.info(
             "request_with_callbacks_start",
             method=method,
@@ -373,45 +470,126 @@ class ACPTransportService(TransportService):
             request = ACPMessage.request(method=method, params=params)
             request_data = request.to_dict()
 
+            # Создаем очередь для этого request_id
+            # Background loop будет класть ответы в эту очередь
+            response_queue = await self._queues.get_or_create_response_queue(request.id)
+
             # Отправляем запрос (через send который имеет собственную защиту переподключения)
             await self.send(request_data)
 
+            self._logger.debug(
+                "request_sent",
+                method=method,
+                request_id=request.id,
+            )
+
             # Получаем ответы, обрабатывая промежуточные события
+            # Используем asyncio.wait для ожидания нескольких очередей одновременно
             while True:
-                response_data = await self.receive()
-                response = ACPMessage.from_dict(response_data)
+                # Создаем задачи для ожидания из разных очередей
+                response_task = asyncio.create_task(
+                    asyncio.wait_for(response_queue.get(), timeout=300.0)
+                )
+                notification_task = asyncio.create_task(
+                    asyncio.wait_for(self._queues.notification_queue.get(), timeout=0.1)
+                )
 
-                # Если это session/update - обрабатываем callback
-                if response.method == "session/update" and on_update is not None:
-                    on_update(response_data)
-                    continue
+                # Ждем первого результата
+                done, pending = await asyncio.wait(
+                    [response_task, notification_task],
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
 
-                # Если это session/request_permission - обрабатываем callback
-                if response.method == "session/request_permission" and on_permission is not None:
-                    permission_response = on_permission(response_data)
-                    # Отправляем ответ на permission запрос
-                    permission_reply = ACPMessage.response(
-                        response.id,
-                        {"permission": permission_response} if permission_response else {},
-                    )
-                    await self.send(permission_reply.to_dict())
-                    continue
+                # Отменяем оставшиеся задачи
+                for task in pending:
+                    task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await task
 
-                # Если это ответ на наш запрос - возвращаем результат
-                if response.id == request.id:
-                    if response.error is not None:
+                # Проверяем результат от response queue
+                if response_task in done:
+                    try:
+                        response_data = response_task.result()
+                        response = ACPMessage.from_dict(response_data)
+
+                        # Если это ответ на наш запрос - возвращаем результат
+                        if response.id == request.id:
+                            if response.error is not None:
+                                self._logger.error(
+                                    "request_error",
+                                    method=method,
+                                    error_code=response.error.code,
+                                    error_message=response.error.message,
+                                )
+                            self._logger.info(
+                                "request_completed",
+                                method=method,
+                                request_id=request.id,
+                            )
+                            return response_data
+                    except TimeoutError:
                         self._logger.error(
-                            "request_error",
+                            "request_timeout",
                             method=method,
-                            error_code=response.error.code,
-                            error_message=response.error.message,
+                            request_id=request.id,
                         )
-                    self._logger.info("request_completed", method=method)
-                    return response_data
+                        raise RuntimeError(f"Request {request.id} timed out") from None
+                    except Exception:
+                        # Продолжаем если была ошибка
+                        pass
+
+                # Проверяем результат от notification queue
+                if notification_task in done:
+                    try:
+                        notification_data = notification_task.result()
+                        notification = ACPMessage.from_dict(notification_data)
+
+                        # Обрабатываем асинхронные события
+                        if (
+                            notification.method == "session/update"
+                            and on_update is not None
+                        ):
+                            self._logger.debug("handling_session_update")
+                            on_update(notification_data)
+
+                        elif (
+                            notification.method == "session/request_permission"
+                            and on_permission is not None
+                        ):
+                            self._logger.debug("handling_permission_request")
+                            permission_response = on_permission(notification_data)
+                            # Отправляем ответ на permission запрос
+                            permission_reply = ACPMessage.response(
+                                notification.id,
+                                (
+                                    {"permission": permission_response}
+                                    if permission_response
+                                    else {}
+                                ),
+                            )
+                            await self.send(permission_reply.to_dict())
+
+                        # Продолжаем ждать ответа на наш запрос
+                    except TimeoutError:
+                        # Таймаут при ожидании уведомления - это нормально
+                        # Продолжаем ждать ответ на основной запрос
+                        pass
+                    except Exception:
+                        # Игнорируем ошибки обработки уведомлений
+                        pass
 
         except Exception as e:
-            self._logger.error("request_failed", method=method, error=str(e))
+            self._logger.error(
+                "request_failed",
+                method=method,
+                request_id=request.id if "request" in locals() else None,
+                error=str(e),
+            )
             raise
+        finally:
+            # Очищаем очередь ответов после использования
+            if "request" in locals() and self._queues is not None:
+                await self._queues.cleanup_response_queue(request.id)
 
     def cleanup(self) -> None:
         """Очищает ресурсы синхронно (вызывается DI контейнером).

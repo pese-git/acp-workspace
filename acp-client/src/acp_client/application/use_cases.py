@@ -100,7 +100,8 @@ class InitializeUseCase(UseCase):
             self._logger.debug("initialize_request_sent", request_id=init_request.id)
 
             # Получаем ответ с информацией о сервере
-            response_data = await self._transport.receive()
+            # Используем routing queues: получаем из response_queues[request_id]
+            response_data = await self._transport.receive(request_id=init_request.id)
             response = ACPMessage.from_dict(response_data)
 
             # Обработка ошибок от сервера
@@ -223,7 +224,8 @@ class CreateSessionUseCase(UseCase):
                     },
                 )
                 await self._transport.send(auth_request.to_dict())
-                auth_response_data = await self._transport.receive()
+                # Используем routing queues: получаем из response_queues[request_id]
+                auth_response_data = await self._transport.receive(request_id=auth_request.id)
                 auth_response = ACPMessage.from_dict(auth_response_data)
 
                 if auth_response.error is not None:
@@ -257,7 +259,8 @@ class CreateSessionUseCase(UseCase):
             )
             await self._transport.send(session_request.to_dict())
 
-            session_response_data = await self._transport.receive()
+            # Используем routing queues: получаем из response_queues[request_id]
+            session_response_data = await self._transport.receive(request_id=session_request.id)
             session_response = ACPMessage.from_dict(session_response_data)
 
             if session_response.error is not None:
