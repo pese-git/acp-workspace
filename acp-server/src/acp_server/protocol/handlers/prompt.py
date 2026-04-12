@@ -292,25 +292,34 @@ async def session_prompt(
     config_specs: dict[str, dict[str, Any]],
     agent_orchestrator: AgentOrchestrator | None = None,
 ) -> ProtocolOutcome:
-    """Обрабатывает пользовательский prompt-turn и формирует updates.
+    """Обрабатывает пользовательский prompt-turn через PromptOrchestrator.
 
-    Метод валидирует контент, добавляет сообщение агента, обновляет историю,
-    публикует `session_info_update` и `available_commands_update`.
+    Этап 5: Глубокая интеграция оркестратора.
+    
+    Метод валидирует контент и делегирует обработку PromptOrchestrator,
+    который управляет всеми компонентами (StateManager, PlanBuilder,
+    TurnLifecycleManager, ToolCallHandler, PermissionManager, ClientRPCHandler).
 
     Если передан agent_orchestrator, обрабатывает промпт через LLM-агента.
-    В противном случае использует legacy директивы.
+    В противном случае использует legacy директивы для backward compatibility.
 
     Args:
         request_id: ID запроса
         params: Параметры запроса (sessionId, prompt, ...)
         sessions: Словарь активных сессий
-        config_specs: Спецификации конфигурационных опций
+        config_specs: Спецификации конфигурационных опций (не используется в orchestrator)
         agent_orchestrator: Оркестратор агента для обработки через LLM (опционально)
 
+    Returns:
+        ProtocolOutcome с notifications и response
+
     Пример использования:
-        outcome = session_prompt("req_1", {"sessionId": "sess_1", "prompt": []}, sessions, specs)
+        outcome = await session_prompt(
+            "req_1", {"sessionId": "sess_1", "prompt": []}, sessions, specs
+        )
     """
 
+    # === ЭТАП 1: Валидация входных параметров ===
     session_id = params.get("sessionId")
     prompt = params.get("prompt")
 
@@ -346,15 +355,38 @@ async def session_prompt(
     if content_error is not None:
         return ProtocolOutcome(response=content_error)
 
-    # Если передан agent_orchestrator, обработать промпт через LLM-агента
+    # === ЭТАП 2: Обработка через PromptOrchestrator ===
+    
+    # Если передан agent_orchestrator, использовать оркестратор для полной обработки
     if agent_orchestrator is not None:
-        return await _handle_with_agent(
-            request_id=request_id,
-            params=params,
-            session=session,
-            sessions=sessions,
-            agent_orchestrator=agent_orchestrator,
-        )
+        orchestrator = create_prompt_orchestrator()
+        try:
+            outcome = await orchestrator.handle_prompt(
+                request_id=request_id,
+                params=params,
+                session=session,
+                sessions=sessions,
+                agent_orchestrator=agent_orchestrator,
+            )
+            logger.debug(
+                "prompt handled via orchestrator",
+                session_id=session_id,
+                notifications_count=len(outcome.notifications),
+            )
+            return outcome
+        except Exception as e:
+            logger.error(
+                "orchestrator handle_prompt failed",
+                session_id=session_id,
+                error=str(e),
+            )
+            return ProtocolOutcome(
+                response=ACPMessage.error_response(
+                    request_id,
+                    code=-32603,
+                    message=f"Internal error: {str(e)}",
+                )
+            )
 
     if session.active_turn is not None:
         return ProtocolOutcome(
@@ -645,87 +677,74 @@ def session_cancel(
     params: dict[str, Any],
     sessions: dict[str, SessionState],
 ) -> ProtocolOutcome:
-    """Отменяет текущий turn сессии и активные tool calls.
+    """Отменяет текущий turn сессии через PromptOrchestrator.
+
+    Этап 5: Глубокая интеграция оркестратора.
+
+    Метод обрабатывает отмену через PromptOrchestrator.handle_cancel(),
+    который управляет отменой всех активных операций, tool calls,
+    permission requests и client RPC операций.
 
     Если запрос пришел как notification (без `id`), response не возвращается.
+
+    Args:
+        request_id: ID запроса (может быть None для notifications)
+        params: Параметры запроса (должны содержать sessionId)
+        sessions: Словарь активных сессий
+
+    Returns:
+        ProtocolOutcome с notifications об отмене
 
     Пример использования:
         outcome = session_cancel(None, {"sessionId": "sess_1"}, sessions)
     """
 
     session_id = params.get("sessionId")
-    notifications: list[ACPMessage] = []
-    if isinstance(session_id, str) and session_id in sessions:
-        session = sessions[session_id]
-        if (
-            session.active_turn is not None
-            and session.active_turn.permission_request_id is not None
-        ):
-            # Фиксируем отмененный permission-request, чтобы его поздний
-            # response не мог повлиять на последующие turn-циклы.
-            session.cancelled_permission_requests.add(session.active_turn.permission_request_id)
-        if (
-            session.active_turn is not None
-            and session.active_turn.pending_client_request is not None
-        ):
-            session.cancelled_client_rpc_requests.add(
-                session.active_turn.pending_client_request.request_id
-            )
-        pending = (
-            session.active_turn.pending_client_request if session.active_turn is not None else None
-        )
-        if pending is not None and pending.terminal_id is not None:
-            # Для terminal-flow отправляем best-effort cleanup перед завершением turn.
-            notifications.append(
-                ACPMessage.request(
-                    "terminal/kill",
-                    {
-                        "sessionId": session_id,
-                        "terminalId": pending.terminal_id,
-                    },
-                )
-            )
-            notifications.append(
-                ACPMessage.request(
-                    "terminal/release",
-                    {
-                        "sessionId": session_id,
-                        "terminalId": pending.terminal_id,
-                    },
-                )
-            )
-        cancelled_prompt_response = finalize_active_turn(
-            session=session,
-            stop_reason="cancelled",
-        )
-        # При отмене переводим все незавершенные tool calls в `cancelled`.
-        notifications.extend(cancel_active_tool_calls(session=session, session_id=session_id))
-        session.updated_at = datetime.now(UTC).isoformat()
-        notifications.append(
-            session_info_notification(
-                session_id=session_id,
-                title=None,
-                updated_at=session.updated_at,
-            )
-        )
-        followup_responses: list[ACPMessage] = []
-        if cancelled_prompt_response is not None:
-            followup_responses.append(cancelled_prompt_response)
-    else:
-        followup_responses = []
-
-    if request_id is None:
+    
+    # Проверить, что sessionId передан и сессия существует
+    if not isinstance(session_id, str) or session_id not in sessions:
+        # Если sessionId невалиден или сессия не найдена, вернуть пустой результат
+        if request_id is None:
+            return ProtocolOutcome(response=None, notifications=[])
         return ProtocolOutcome(
-            response=None,
-            notifications=notifications,
-            followup_responses=followup_responses,
+            response=ACPMessage.response(request_id, None),
+            notifications=[],
         )
-
-    return ProtocolOutcome(
-        response=ACPMessage.response(request_id, None),
-        notifications=notifications,
-        followup_responses=followup_responses,
-    )
+    
+    session = sessions[session_id]
+    
+    # === ЭТАП 1: Использовать PromptOrchestrator для обработки отмены ===
+    orchestrator = create_prompt_orchestrator()
+    try:
+        outcome = orchestrator.handle_cancel(
+            request_id=request_id,
+            params=params,
+            session=session,
+            sessions=sessions,
+        )
+        logger.debug(
+            "cancel handled via orchestrator",
+            session_id=session_id,
+            notifications_count=len(outcome.notifications),
+        )
+        return outcome
+    except Exception as e:
+        logger.error(
+            "orchestrator handle_cancel failed",
+            session_id=session_id,
+            error=str(e),
+        )
+        # Вернуть ошибку или пустой результат в зависимости от типа запроса
+        if request_id is None:
+            return ProtocolOutcome(response=None, notifications=[])
+        return ProtocolOutcome(
+            response=ACPMessage.error_response(
+                request_id,
+                code=-32603,
+                message=f"Internal error: {str(e)}",
+            ),
+            notifications=[],
+        )
 
 
 def complete_active_turn(
