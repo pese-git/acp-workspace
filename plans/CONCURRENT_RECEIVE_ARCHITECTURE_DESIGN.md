@@ -1,5 +1,22 @@
 # Архитектурное решение: Message Routing для Concurrent Receive()
 
+---
+**Статус:** ✅ РЕАЛИЗОВАНО (100%)  
+**Дата завершения:** 13 апреля 2026  
+**Связанные компоненты:**
+- [`acp-client/src/acp_client/infrastructure/services/background_receive_loop.py`](../../acp-client/src/acp_client/infrastructure/services/background_receive_loop.py)
+- [`acp-client/src/acp_client/infrastructure/services/acp_transport_service.py`](../../acp-client/src/acp_client/infrastructure/services/acp_transport_service.py)
+- [`acp-client/src/acp_client/infrastructure/services/message_router.py`](../../acp-client/src/acp_client/infrastructure/services/message_router.py)
+- [`acp-client/src/acp_client/infrastructure/services/routing_queues.py`](../../acp-client/src/acp_client/infrastructure/services/routing_queues.py)
+
+**Связанные тесты:**
+- [`acp-client/tests/test_concurrent_receive_calls.py`](../../acp-client/tests/test_concurrent_receive_calls.py)
+- [`acp-client/tests/test_background_receive_loop.py`](../../acp-client/tests/test_background_receive_loop.py)
+- [`acp-client/tests/test_message_router.py`](../../acp-client/tests/test_message_router.py)
+- [`acp-client/tests/test_routing_queues.py`](../../acp-client/tests/test_routing_queues.py)
+
+---
+
 ## Проблема (Проблема со Race Condition)
 
 ```

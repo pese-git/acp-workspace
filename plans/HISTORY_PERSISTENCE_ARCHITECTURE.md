@@ -1,5 +1,22 @@
 # Архитектура персистентности истории переписки
 
+---
+**Статус:** ✅ РЕАЛИЗОВАНО (95%)  
+**Дата завершения:** 13 апреля 2026  
+**Что осталось:** End-to-end тест с перезапуском сервера для валидации полной восстановление истории  
+
+**Связанные компоненты:**
+- [`acp-server/src/acp_server/storage/json_file.py`](../../acp-server/src/acp_server/storage/json_file.py)
+- [`acp-server/src/acp_server/protocol/state.py`](../../acp-server/src/acp_server/protocol/state.py)
+- [`acp-client/src/acp_client/application/session_coordinator.py`](../../acp-client/src/acp_client/application/session_coordinator.py)
+
+**Связанные тесты:**
+- [`acp-server/tests/test_storage_json_file.py`](../../acp-server/tests/test_storage_json_file.py)
+- [`acp-server/tests/test_end_to_end_with_storage.py`](../../acp-server/tests/test_end_to_end_with_storage.py)
+- [`acp-client/tests/test_application_load_session_use_case.py`](../../acp-client/tests/test_application_load_session_use_case.py)
+
+---
+
 ## Требование
 
 После перезапуска клиента или переключения сессии пользователь должен видеть:
