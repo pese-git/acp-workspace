@@ -382,6 +382,11 @@ class LoadSessionUseCase(UseCase):
         def handle_update(update_data: dict[str, Any]) -> None:
             """Собирает `session/update` во время `session/load` для UI-реплея."""
 
+            self._logger.debug(
+                "load_session_update_received",
+                update_type=update_data.get("params", {}).get("update", {}).get("sessionUpdate"),
+                total_updates=len(replay_updates) + 1,
+            )
             replay_updates.append(update_data)
 
         load_cwd = request.cwd or str(Path.cwd())

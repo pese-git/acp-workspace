@@ -412,6 +412,12 @@ class ChatViewModel(BaseViewModel):
             replay_updates: Список raw-уведомлений `session/update`
         """
 
+        self.logger.info(
+            "restore_session_from_replay_started",
+            session_id=session_id,
+            replay_updates_count=len(replay_updates),
+        )
+
         # Полная пересборка сообщений из server-side истории исключает
         # зависимость от локального history-кэша клиента.
         rebuilt_messages: list[dict[str, str]] = []
@@ -451,6 +457,13 @@ class ChatViewModel(BaseViewModel):
             self.messages.value = list(rebuilt_messages)
             self.streaming_text.value = ""
             self.is_streaming.value = False
+
+        self.logger.info(
+            "restore_session_from_replay_completed",
+            session_id=session_id,
+            rebuilt_messages_count=len(rebuilt_messages),
+            is_active_session=self._active_session_id == session_id,
+        )
 
     def _persist_active_state(self) -> None:
         """Сохраняет текущее состояние чата для активной сессии."""

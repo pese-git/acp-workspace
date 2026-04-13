@@ -512,7 +512,7 @@ class ACPTransportService(TransportService):
                         response_data = response_task.result()
                         response = ACPMessage.from_dict(response_data)
 
-                        # Если это ответ на наш запрос - возвращаем результат
+                        # Если это ответ на наш запрос - обрабатываем оставшиеся уведомления и возвращаем результат
                         if response.id == request.id:
                             if response.error is not None:
                                 self._logger.error(
@@ -521,6 +521,40 @@ class ACPTransportService(TransportService):
                                     error_code=response.error.code,
                                     error_message=response.error.message,
                                 )
+                            
+                            # КРИТИЧНО: Обработать все оставшиеся уведомления из очереди
+                            # Они могли прийти до финального response и остаться необработанными
+                            remaining_notifications = 0
+                            while not self._queues.notification_queue.empty():
+                                try:
+                                    notification_data = self._queues.notification_queue.get_nowait()
+                                    notification = ACPMessage.from_dict(notification_data)
+                                    remaining_notifications += 1
+                                    
+                                    if notification.method == "session/update" and on_update is not None:
+                                        self._logger.debug(
+                                            "handling_remaining_session_update",
+                                            method=method,
+                                            request_id=request.id,
+                                            remaining_count=remaining_notifications,
+                                        )
+                                        on_update(notification_data)
+                                except asyncio.QueueEmpty:
+                                    break
+                                except Exception as e:
+                                    self._logger.warning(
+                                        "error_processing_remaining_notification",
+                                        error=str(e),
+                                    )
+                            
+                            if remaining_notifications > 0:
+                                self._logger.info(
+                                    "processed_remaining_notifications",
+                                    method=method,
+                                    request_id=request.id,
+                                    count=remaining_notifications,
+                                )
+                            
                             self._logger.info(
                                 "request_completed",
                                 method=method,
@@ -549,8 +583,19 @@ class ACPTransportService(TransportService):
                             notification.method == "session/update"
                             and on_update is not None
                         ):
-                            self._logger.debug("handling_session_update")
+                            self._logger.debug(
+                                "handling_session_update",
+                                method=method,
+                                request_id=request.id,
+                                has_callback=on_update is not None,
+                            )
                             on_update(notification_data)
+                        elif notification.method == "session/update" and on_update is None:
+                            self._logger.warning(
+                                "session_update_received_but_no_callback",
+                                method=method,
+                                request_id=request.id,
+                            )
 
                         elif (
                             notification.method == "session/request_permission"
