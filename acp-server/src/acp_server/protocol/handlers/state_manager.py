@@ -65,7 +65,11 @@ class StateManager:
             prompt: Массив content blocks из request
         """
         # Добавляем полный prompt как запись истории
-        history_entry = {"role": "user", "content": prompt}
+        history_entry = {
+            "role": "user",
+            "content": prompt,
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
         sanitized = _sanitize_history_entry(history_entry)
         if sanitized is not None:
             session.history.append(sanitized)
@@ -88,9 +92,17 @@ class StateManager:
         """
         # Нормализуем content - может быть строка или dict
         if isinstance(content, str):
-            history_entry = {"role": "assistant", "text": content}
+            history_entry = {
+                "role": "assistant",
+                "text": content,
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
         else:
-            history_entry = {"role": "assistant", "content": content}
+            history_entry = {
+                "role": "assistant",
+                "content": content,
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
 
         sanitized = _sanitize_history_entry(history_entry)
         if sanitized is not None:
