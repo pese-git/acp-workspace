@@ -67,7 +67,7 @@ class ACPTransportService(TransportService):
         self._transport: WebSocketTransport | None = None
         # Сохраняем server capabilities после инициализации
         self._server_capabilities: dict[str, Any] | None = None
-        
+
         # Infrastructure для управления конкурентными вызовами receive()
         # Background Receive Loop: единственный вызов receive() на WebSocket
         self._background_loop: BackgroundReceiveLoop | None = None
@@ -75,7 +75,11 @@ class ACPTransportService(TransportService):
         self._router: MessageRouter | None = None
         # Routing Queues: распределение по очередям
         self._queues: RoutingQueues | None = None
-        
+        # Глобальная блокировка для request_with_callbacks.
+        # Нужна, чтобы разные callback-запросы не конкурировали за
+        # общую notification_queue и не теряли session/update события.
+        self._callbacks_request_lock = asyncio.Lock()
+
         self._logger = structlog.get_logger("acp_transport_service")
 
     async def __aenter__(self) -> ACPTransportService:
@@ -130,7 +134,7 @@ class ACPTransportService(TransportService):
             # Вызов __aenter__() устанавливает _ws и _http_session
             # При переподключении это переиспользует существующий объект
             await self._transport.__aenter__()
-            
+
             # Инициализируем routing infrastructure
             self._router = MessageRouter()
             self._queues = RoutingQueues()
@@ -139,10 +143,10 @@ class ACPTransportService(TransportService):
                 self._router,
                 self._queues,
             )
-            
+
             # Запускаем background loop - единственный вызов receive() на WebSocket
             await self._background_loop.start()
-            
+
             self._logger.info(
                 "connected_to_server",
                 host=self.host,
@@ -174,23 +178,23 @@ class ACPTransportService(TransportService):
 
         try:
             self._logger.debug("closing_connection", host=self.host, port=self.port)
-            
+
             # Сначала останавливаем background loop - это главное
             # Иначе он будет пытаться читать из закрытого транспорта
             if self._background_loop is not None:
                 self._logger.debug("stopping_background_loop")
                 await self._background_loop.stop()
-            
+
             # Очищаем очереди чтобы разбудить все ждущие операции
             if self._queues is not None:
                 await self._queues.clear_all()
-            
+
             # Потом закрываем транспорт
             # Правильно вызываем __aexit__ для корректного закрытия соединения
             # Это завершает context manager и освобождает все ресурсы
             if self._transport is not None:
                 await self._transport.__aexit__(None, None, None)
-            
+
             self._logger.info("connection_closed", host=self.host, port=self.port)
         except Exception as e:
             self._logger.warning("disconnect_error", error=str(e), host=self.host, port=self.port)
@@ -459,182 +463,207 @@ class ACPTransportService(TransportService):
             self._logger.error("queues_not_initialized")
             raise RuntimeError(msg)
 
-        self._logger.info(
-            "request_with_callbacks_start",
-            method=method,
-            has_callbacks=any([on_update, on_permission, on_fs_read, on_fs_write]),
-        )
-
-        try:
-            # Создаем JSON-RPC запрос
-            request = ACPMessage.request(method=method, params=params)
-            request_data = request.to_dict()
-
-            # Создаем очередь для этого request_id
-            # Background loop будет класть ответы в эту очередь
-            response_queue = await self._queues.get_or_create_response_queue(request.id)
-
-            # Отправляем запрос (через send который имеет собственную защиту переподключения)
-            await self.send(request_data)
-
-            self._logger.debug(
-                "request_sent",
+        async with self._callbacks_request_lock:
+            should_listen_notifications = any(
+                [
+                    on_update,
+                    on_permission,
+                    on_fs_read,
+                    on_fs_write,
+                    on_terminal_create,
+                    on_terminal_output,
+                    on_terminal_wait,
+                    on_terminal_release,
+                    on_terminal_kill,
+                ]
+            )
+            self._logger.info(
+                "request_with_callbacks_start",
                 method=method,
-                request_id=request.id,
+                has_callbacks=should_listen_notifications,
             )
 
-            # Получаем ответы, обрабатывая промежуточные события
-            # Используем asyncio.wait для ожидания нескольких очередей одновременно
-            while True:
-                # Создаем задачи для ожидания из разных очередей
-                response_task = asyncio.create_task(
-                    asyncio.wait_for(response_queue.get(), timeout=300.0)
+            try:
+                # Создаем JSON-RPC запрос
+                request = ACPMessage.request(method=method, params=params)
+                request_data = request.to_dict()
+
+                # Создаем очередь для этого request_id.
+                # Background loop будет класть ответы в эту очередь.
+                response_queue = await self._queues.get_or_create_response_queue(request.id)
+
+                # Отправляем запрос (через send с защитой переподключения).
+                await self.send(request_data)
+
+                self._logger.debug(
+                    "request_sent",
+                    method=method,
+                    request_id=request.id,
                 )
-                notification_task = asyncio.create_task(
-                    asyncio.wait_for(self._queues.notification_queue.get(), timeout=0.1)
-                )
 
-                # Ждем первого результата
-                done, pending = await asyncio.wait(
-                    [response_task, notification_task],
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
+                # Получаем ответы, обрабатывая промежуточные события.
+                # Используем asyncio.wait для ожидания нескольких очередей одновременно.
+                while True:
+                    # Создаем задачи для ожидания из разных очередей.
+                    response_task = asyncio.create_task(
+                        asyncio.wait_for(response_queue.get(), timeout=300.0)
+                    )
+                    notification_task: asyncio.Task[dict[str, Any]] | None = None
+                    if should_listen_notifications:
+                        notification_task = asyncio.create_task(
+                            asyncio.wait_for(self._queues.notification_queue.get(), timeout=0.1)
+                        )
 
-                # Отменяем оставшиеся задачи
-                for task in pending:
-                    task.cancel()
-                    with contextlib.suppress(asyncio.CancelledError):
-                        await task
+                    # Ждем первого результата.
+                    done, pending = await asyncio.wait(
+                        [response_task]
+                        if notification_task is None
+                        else [response_task, notification_task],
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
 
-                # Проверяем результат от response queue
-                if response_task in done:
-                    try:
-                        response_data = response_task.result()
-                        response = ACPMessage.from_dict(response_data)
+                    # Отменяем оставшиеся задачи.
+                    for task in pending:
+                        task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await task
 
-                        # Если это ответ на наш запрос - обрабатываем оставшиеся уведомления и возвращаем результат
-                        if response.id == request.id:
-                            if response.error is not None:
-                                self._logger.error(
-                                    "request_error",
-                                    method=method,
-                                    error_code=response.error.code,
-                                    error_message=response.error.message,
-                                )
-                            
-                            # КРИТИЧНО: Обработать все оставшиеся уведомления из очереди
-                            # Они могли прийти до финального response и остаться необработанными
-                            remaining_notifications = 0
-                            while not self._queues.notification_queue.empty():
-                                try:
-                                    notification_data = self._queues.notification_queue.get_nowait()
-                                    notification = ACPMessage.from_dict(notification_data)
-                                    remaining_notifications += 1
-                                    
-                                    if notification.method == "session/update" and on_update is not None:
-                                        self._logger.debug(
-                                            "handling_remaining_session_update",
-                                            method=method,
-                                            request_id=request.id,
-                                            remaining_count=remaining_notifications,
-                                        )
-                                        on_update(notification_data)
-                                except asyncio.QueueEmpty:
-                                    break
-                                except Exception as e:
-                                    self._logger.warning(
-                                        "error_processing_remaining_notification",
-                                        error=str(e),
-                                    )
-                            
-                            if remaining_notifications > 0:
-                                self._logger.info(
-                                    "processed_remaining_notifications",
+                    # Сначала обрабатываем notification, если она уже получена.
+                    # Это предотвращает потерю события в кейсе, когда response
+                    # и notification завершаются одновременно.
+                    if notification_task is not None and notification_task in done:
+                        try:
+                            notification_data = notification_task.result()
+                            notification = ACPMessage.from_dict(notification_data)
+
+                            # Обрабатываем асинхронные события.
+                            if notification.method == "session/update" and on_update is not None:
+                                self._logger.debug(
+                                    "handling_session_update",
                                     method=method,
                                     request_id=request.id,
-                                    count=remaining_notifications,
+                                    has_callback=on_update is not None,
                                 )
-                            
-                            self._logger.info(
-                                "request_completed",
+                                on_update(notification_data)
+                            elif notification.method == "session/update" and on_update is None:
+                                self._logger.warning(
+                                    "session_update_received_but_no_callback",
+                                    method=method,
+                                    request_id=request.id,
+                                )
+
+                            elif (
+                                notification.method == "session/request_permission"
+                                and on_permission is not None
+                            ):
+                                self._logger.debug("handling_permission_request")
+                                permission_response = on_permission(notification_data)
+                                # Отправляем ответ на permission запрос.
+                                permission_reply = ACPMessage.response(
+                                    notification.id,
+                                    (
+                                        {"permission": permission_response}
+                                        if permission_response
+                                        else {}
+                                    ),
+                                )
+                                await self.send(permission_reply.to_dict())
+
+                            # Продолжаем ждать ответа на наш запрос.
+                        except TimeoutError:
+                            # Таймаут при ожидании уведомления — нормально.
+                            pass
+                        except Exception:
+                            # Игнорируем ошибки обработки уведомлений.
+                            pass
+
+                    # Проверяем результат от response queue.
+                    if response_task in done:
+                        try:
+                            response_data = response_task.result()
+                            response = ACPMessage.from_dict(response_data)
+
+                            # Если это ответ на наш запрос, обрабатываем оставшиеся
+                            # уведомления и возвращаем результат.
+                            if response.id == request.id:
+                                if response.error is not None:
+                                    self._logger.error(
+                                        "request_error",
+                                        method=method,
+                                        error_code=response.error.code,
+                                        error_message=response.error.message,
+                                    )
+
+                                # Обрабатываем уведомления после финального ответа.
+                                # Небольшой grace period нужен, чтобы забрать события,
+                                # которые могли прийти сразу после response и попасть
+                                # в очередь чуть позже этой проверки.
+                                remaining_notifications = 0
+                                while True:
+                                    try:
+                                        notification_data = await asyncio.wait_for(
+                                            self._queues.notification_queue.get(),
+                                            timeout=0.2,
+                                        )
+                                        notification = ACPMessage.from_dict(notification_data)
+                                        remaining_notifications += 1
+
+                                        if (
+                                            notification.method == "session/update"
+                                            and on_update is not None
+                                        ):
+                                            self._logger.debug(
+                                                "handling_remaining_session_update",
+                                                method=method,
+                                                request_id=request.id,
+                                                remaining_count=remaining_notifications,
+                                            )
+                                            on_update(notification_data)
+                                    except TimeoutError:
+                                        break
+                                    except Exception as e:
+                                        self._logger.warning(
+                                            "error_processing_remaining_notification",
+                                            error=str(e),
+                                        )
+
+                                if remaining_notifications > 0:
+                                    self._logger.info(
+                                        "processed_remaining_notifications",
+                                        method=method,
+                                        request_id=request.id,
+                                        count=remaining_notifications,
+                                    )
+
+                                self._logger.info(
+                                    "request_completed",
+                                    method=method,
+                                    request_id=request.id,
+                                )
+                                return response_data
+                        except TimeoutError:
+                            self._logger.error(
+                                "request_timeout",
                                 method=method,
                                 request_id=request.id,
                             )
-                            return response_data
-                    except TimeoutError:
-                        self._logger.error(
-                            "request_timeout",
-                            method=method,
-                            request_id=request.id,
-                        )
-                        raise RuntimeError(f"Request {request.id} timed out") from None
-                    except Exception:
-                        # Продолжаем если была ошибка
-                        pass
+                            raise RuntimeError(f"Request {request.id} timed out") from None
+                        except Exception:
+                            # Продолжаем если была ошибка.
+                            pass
 
-                # Проверяем результат от notification queue
-                if notification_task in done:
-                    try:
-                        notification_data = notification_task.result()
-                        notification = ACPMessage.from_dict(notification_data)
-
-                        # Обрабатываем асинхронные события
-                        if (
-                            notification.method == "session/update"
-                            and on_update is not None
-                        ):
-                            self._logger.debug(
-                                "handling_session_update",
-                                method=method,
-                                request_id=request.id,
-                                has_callback=on_update is not None,
-                            )
-                            on_update(notification_data)
-                        elif notification.method == "session/update" and on_update is None:
-                            self._logger.warning(
-                                "session_update_received_but_no_callback",
-                                method=method,
-                                request_id=request.id,
-                            )
-
-                        elif (
-                            notification.method == "session/request_permission"
-                            and on_permission is not None
-                        ):
-                            self._logger.debug("handling_permission_request")
-                            permission_response = on_permission(notification_data)
-                            # Отправляем ответ на permission запрос
-                            permission_reply = ACPMessage.response(
-                                notification.id,
-                                (
-                                    {"permission": permission_response}
-                                    if permission_response
-                                    else {}
-                                ),
-                            )
-                            await self.send(permission_reply.to_dict())
-
-                        # Продолжаем ждать ответа на наш запрос
-                    except TimeoutError:
-                        # Таймаут при ожидании уведомления - это нормально
-                        # Продолжаем ждать ответ на основной запрос
-                        pass
-                    except Exception:
-                        # Игнорируем ошибки обработки уведомлений
-                        pass
-
-        except Exception as e:
-            self._logger.error(
-                "request_failed",
-                method=method,
-                request_id=request.id if "request" in locals() else None,
-                error=str(e),
-            )
-            raise
-        finally:
-            # Очищаем очередь ответов после использования
-            if "request" in locals() and self._queues is not None:
-                await self._queues.cleanup_response_queue(request.id)
+            except Exception as e:
+                self._logger.error(
+                    "request_failed",
+                    method=method,
+                    request_id=request.id if "request" in locals() else None,
+                    error=str(e),
+                )
+                raise
+            finally:
+                # Очищаем очередь ответов после использования.
+                if "request" in locals() and self._queues is not None:
+                    await self._queues.cleanup_response_queue(request.id)
 
     def cleanup(self) -> None:
         """Очищает ресурсы синхронно (вызывается DI контейнером).

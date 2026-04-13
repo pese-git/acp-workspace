@@ -382,9 +382,20 @@ class LoadSessionUseCase(UseCase):
         def handle_update(update_data: dict[str, Any]) -> None:
             """Собирает `session/update` во время `session/load` для UI-реплея."""
 
+            params_data = update_data.get("params", {})
+            incoming_session_id = params_data.get("sessionId")
+            if incoming_session_id != request.session_id:
+                self._logger.debug(
+                    "load_session_update_skipped_foreign_session",
+                    expected_session_id=request.session_id,
+                    actual_session_id=incoming_session_id,
+                    update_type=params_data.get("update", {}).get("sessionUpdate"),
+                )
+                return
+
             self._logger.debug(
                 "load_session_update_received",
-                update_type=update_data.get("params", {}).get("update", {}).get("sessionUpdate"),
+                update_type=params_data.get("update", {}).get("sessionUpdate"),
                 total_updates=len(replay_updates) + 1,
             )
             replay_updates.append(update_data)

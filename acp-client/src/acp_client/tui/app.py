@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 
@@ -92,6 +93,10 @@ class ACPClientApp(App[None]):
 
         # NavigationManager будет инициализирован в on_mount
         self._navigation_manager: NavigationManager | None = None
+
+        # Блокировка предотвращает параллельные `session/load`, которые могут
+        # перемешивать `session/update` между конкурентными запросами.
+        self._session_history_load_lock = asyncio.Lock()
 
         # Инициализируем DIContainer
         try:
@@ -325,34 +330,35 @@ class ACPClientApp(App[None]):
     async def _load_selected_session_history(self, session_id: str) -> None:
         """Загружает историю выбранной сессии через `session/load`."""
 
-        try:
-            from acp_client.application.session_coordinator import SessionCoordinator
+        async with self._session_history_load_lock:
+            try:
+                from acp_client.application.session_coordinator import SessionCoordinator
 
-            coordinator = self._container.resolve(SessionCoordinator)
-            loaded = await coordinator.load_session(
-                session_id,
-                self._host,
-                self._port,
-                cwd=self._cwd,
-                mcp_servers=[],
-            )
-            replay_updates = loaded.get("replay_updates", [])
-            if isinstance(replay_updates, list):
-                self._chat_vm.restore_session_from_replay(session_id, replay_updates)
+                coordinator = self._container.resolve(SessionCoordinator)
+                loaded = await coordinator.load_session(
+                    session_id,
+                    self._host,
+                    self._port,
+                    cwd=self._cwd,
+                    mcp_servers=[],
+                )
+                replay_updates = loaded.get("replay_updates", [])
+                if isinstance(replay_updates, list):
+                    self._chat_vm.restore_session_from_replay(session_id, replay_updates)
 
-            self._app_logger.info(
-                "session_history_loaded",
-                session_id=session_id,
-                replay_updates_count=(
-                    len(replay_updates) if isinstance(replay_updates, list) else 0
-                ),
-            )
-        except Exception as error:
-            self._app_logger.warning(
-                "session_history_load_failed",
-                session_id=session_id,
-                error=str(error),
-            )
+                self._app_logger.info(
+                    "session_history_loaded",
+                    session_id=session_id,
+                    replay_updates_count=(
+                        len(replay_updates) if isinstance(replay_updates, list) else 0
+                    ),
+                )
+            except Exception as error:
+                self._app_logger.warning(
+                    "session_history_load_failed",
+                    session_id=session_id,
+                    error=str(error),
+                )
 
     async def on_unmount(self) -> None:
         """Очистка ресурсов при завершении приложения."""

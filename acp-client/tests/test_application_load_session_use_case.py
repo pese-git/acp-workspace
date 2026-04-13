@@ -123,6 +123,85 @@ class TestLoadSessionUseCase:
             )
 
     @pytest.mark.asyncio
+    async def test_execute_ignores_updates_for_other_sessions(self) -> None:
+        """UseCase игнорирует `session/update` не из запрошенной сессии."""
+
+        transport = AsyncMock()
+        session_repo = AsyncMock()
+        use_case = LoadSessionUseCase(transport=transport, session_repo=session_repo)
+
+        session_repo.load.return_value = Session.create(
+            server_host="127.0.0.1",
+            server_port=8765,
+            client_capabilities={},
+            server_capabilities={"sessionCapabilities": {"load": True}},
+            session_id="sess_target",
+        )
+        transport.is_initialized = Mock(return_value=True)
+        transport.is_connected = Mock(return_value=True)
+
+        async def request_with_callbacks_side_effect(
+            *,
+            method: str,
+            params: dict[str, object],
+            on_update,
+            **_: object,
+        ) -> dict[str, object]:
+            """Имитирует mixed updates для разных sessionId."""
+
+            on_update(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "session/update",
+                    "params": {
+                        "sessionId": "sess_other",
+                        "update": {
+                            "sessionUpdate": "user_message_chunk",
+                            "content": {"type": "text", "text": "foreign"},
+                        },
+                    },
+                }
+            )
+            on_update(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "session/update",
+                    "params": {
+                        "sessionId": "sess_target",
+                        "update": {
+                            "sessionUpdate": "user_message_chunk",
+                            "content": {"type": "text", "text": "local"},
+                        },
+                    },
+                }
+            )
+
+            assert method == "session/load"
+            assert params["sessionId"] == "sess_target"
+            return {
+                "jsonrpc": "2.0",
+                "id": "req_1",
+                "result": {
+                    "configOptions": [],
+                    "modes": {"availableModes": [], "currentModeId": "ask"},
+                },
+            }
+
+        transport.request_with_callbacks.side_effect = request_with_callbacks_side_effect
+
+        response = await use_case.execute(
+            LoadSessionRequest(
+                session_id="sess_target",
+                server_host="127.0.0.1",
+                server_port=8765,
+                cwd="/tmp",
+            )
+        )
+
+        assert len(response.replay_updates) == 1
+        assert response.replay_updates[0]["params"]["sessionId"] == "sess_target"
+
+    @pytest.mark.asyncio
     async def test_execute_creates_shadow_session_when_repo_is_empty(self) -> None:
         """UseCase создает локальную shadow-сессию, если ее нет в repository."""
 

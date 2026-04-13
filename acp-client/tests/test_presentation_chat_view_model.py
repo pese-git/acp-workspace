@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from acp_client.infrastructure.events.bus import EventBus
@@ -234,3 +236,87 @@ def test_chat_history_is_persisted_to_local_storage(tmp_path) -> None:
     second_vm.set_active_session("sess_local")
 
     assert second_vm.messages.value == [{"role": "user", "content": "persist me"}]
+
+
+def test_message_with_explicit_session_id_is_persisted(tmp_path) -> None:
+    """Сообщение с explicit session_id сразу сохраняется в локальный storage."""
+
+    history_dir = tmp_path / "history"
+
+    first_vm = ChatViewModel(
+        coordinator=None,
+        event_bus=EventBus(),
+        logger=None,
+        history_dir=history_dir,
+    )
+    first_vm.set_active_session("sess_explicit")
+    first_vm.add_message("user", "save immediately", session_id="sess_explicit")
+
+    second_vm = ChatViewModel(
+        coordinator=None,
+        event_bus=EventBus(),
+        logger=None,
+        history_dir=history_dir,
+    )
+    second_vm.set_active_session("sess_explicit")
+
+    assert second_vm.messages.value == [{"role": "user", "content": "save immediately"}]
+
+
+def test_restore_session_persists_all_replay_updates(tmp_path) -> None:
+    """В локальном кэше сохраняются все replay-события, а не только сообщения."""
+
+    history_dir = tmp_path / "history"
+    vm = ChatViewModel(
+        coordinator=None,
+        event_bus=EventBus(),
+        logger=None,
+        history_dir=history_dir,
+    )
+    vm.set_active_session("sess_events")
+
+    replay_updates = [
+        {
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": "sess_events",
+                "update": {
+                    "sessionUpdate": "user_message_chunk",
+                    "content": {"type": "text", "text": "hello"},
+                },
+            },
+        },
+        {
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": "sess_events",
+                "update": {
+                    "sessionUpdate": "tool_call",
+                    "toolUseId": "tool_1",
+                    "title": "Read file",
+                },
+            },
+        },
+        {
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": "sess_events",
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {"type": "text", "text": "world"},
+                },
+            },
+        },
+    ]
+
+    vm.restore_session_from_replay("sess_events", replay_updates)
+
+    cache_payload = json.loads((history_dir / "sess_events.json").read_text(encoding="utf-8"))
+    cached_replay_updates = cache_payload.get("replay_updates")
+
+    assert isinstance(cached_replay_updates, list)
+    assert len(cached_replay_updates) == 3
+    assert cached_replay_updates[1]["params"]["update"]["sessionUpdate"] == "tool_call"

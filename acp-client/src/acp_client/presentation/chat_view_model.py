@@ -37,6 +37,7 @@ class ChatSessionState:
     streaming_text: str
     is_streaming: bool
     last_stop_reason: str | None
+    replay_updates: list[dict[str, Any]]
 
 
 class ChatViewModel(BaseViewModel):
@@ -173,6 +174,11 @@ class ChatViewModel(BaseViewModel):
                 session_state.streaming_text = ""
                 session_state.is_streaming = False
                 self._session_states[session_id] = session_state
+                self._persist_messages_to_local_storage(
+                    session_id,
+                    session_state.messages,
+                    replay_updates=session_state.replay_updates,
+                )
                 if self._active_session_id == session_id:
                     self.messages.value = list(session_state.messages)
                     self.streaming_text.value = ""
@@ -206,6 +212,21 @@ class ChatViewModel(BaseViewModel):
             update = params.get("update", {})
             session_update_type = update.get("sessionUpdate")
             session_id = params.get("sessionId")
+            target_session_id = (
+                session_id if isinstance(session_id, str) else self._active_session_id
+            )
+
+            # Кэшируем все session/update события, чтобы можно было восстановить
+            # состояние ChatView даже для типов обновлений, которые не рендерим как сообщения.
+            if target_session_id is not None:
+                state = self._get_or_create_session_state(target_session_id)
+                state.replay_updates.append(update_data)
+                self._session_states[target_session_id] = state
+                self._persist_messages_to_local_storage(
+                    target_session_id,
+                    state.messages,
+                    replay_updates=state.replay_updates,
+                )
 
             self.logger.debug(
                 "session_update_received",
@@ -220,9 +241,6 @@ class ChatViewModel(BaseViewModel):
 
                 if text:
                     # Добавляем текст в состояние той сессии, откуда пришёл update.
-                    target_session_id = (
-                        session_id if isinstance(session_id, str) else self._active_session_id
-                    )
                     if target_session_id is not None:
                         if self._is_system_ack_chunk(text):
                             self.add_message("system", text, session_id=target_session_id)
@@ -236,25 +254,24 @@ class ChatViewModel(BaseViewModel):
                 content = update.get("content", {})
                 text = content.get("text", "")
 
-                if text:
-                    # Определяем целевую сессию для обновления
-                    target_session_id = (
-                        session_id if isinstance(session_id, str) else self._active_session_id
+                if text and target_session_id is not None:
+                    # Добавляем сообщение пользователя в состояние сессии.
+                    state = self._get_or_create_session_state(target_session_id)
+                    state.messages.append({"role": "user", "content": text})
+                    self._session_states[target_session_id] = state
+
+                    # Синхронизируем с UI если это активная сессия.
+                    if self._active_session_id == target_session_id:
+                        self.messages.value = list(state.messages)
+
+                    # Сохраняем в локальное хранилище.
+                    self._persist_messages_to_local_storage(
+                        target_session_id,
+                        state.messages,
+                        replay_updates=state.replay_updates,
                     )
-                    if target_session_id is not None:
-                        # Добавляем сообщение пользователя в состояние сессии
-                        state = self._get_or_create_session_state(target_session_id)
-                        state.messages.append({"role": "user", "content": text})
-                        self._session_states[target_session_id] = state
 
-                        # Синхронизируем с UI если это активная сессия
-                        if self._active_session_id == target_session_id:
-                            self.messages.value = list(state.messages)
-
-                        # Сохраняем в локальное хранилище
-                        self._persist_messages_to_local_storage(target_session_id, state.messages)
-
-                        self.logger.debug("user_message_chunk_processed", text_length=len(text))
+                    self.logger.debug("user_message_chunk_processed", text_length=len(text))
 
             # Можно добавить обработку других типов: tool_call, plan_update и т.д.
 
@@ -367,6 +384,11 @@ class ChatViewModel(BaseViewModel):
             state = self._get_or_create_session_state(session_id)
             state.messages.append({"role": role, "content": content})
             self._session_states[session_id] = state
+            self._persist_messages_to_local_storage(
+                session_id,
+                state.messages,
+                replay_updates=state.replay_updates,
+            )
             if self._active_session_id == session_id:
                 self.messages.value = list(state.messages)
         else:
@@ -441,6 +463,7 @@ class ChatViewModel(BaseViewModel):
         # Полная пересборка сообщений из server-side истории исключает
         # зависимость от локального history-кэша клиента.
         rebuilt_messages: list[dict[str, str]] = []
+        session_replay_updates: list[dict[str, Any]] = []
 
         for idx, update_data in enumerate(replay_updates):
             params = update_data.get("params", {})
@@ -453,10 +476,12 @@ class ChatViewModel(BaseViewModel):
                 )
                 continue
 
+            session_replay_updates.append(update_data)
+
             update = params.get("update", {})
             update_type = update.get("sessionUpdate")
             content = update.get("content")
-            
+
             self.logger.debug(
                 "restore_processing_update",
                 idx=idx,
@@ -464,7 +489,7 @@ class ChatViewModel(BaseViewModel):
                 has_content=content is not None,
                 content_type=type(content).__name__ if content is not None else None,
             )
-            
+
             if not isinstance(content, dict):
                 self.logger.debug(
                     "restore_skipping_no_content",
@@ -501,14 +526,18 @@ class ChatViewModel(BaseViewModel):
                     text_length=len(text),
                 )
 
-
         # Записываем пересобранное состояние в кэш конкретной сессии.
         state = self._get_or_create_session_state(session_id)
         state.messages = rebuilt_messages
         state.streaming_text = ""
         state.is_streaming = False
+        state.replay_updates = session_replay_updates
         self._session_states[session_id] = state
-        self._persist_messages_to_local_storage(session_id, rebuilt_messages)
+        self._persist_messages_to_local_storage(
+            session_id,
+            rebuilt_messages,
+            replay_updates=session_replay_updates,
+        )
 
         # Если сессия активна в UI, синхронизируем observables сразу.
         if self._active_session_id == session_id:
@@ -529,6 +558,9 @@ class ChatViewModel(BaseViewModel):
         if self._active_session_id is None:
             return
 
+        existing_state = self._session_states.get(self._active_session_id)
+        replay_updates = [] if existing_state is None else list(existing_state.replay_updates)
+
         state = ChatSessionState(
             messages=list(self.messages.value),
             tool_calls=list(self.tool_calls.value),
@@ -536,11 +568,13 @@ class ChatViewModel(BaseViewModel):
             streaming_text=self.streaming_text.value,
             is_streaming=self.is_streaming.value,
             last_stop_reason=self.last_stop_reason.value,
+            replay_updates=replay_updates,
         )
         self._session_states[self._active_session_id] = state
         self._persist_messages_to_local_storage(
             self._active_session_id,
             state.messages,
+            replay_updates=state.replay_updates,
         )
 
     def _get_or_create_session_state(self, session_id: str) -> ChatSessionState:
@@ -551,6 +585,12 @@ class ChatViewModel(BaseViewModel):
             return state
 
         persisted_messages = self._load_messages_from_local_storage(session_id)
+        persisted_replay_updates = self._load_replay_updates_from_local_storage(session_id)
+        if persisted_replay_updates:
+            persisted_messages = self._rebuild_messages_from_replay(
+                session_id,
+                persisted_replay_updates,
+            )
 
         state = ChatSessionState(
             messages=persisted_messages,
@@ -559,6 +599,7 @@ class ChatViewModel(BaseViewModel):
             streaming_text="",
             is_streaming=False,
             last_stop_reason=None,
+            replay_updates=persisted_replay_updates,
         )
         self._session_states[session_id] = state
         return state
@@ -573,6 +614,7 @@ class ChatViewModel(BaseViewModel):
         self,
         session_id: str,
         messages: list[Any],
+        replay_updates: list[dict[str, Any]] | None = None,
     ) -> None:
         """Сохраняет сообщения сессии в локальный JSON storage."""
 
@@ -584,9 +626,14 @@ class ChatViewModel(BaseViewModel):
             and isinstance(message.get("content"), str)
         ]
         file_path = self._history_file_path(session_id)
+        payload: dict[str, Any] = {"messages": serializable_messages}
+        if replay_updates is not None:
+            payload["replay_updates"] = [
+                update for update in replay_updates if isinstance(update, dict)
+            ]
         try:
             file_path.write_text(
-                json.dumps({"messages": serializable_messages}, ensure_ascii=False, indent=2),
+                json.dumps(payload, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
         except OSError as error:
@@ -628,6 +675,62 @@ class ChatViewModel(BaseViewModel):
             if isinstance(role, str) and isinstance(content, str):
                 normalized_messages.append({"role": role, "content": content})
         return normalized_messages
+
+    def _load_replay_updates_from_local_storage(self, session_id: str) -> list[dict[str, Any]]:
+        """Загружает replay updates сессии из локального JSON storage."""
+
+        file_path = self._history_file_path(session_id)
+        if not file_path.exists():
+            return []
+
+        try:
+            payload = json.loads(file_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            self.logger.warning(
+                "chat_history_load_failed",
+                session_id=session_id,
+                path=str(file_path),
+                error=str(error),
+            )
+            return []
+
+        raw_replay_updates = payload.get("replay_updates") if isinstance(payload, dict) else None
+        if not isinstance(raw_replay_updates, list):
+            return []
+
+        return [update for update in raw_replay_updates if isinstance(update, dict)]
+
+    def _rebuild_messages_from_replay(
+        self,
+        session_id: str,
+        replay_updates: list[dict[str, Any]],
+    ) -> list[dict[str, str]]:
+        """Восстанавливает сообщения из кэшированных replay updates одной сессии."""
+
+        rebuilt_messages: list[dict[str, str]] = []
+
+        for update_data in replay_updates:
+            params = update_data.get("params", {})
+            if params.get("sessionId") != session_id:
+                continue
+
+            update = params.get("update", {})
+            update_type = update.get("sessionUpdate")
+            content = update.get("content")
+            if not isinstance(content, dict):
+                continue
+
+            text = content.get("text")
+            if not isinstance(text, str) or text == "":
+                continue
+
+            if update_type == "user_message_chunk":
+                rebuilt_messages.append({"role": "user", "content": text})
+            elif update_type == "agent_message_chunk":
+                role = "system" if self._is_system_ack_chunk(text) else "assistant"
+                rebuilt_messages.append({"role": role, "content": text})
+
+        return rebuilt_messages
 
     def _append_streaming_text_to_session(self, session_id: str, text: str) -> None:
         """Добавляет streaming chunk в состояние указанной сессии."""
@@ -713,6 +816,11 @@ class ChatViewModel(BaseViewModel):
         if streaming_text:
             state.messages.append({"role": "assistant", "content": streaming_text})
             self._session_states[session_id] = state
+            self._persist_messages_to_local_storage(
+                session_id,
+                state.messages,
+                replay_updates=state.replay_updates,
+            )
             if self._active_session_id == session_id:
                 self.messages.value = list(state.messages)
             self.logger.debug(
