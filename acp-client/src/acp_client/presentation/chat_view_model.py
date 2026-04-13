@@ -422,27 +422,65 @@ class ChatViewModel(BaseViewModel):
         # зависимость от локального history-кэша клиента.
         rebuilt_messages: list[dict[str, str]] = []
 
-        for update_data in replay_updates:
+        for idx, update_data in enumerate(replay_updates):
             params = update_data.get("params", {})
             if params.get("sessionId") != session_id:
+                self.logger.debug(
+                    "restore_skipping_wrong_session",
+                    idx=idx,
+                    expected_session=session_id,
+                    actual_session=params.get("sessionId"),
+                )
                 continue
 
             update = params.get("update", {})
             update_type = update.get("sessionUpdate")
             content = update.get("content")
+            
+            self.logger.debug(
+                "restore_processing_update",
+                idx=idx,
+                update_type=update_type,
+                has_content=content is not None,
+                content_type=type(content).__name__ if content is not None else None,
+            )
+            
             if not isinstance(content, dict):
+                self.logger.debug(
+                    "restore_skipping_no_content",
+                    idx=idx,
+                    update_type=update_type,
+                )
                 continue
 
             text = content.get("text")
             if not isinstance(text, str) or text == "":
+                self.logger.debug(
+                    "restore_skipping_no_text",
+                    idx=idx,
+                    update_type=update_type,
+                    has_text=text is not None,
+                )
                 continue
 
             if update_type == "user_message_chunk":
                 rebuilt_messages.append({"role": "user", "content": text})
+                self.logger.debug(
+                    "restore_added_user_message",
+                    idx=idx,
+                    text_length=len(text),
+                )
                 continue
             if update_type == "agent_message_chunk":
                 role = "system" if self._is_system_ack_chunk(text) else "assistant"
                 rebuilt_messages.append({"role": role, "content": text})
+                self.logger.debug(
+                    "restore_added_agent_message",
+                    idx=idx,
+                    role=role,
+                    text_length=len(text),
+                )
+
 
         # Записываем пересобранное состояние в кэш конкретной сессии.
         state = self._get_or_create_session_state(session_id)
