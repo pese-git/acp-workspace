@@ -191,6 +191,7 @@ class JsonFileStorage(SessionStorage):
             "updated_at": session.updated_at,
             "config_values": session.config_values,
             "history": history_serialized,
+            "events_history": session.events_history,
             "active_turn": (
                 self._serialize_active_turn(session.active_turn)
                 if session.active_turn
@@ -257,6 +258,7 @@ class JsonFileStorage(SessionStorage):
             updated_at=data.get("updated_at", datetime.now(UTC).isoformat()),
             config_values=data.get("config_values", {}),
             history=history_deserialized,
+            events_history=data.get("events_history", []),
             active_turn=(
                 self._deserialize_active_turn(data["active_turn"])
                 if data.get("active_turn")
