@@ -56,9 +56,9 @@
 
 #### Документация
 
-- **[acp-server/REFACTORING_STATUS.md](acp-server/REFACTORING_STATUS.md)** — полный статус рефакторинга Фазы 1
+- **[acp-server/docs/archive/refactoring/REFACTORING_STATUS.md](acp-server/docs/archive/refactoring/REFACTORING_STATUS.md)** — полный статус рефакторинга Фазы 1
 - **[acp-server/README.md#Архитектура](acp-server/README.md)** — описание новых компонентов архитектуры
-- Обновлены существующие документы: `REFACTORING_ANALYSIS.md`, `SESSION_PROMPT_REFACTORING_PLAN.md`
+- Обновлены существующие документы: архивные документы в `acp-server/docs/archive/refactoring/`
 
 #### Результаты тестирования
 
@@ -190,9 +190,8 @@
 - Качество кода: все проверки пройдены
 
 **Документация:**
-- [`doc/PHASE_4_PART9_TYPE_CHECKING_ANALYSIS.md`](doc/PHASE_4_PART9_TYPE_CHECKING_ANALYSIS.md) - детальный анализ
-- [`doc/PHASE_4_PART9_COMPLETION_REPORT.md`](doc/PHASE_4_PART9_COMPLETION_REPORT.md) - отчет о завершении
-- [`doc/PHASE_4_PART9_TYPE_CHECKER_OUTPUT.txt`](doc/PHASE_4_PART9_TYPE_CHECKER_OUTPUT.txt) - полный вывод type checker
+- Анализ и отчет о завершении Type Checking работ задокументированы в коде и тестах
+- Все изменения отражены в CHANGELOG.md и документации по архитектуре
 
 ### Added (Phase 4.8: Complete MVVM Integration)
 
