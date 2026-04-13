@@ -50,7 +50,7 @@ uv run acp-server --host 127.0.0.1 --port 8080 --storage memory
 
 ```bash
 # Сохранять сессии в ~/.acp/sessions
-uv run acp-server --host 127.0.0.1 --port 8080 --storage json:~/.acp/sessions
+uv run acp-server --host 127.0.0.1 --port 8080 --storage json:~/.acp-server/sessions
 
 # Или с абсолютным путем
 uv run acp-server --host 127.0.0.1 --port 8080 --storage json:/var/lib/acp/sessions

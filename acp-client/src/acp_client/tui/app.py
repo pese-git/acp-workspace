@@ -26,7 +26,7 @@ from acp_client.presentation.plan_view_model import PlanViewModel
 from acp_client.presentation.session_view_model import SessionViewModel
 from acp_client.presentation.terminal_log_view_model import TerminalLogViewModel
 from acp_client.presentation.terminal_view_model import TerminalViewModel
-from acp_client.presentation.ui_view_model import UIViewModel
+from acp_client.presentation.ui_view_model import ConnectionStatus, SidebarTab, UIViewModel
 from acp_client.tui.navigation import NavigationManager
 
 from .components import (
@@ -34,6 +34,7 @@ from .components import (
     FileTree,
     FooterBar,
     HeaderBar,
+    HelpModal,
     PlanPanel,
     PromptInput,
     Sidebar,
@@ -59,6 +60,9 @@ class ACPClientApp(App[None]):
         ("ctrl+k", "previous_session", "Prev Session"),
         ("ctrl+l", "clear_chat", "Clear Chat"),
         ("ctrl+h", "open_help", "Help"),
+        ("?", "show_hotkeys", "Hotkeys"),
+        ("ctrl+tab", "next_sidebar_tab", "Next Sidebar Tab"),
+        ("ctrl+shift+tab", "previous_sidebar_tab", "Prev Sidebar Tab"),
         ("ctrl+t", "open_terminal_output", "Terminal Output"),
         ("tab", "cycle_focus", "Cycle Focus"),
         ("ctrl+c", "cancel_prompt", "Cancel"),
@@ -131,6 +135,10 @@ class ACPClientApp(App[None]):
             # Синхронизируем ChatViewModel с выбранной сессией.
             self._session_vm.selected_session_id.subscribe(self._on_selected_session_changed)
             self._chat_vm.set_active_session(self._session_vm.selected_session_id.value)
+
+            # Синхронизируем layout левой колонки с глобальным UI состоянием.
+            self._ui_vm.sidebar_tab.subscribe(self._on_sidebar_state_changed)
+            self._ui_vm.files_expanded.subscribe(self._on_sidebar_state_changed)
         except Exception as e:
             self._app_logger.error(
                 "failed_to_resolve_view_models",
@@ -143,7 +151,7 @@ class ACPClientApp(App[None]):
         yield HeaderBar(self._ui_vm)
         with Horizontal(id="body"):
             with Vertical(id="sidebar-column"):
-                yield Sidebar(self._session_vm)
+                yield Sidebar(self._session_vm, self._ui_vm)
                 # Передаем cwd в FileTree для отображения структуры проекта
                 yield FileTree(
                     filesystem_vm=self._filesystem_vm,
@@ -174,12 +182,13 @@ class ACPClientApp(App[None]):
         # Инициализируем подключение к серверу
         self._app_logger.info("starting_connection_worker")
         self.run_worker(self._initialize_connection(), exclusive=False)
+        self._on_sidebar_state_changed(None)
 
     async def _initialize_connection(self) -> None:
         """Инициализирует подключение к серверу."""
-        from acp_client.presentation.ui_view_model import ConnectionStatus
-
         self._app_logger.info("connection_worker_started")
+        self._ui_vm.set_connection_status(ConnectionStatus.CONNECTING)
+        self._ui_vm.set_loading(True, "connecting to server")
         try:
             from acp_client.application.session_coordinator import SessionCoordinator
 
@@ -199,6 +208,7 @@ class ACPClientApp(App[None]):
 
             # Обновляем статус подключения в UI
             self._ui_vm.set_connection_status(ConnectionStatus.CONNECTED)
+            self._ui_vm.set_loading(False)
 
             # После успешного подключения запрашиваем список сессий с сервера,
             # чтобы sidebar отображал сохраненные сессии сразу при старте.
@@ -225,6 +235,29 @@ class ACPClientApp(App[None]):
             )
             # Обновляем статус подключения в UI
             self._ui_vm.set_connection_status(ConnectionStatus.DISCONNECTED)
+            self._ui_vm.set_loading(False)
+
+    def _on_sidebar_state_changed(self, _: object) -> None:
+        """Синхронизировать видимость FileTree с активной вкладкой sidebar."""
+
+        try:
+            file_tree = self.query_one(FileTree)
+        except Exception:
+            return
+
+        is_files_tab = self._ui_vm.sidebar_tab.value == SidebarTab.FILES
+        should_show = is_files_tab and self._ui_vm.files_expanded.value
+        file_tree.display = should_show
+
+    def action_next_sidebar_tab(self) -> None:
+        """Переключить вкладку sidebar вперед по кругу."""
+
+        self._ui_vm.cycle_sidebar_tab()
+
+    def action_previous_sidebar_tab(self) -> None:
+        """Переключить вкладку sidebar назад по кругу."""
+
+        self._ui_vm.cycle_sidebar_tab(reverse=True)
 
     def action_new_session(self) -> None:
         """Создает новую сессию по горячей клавише Ctrl+N."""
@@ -249,6 +282,24 @@ class ACPClientApp(App[None]):
         """Алиас для перевода фокуса в список сессий."""
 
         self.action_focus_sidebar()
+
+    def action_open_help(self) -> None:
+        """Открыть контекстную справку по текущему фокусу."""
+
+        focused = self.focused
+        context = "global"
+        if isinstance(focused, Sidebar):
+            context = "sidebar"
+        elif isinstance(focused, FileTree):
+            context = "file-tree"
+        elif isinstance(focused, PromptInput):
+            context = "prompt-input"
+        self.push_screen(HelpModal(context=context, show_hotkeys=False))
+
+    def action_show_hotkeys(self) -> None:
+        """Показать отдельный экран со списком горячих клавиш."""
+
+        self.push_screen(HelpModal(context="global", show_hotkeys=True))
 
     def action_next_session(self) -> None:
         """Выбирает следующую сессию в sidebar и применяет выбор."""
