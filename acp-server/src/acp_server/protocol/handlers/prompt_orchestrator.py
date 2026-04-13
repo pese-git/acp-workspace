@@ -112,6 +112,18 @@ class PromptOrchestrator:
         # Шаг 3: Обновление состояния сессии
         self.state_manager.update_session_title(session, text_preview)
         self.state_manager.add_user_message(session, prompt)
+        
+        # Сохранить каждый user_message_chunk в events_history для полного replay
+        # при загрузке сессии через session/load
+        for block in prompt:
+            self.state_manager.add_event(session, {
+                "type": "session_update",
+                "update": {
+                    "sessionUpdate": "user_message_chunk",
+                    "content": block
+                }
+            })
+        
         self.state_manager.update_session_timestamp(session)
 
         # Шаг 4: Отправить ACK notification
@@ -142,12 +154,17 @@ class PromptOrchestrator:
             # Добавляем assistant message в историю
             self.state_manager.add_assistant_message(session, agent_response_text)
             
-            # Добавляем события в events_history
-            # События отправляются клиенту и сохраняются для полного восстановления
+            # Сохраняем agent_message_chunk в events_history в соответствии со спецификацией ACP
+            # Формат должен соответствовать ContentBlock структуре протокола
             self.state_manager.add_event(session, {
                 "type": "session_update",
-                "event": "agent_message_chunk",
-                "content": agent_response_text,
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {
+                        "type": "text",
+                        "text": agent_response_text
+                    }
+                }
             })
             
             # Строим notification для отправки клиенту
@@ -165,12 +182,14 @@ class PromptOrchestrator:
         )
         notifications.append(session_info_notification)
         
-        # Добавляем это событие в events_history
+        # Добавляем session_info событие в events_history
         self.state_manager.add_event(session, {
             "type": "session_update",
-            "event": "session_info",
-            "title": summary.get("title"),
-            "updated_at": summary.get("updated_at"),
+            "update": {
+                "sessionUpdate": "session_info",
+                "title": summary.get("title"),
+                "updated_at": summary.get("updated_at"),
+            }
         })
 
         # Шаг 8: Построить plan updates если нужно

@@ -226,37 +226,28 @@ def session_load(
     session.mcp_servers = [server for server in mcp_servers if isinstance(server, dict)]
 
     notifications: list[ACPMessage] = []
-    for entry in session.history:
-        role = entry.get("role") if isinstance(entry, dict) else None
-        content = entry.get("content") if isinstance(entry, dict) else None
-        if role == "user" and isinstance(content, list):
-            for block in content:
+    
+    # Реплей из events_history - восстанавливаем полную историю session/update уведомлений
+    # согласно спецификации ACP (protocol/03-Session Setup.md, раздел 132)
+    # Агент MUST replay всю историю через session/update уведомления
+    for event in session.events_history:
+        event_type = event.get("type")
+        
+        if event_type == "session_update":
+            # Восстанавливаем session/update уведомления из сохранённых событий
+            update_data = event.get("update", {})
+            if update_data:
                 notifications.append(
                     ACPMessage.notification(
                         "session/update",
                         {
                             "sessionId": session_id,
-                            "update": {
-                                "sessionUpdate": "user_message_chunk",
-                                "content": block,
-                            },
-                        },
+                            "update": update_data
+                        }
                     )
                 )
-        if role == "agent" and isinstance(content, list):
-            for block in content:
-                notifications.append(
-                    ACPMessage.notification(
-                        "session/update",
-                        {
-                            "sessionId": session_id,
-                            "update": {
-                                "sessionUpdate": "agent_message_chunk",
-                                "content": block,
-                            },
-                        },
-                    )
-                )
+        # Пропускаем другие типы событий (turn_complete, permission requests и т.д.)
+        # при replay, так как они не требуют восстановления UI
 
     if session.latest_plan:
         notifications.append(
