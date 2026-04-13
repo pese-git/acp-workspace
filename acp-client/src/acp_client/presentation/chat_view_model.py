@@ -231,10 +231,30 @@ class ChatViewModel(BaseViewModel):
 
                     self.logger.debug("agent_message_chunk_processed", text_length=len(text))
 
-            # Обработка user_message_chunk если нужно
+            # Обработка user_message_chunk - добавляем сообщения пользователя в историю
             elif session_update_type == "user_message_chunk":
-                # Пока не требуется обработка
-                pass
+                content = update.get("content", {})
+                text = content.get("text", "")
+
+                if text:
+                    # Определяем целевую сессию для обновления
+                    target_session_id = (
+                        session_id if isinstance(session_id, str) else self._active_session_id
+                    )
+                    if target_session_id is not None:
+                        # Добавляем сообщение пользователя в состояние сессии
+                        state = self._get_or_create_session_state(target_session_id)
+                        state.messages.append({"role": "user", "content": text})
+                        self._session_states[target_session_id] = state
+
+                        # Синхронизируем с UI если это активная сессия
+                        if self._active_session_id == target_session_id:
+                            self.messages.value = list(state.messages)
+
+                        # Сохраняем в локальное хранилище
+                        self._persist_messages_to_local_storage(target_session_id, state.messages)
+
+                        self.logger.debug("user_message_chunk_processed", text_length=len(text))
 
             # Можно добавить обработку других типов: tool_call, plan_update и т.д.
 

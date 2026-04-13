@@ -10,9 +10,14 @@ import json
 from pathlib import Path
 from typing import Any
 
+import structlog
+
 from ...messages import ACPMessage, JsonRpcId
 from ..session_factory import SessionFactory
 from ..state import ClientRuntimeCapabilities, ProtocolOutcome, SessionState
+
+# Используем structlog для структурированного логирования
+logger = structlog.get_logger()
 
 
 def _serialize_available_commands(

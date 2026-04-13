@@ -149,6 +149,68 @@ def test_restore_session_from_replay_rebuilds_messages(chat_view_model: ChatView
     ]
 
 
+def test_user_message_chunk_added_to_history(chat_view_model: ChatViewModel) -> None:
+    """user_message_chunk обрабатывается и добавляется в историю сообщений."""
+
+    chat_view_model.set_active_session("sess_user_chunk")
+
+    # Обработаем user_message_chunk
+    chat_view_model._handle_session_update(
+        {
+            "params": {
+                "sessionId": "sess_user_chunk",
+                "update": {
+                    "sessionUpdate": "user_message_chunk",
+                    "content": {"text": "user question"},
+                },
+            }
+        }
+    )
+
+    # Сообщение должно быть добавлено в историю
+    assert len(chat_view_model.messages.value) == 1
+    assert chat_view_model.messages.value[0]["role"] == "user"
+    assert chat_view_model.messages.value[0]["content"] == "user question"
+
+
+def test_user_message_chunk_persisted_to_storage(tmp_path) -> None:
+    """user_message_chunk сохраняется в локальное хранилище."""
+
+    history_dir = tmp_path / "history"
+    chat_view_model = ChatViewModel(
+        coordinator=None,
+        event_bus=EventBus(),
+        logger=None,
+        history_dir=history_dir,
+    )
+
+    chat_view_model.set_active_session("sess_user_persist")
+    chat_view_model._handle_session_update(
+        {
+            "params": {
+                "sessionId": "sess_user_persist",
+                "update": {
+                    "sessionUpdate": "user_message_chunk",
+                    "content": {"text": "save me"},
+                },
+            }
+        }
+    )
+
+    # Создаем новый ViewModel и проверяем что сообщение загружено из storage
+    second_vm = ChatViewModel(
+        coordinator=None,
+        event_bus=EventBus(),
+        logger=None,
+        history_dir=history_dir,
+    )
+    second_vm.set_active_session("sess_user_persist")
+
+    assert len(second_vm.messages.value) == 1
+    assert second_vm.messages.value[0]["role"] == "user"
+    assert second_vm.messages.value[0]["content"] == "save me"
+
+
 def test_chat_history_is_persisted_to_local_storage(tmp_path) -> None:
     """История сообщений сохраняется и восстанавливается из локального storage."""
 
