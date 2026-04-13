@@ -57,11 +57,6 @@ class MessageRouter:
             self._logger.debug("route_notification_update", method=method)
             return RoutingKey(queue_type="notification")
 
-        if method == "session/turn_complete":
-            # Асинхронное уведомление о завершении prompt-turn
-            self._logger.debug("route_turn_complete_notification", method=method)
-            return RoutingKey(queue_type="notification")
-
         if method == "session/request_permission":
             # Запрос разрешения (требует ответа)
             self._logger.debug("route_permission_request", method=method)
@@ -106,7 +101,6 @@ class MessageRouter:
         return message.get("id") is None and method in (
             "session/update",
             "session/cancel",
-            "session/turn_complete",
         )
 
     def is_permission_request(self, message: dict[str, Any]) -> bool:

@@ -52,28 +52,29 @@ class TestUserMessageChunkPersistence:
 
         # Act - добавляем user message
         orchestrator.state_manager.add_user_message(session, prompt)
-        
+
         # Добавляем events как делает handle_prompt
         for block in prompt:
-            orchestrator.state_manager.add_event(session, {
-                "type": "session_update",
-                "update": {
-                    "sessionUpdate": "user_message_chunk",
-                    "content": block
-                }
-            })
+            orchestrator.state_manager.add_event(
+                session,
+                {
+                    "type": "session_update",
+                    "update": {"sessionUpdate": "user_message_chunk", "content": block},
+                },
+            )
 
         # Assert
         assert len(session.events_history) >= 2
-        
+
         # Проверяем, что события сохранены в правильном формате
         user_message_events = [
-            e for e in session.events_history
+            e
+            for e in session.events_history
             if e.get("type") == "session_update"
             and e.get("update", {}).get("sessionUpdate") == "user_message_chunk"
         ]
         assert len(user_message_events) == 2
-        
+
         # Проверяем содержимое
         assert user_message_events[0]["update"]["content"]["text"] == "Hello, assistant!"
         assert user_message_events[1]["update"]["content"]["text"] == "How are you?"
@@ -113,27 +114,27 @@ class TestAgentMessageChunkFormat:
 
         # Act - добавляем agent message и event как делает handle_prompt
         orchestrator.state_manager.add_assistant_message(session, agent_response)
-        orchestrator.state_manager.add_event(session, {
-            "type": "session_update",
-            "update": {
-                "sessionUpdate": "agent_message_chunk",
-                "content": {
-                    "type": "text",
-                    "text": agent_response
-                }
-            }
-        })
+        orchestrator.state_manager.add_event(
+            session,
+            {
+                "type": "session_update",
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {"type": "text", "text": agent_response},
+                },
+            },
+        )
 
         # Assert
         # Проверяем, что событие содержит правильную структуру
         assert len(session.events_history) > 0
-        
+
         agent_event = session.events_history[-1]
         assert agent_event["type"] == "session_update"
-        
+
         update = agent_event["update"]
         assert update["sessionUpdate"] == "agent_message_chunk"
-        
+
         # Проверяем ContentBlock структуру
         content = update["content"]
         assert content["type"] == "text"
@@ -150,16 +151,16 @@ class TestAgentMessageChunkFormat:
 
         # Act
         orchestrator.state_manager.add_assistant_message(session, agent_response)
-        orchestrator.state_manager.add_event(session, {
-            "type": "session_update",
-            "update": {
-                "sessionUpdate": "agent_message_chunk",
-                "content": {
-                    "type": "text",
-                    "text": agent_response
-                }
-            }
-        })
+        orchestrator.state_manager.add_event(
+            session,
+            {
+                "type": "session_update",
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {"type": "text", "text": agent_response},
+                },
+            },
+        )
 
         # Assert
         event = session.events_history[-1]
@@ -202,27 +203,20 @@ class TestSessionLoadReplay:
                     "type": "session_update",
                     "update": {
                         "sessionUpdate": "user_message_chunk",
-                        "content": {
-                            "type": "text",
-                            "text": "Hello"
-                        }
+                        "content": {"type": "text", "text": "Hello"},
                     },
-                    "timestamp": "2026-04-13T07:00:00Z"
+                    "timestamp": "2026-04-13T07:00:00Z",
                 }
             ],
             active_turn=None,
         )
-        
+
         sessions = {"sess_1": session}
 
         # Act
         outcome = session_load(
             request_id="req_1",
-            params={
-                "sessionId": "sess_1",
-                "cwd": "/tmp",
-                "mcpServers": []
-            },
+            params={"sessionId": "sess_1", "cwd": "/tmp", "mcpServers": []},
             require_auth=False,
             authenticated=True,
             config_specs=config_specs,
@@ -233,14 +227,17 @@ class TestSessionLoadReplay:
         # Assert
         # Проверяем, что есть notifications
         assert outcome.notifications is not None
-        
+
         # Ищем user_message_chunk notifications
         user_message_notifications = [
-            n for n in outcome.notifications
-            if (n.method == "session/update" and 
-                n.params.get("update", {}).get("sessionUpdate") == "user_message_chunk")
+            n
+            for n in outcome.notifications
+            if (
+                n.method == "session/update"
+                and n.params.get("update", {}).get("sessionUpdate") == "user_message_chunk"
+            )
         ]
-        
+
         assert len(user_message_notifications) == 1
         assert user_message_notifications[0].params["update"]["content"]["text"] == "Hello"
 
@@ -263,27 +260,20 @@ class TestSessionLoadReplay:
                     "type": "session_update",
                     "update": {
                         "sessionUpdate": "agent_message_chunk",
-                        "content": {
-                            "type": "text",
-                            "text": "I am ready to help!"
-                        }
+                        "content": {"type": "text", "text": "I am ready to help!"},
                     },
-                    "timestamp": "2026-04-13T07:00:00Z"
+                    "timestamp": "2026-04-13T07:00:00Z",
                 }
             ],
             active_turn=None,
         )
-        
+
         sessions = {"sess_1": session}
 
         # Act
         outcome = session_load(
             request_id="req_1",
-            params={
-                "sessionId": "sess_1",
-                "cwd": "/tmp",
-                "mcpServers": []
-            },
+            params={"sessionId": "sess_1", "cwd": "/tmp", "mcpServers": []},
             require_auth=False,
             authenticated=True,
             config_specs=config_specs,
@@ -293,11 +283,14 @@ class TestSessionLoadReplay:
 
         # Assert
         agent_message_notifications = [
-            n for n in outcome.notifications
-            if (n.method == "session/update" and 
-                n.params.get("update", {}).get("sessionUpdate") == "agent_message_chunk")
+            n
+            for n in outcome.notifications
+            if (
+                n.method == "session/update"
+                and n.params.get("update", {}).get("sessionUpdate") == "agent_message_chunk"
+            )
         ]
-        
+
         assert len(agent_message_notifications) == 1
         agent_content_text = agent_message_notifications[0].params["update"]["content"]["text"]
         assert agent_content_text == "I am ready to help!"
@@ -321,38 +314,28 @@ class TestSessionLoadReplay:
                     "type": "session_update",
                     "update": {
                         "sessionUpdate": "user_message_chunk",
-                        "content": {
-                            "type": "text",
-                            "text": "What is 2+2?"
-                        }
+                        "content": {"type": "text", "text": "What is 2+2?"},
                     },
-                    "timestamp": "2026-04-13T07:00:00Z"
+                    "timestamp": "2026-04-13T07:00:00Z",
                 },
                 {
                     "type": "session_update",
                     "update": {
                         "sessionUpdate": "agent_message_chunk",
-                        "content": {
-                            "type": "text",
-                            "text": "2+2 equals 4"
-                        }
+                        "content": {"type": "text", "text": "2+2 equals 4"},
                     },
-                    "timestamp": "2026-04-13T07:00:01Z"
+                    "timestamp": "2026-04-13T07:00:01Z",
                 },
             ],
             active_turn=None,
         )
-        
+
         sessions = {"sess_1": session}
 
         # Act
         outcome = session_load(
             request_id="req_1",
-            params={
-                "sessionId": "sess_1",
-                "cwd": "/tmp",
-                "mcpServers": []
-            },
+            params={"sessionId": "sess_1", "cwd": "/tmp", "mcpServers": []},
             require_auth=False,
             authenticated=True,
             config_specs=config_specs,
@@ -362,25 +345,24 @@ class TestSessionLoadReplay:
 
         # Assert
         # Ищем session/update notifications в порядке
-        update_notifications = [
-            n for n in outcome.notifications
-            if n.method == "session/update"
-        ]
-        
+        update_notifications = [n for n in outcome.notifications if n.method == "session/update"]
+
         # Должны быть notifications для user_message и agent_message, плюс config и session_info
         assert len(update_notifications) >= 2
-        
+
         # Проверяем первое сообщение (пользователя)
         user_notifs = [
-            n for n in update_notifications
+            n
+            for n in update_notifications
             if n.params.get("update", {}).get("sessionUpdate") == "user_message_chunk"
         ]
         assert len(user_notifs) == 1
         assert user_notifs[0].params["update"]["content"]["text"] == "What is 2+2?"
-        
+
         # Проверяем второе сообщение (агента)
         agent_notifs = [
-            n for n in update_notifications
+            n
+            for n in update_notifications
             if n.params.get("update", {}).get("sessionUpdate") == "agent_message_chunk"
         ]
         assert len(agent_notifs) == 1
@@ -401,36 +383,25 @@ class TestSessionLoadReplay:
             tool_calls={},
             history=[],
             events_history=[
-                {
-                    "type": "turn_complete",
-                    "stopReason": "end_turn",
-                    "timestamp": "2026-04-13T07:00:00Z"
-                },
+                {"type": "non_session_event", "timestamp": "2026-04-13T07:00:00Z"},
                 {
                     "type": "session_update",
                     "update": {
                         "sessionUpdate": "user_message_chunk",
-                        "content": {
-                            "type": "text",
-                            "text": "Hello"
-                        }
+                        "content": {"type": "text", "text": "Hello"},
                     },
-                    "timestamp": "2026-04-13T07:00:01Z"
+                    "timestamp": "2026-04-13T07:00:01Z",
                 },
             ],
             active_turn=None,
         )
-        
+
         sessions = {"sess_1": session}
 
         # Act
         outcome = session_load(
             request_id="req_1",
-            params={
-                "sessionId": "sess_1",
-                "cwd": "/tmp",
-                "mcpServers": []
-            },
+            params={"sessionId": "sess_1", "cwd": "/tmp", "mcpServers": []},
             require_auth=False,
             authenticated=True,
             config_specs=config_specs,
@@ -439,11 +410,10 @@ class TestSessionLoadReplay:
         )
 
         # Assert
-        # turn_complete события должны быть пропущены
+        # События не типа session_update должны быть пропущены
         # Проверяем что есть только session/update notifications
         for notification in outcome.notifications:
             if notification.method == "session/update":
                 update = notification.params.get("update", {})
                 session_update = update.get("sessionUpdate")
-                # Проверяем что нет turn_complete в session/update
-                assert session_update != "turn_complete"
+                assert session_update is not None

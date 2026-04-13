@@ -103,34 +103,6 @@ class TestBackgroundReceiveLoop:
         await loop.stop()
 
     @pytest.mark.asyncio
-    async def test_turn_complete_dispatched_to_notification_queue(self) -> None:
-        """Сообщения session/turn_complete распределяются в notification queue."""
-        transport = AsyncMock(spec=WebSocketTransport)
-
-        notification = {
-            "method": "session/turn_complete",
-            "params": {
-                "sessionId": "sess-1",
-                "stopReason": "end_turn",
-            },
-        }
-        transport.receive_text = AsyncMock(
-            side_effect=[json.dumps(notification), asyncio.CancelledError()]
-        )
-
-        router = MessageRouter()
-        queues = RoutingQueues()
-        loop = BackgroundReceiveLoop(transport, router, queues)
-
-        await loop.start()
-
-        received = await asyncio.wait_for(queues.notification_queue.get(), timeout=2.0)
-
-        assert received == notification
-
-        await loop.stop()
-
-    @pytest.mark.asyncio
     async def test_messages_dispatched_to_permission_queue(self) -> None:
         """Сообщения session/request_permission распределяются в permission queue."""
         # Создаем mock транспорт

@@ -5,7 +5,6 @@
 
 import pytest
 
-from acp_server.messages import ACPMessage
 from acp_server.protocol.handlers.turn_lifecycle_manager import TurnLifecycleManager
 from acp_server.protocol.state import (
     ActiveTurnState,
@@ -236,19 +235,19 @@ class TestTurnLifecycleStopReason:
         directives: PromptDirectives,
     ) -> None:
         """Использует forced_stop_reason если установлен."""
-        directives.forced_stop_reason = "cancel"
+        directives.forced_stop_reason = "cancelled"
         reason = lifecycle_manager.resolve_stop_reason(directives)
-        assert reason == "cancel"
+        assert reason == "cancelled"
 
     def test_resolve_stop_reason_keep_tool_pending(
         self,
         lifecycle_manager: TurnLifecycleManager,
         directives: PromptDirectives,
     ) -> None:
-        """Возвращает 'tool_pending' если keep_tool_pending=True."""
+        """Возвращает 'end_turn' если keep_tool_pending=True."""
         directives.keep_tool_pending = True
         reason = lifecycle_manager.resolve_stop_reason(directives)
-        assert reason == "tool_pending"
+        assert reason == "end_turn"
 
     def test_resolve_stop_reason_default(
         self,
@@ -275,7 +274,13 @@ class TestTurnLifecycleStopReason:
         directives: PromptDirectives,
     ) -> None:
         """Поддерживает все определенные stop reasons."""
-        supported = {"end_turn", "cancel", "tool_pending", "permission_required"}
+        supported = {
+            "end_turn",
+            "max_tokens",
+            "max_turn_requests",
+            "refusal",
+            "cancelled",
+        }
         for reason in supported:
             directives.forced_stop_reason = reason
             result = lifecycle_manager.resolve_stop_reason(directives)
@@ -290,19 +295,14 @@ class TestTurnLifecycleFinalization:
         lifecycle_manager: TurnLifecycleManager,
         session: SessionState,
     ) -> None:
-        """Финализирует turn и строит notification."""
+        """Финализирует turn и возвращает stop reason."""
         session.active_turn = ActiveTurnState(
             prompt_request_id="req_1",
             session_id="sess_1",
         )
-        notification = lifecycle_manager.finalize_turn(session, "end_turn")
+        stop_reason = lifecycle_manager.finalize_turn(session, "end_turn")
 
-        assert notification is not None
-        assert isinstance(notification, ACPMessage)
-        assert notification.method == "session/turn_complete"
-        assert notification.params is not None
-        assert notification.params["sessionId"] == "sess_1"
-        assert notification.params["stopReason"] == "end_turn"
+        assert stop_reason == "end_turn"
 
     def test_finalize_turn_no_active_turn(
         self,
@@ -311,24 +311,22 @@ class TestTurnLifecycleFinalization:
     ) -> None:
         """Возвращает None если нет active turn."""
         session.active_turn = None
-        notification = lifecycle_manager.finalize_turn(session, "end_turn")
-        assert notification is None
+        stop_reason = lifecycle_manager.finalize_turn(session, "end_turn")
+        assert stop_reason is None
 
     def test_finalize_turn_different_stop_reasons(
         self,
         lifecycle_manager: TurnLifecycleManager,
         session: SessionState,
     ) -> None:
-        """Финализирует turn с разными stop reasons."""
-        for stop_reason in ["end_turn", "cancel", "tool_pending"]:
+        """Финализирует turn с разными stop reasons ACP."""
+        for stop_reason in ["end_turn", "max_tokens", "cancelled"]:
             session.active_turn = ActiveTurnState(
                 prompt_request_id="req_1",
                 session_id="sess_1",
             )
-            notification = lifecycle_manager.finalize_turn(session, stop_reason)
-            assert notification is not None
-            assert notification.params is not None
-            assert notification.params["stopReason"] == stop_reason
+            finalized_reason = lifecycle_manager.finalize_turn(session, stop_reason)
+            assert finalized_reason == stop_reason
 
     def test_finalize_turn_normalizes_stop_reason(
         self,
@@ -340,10 +338,8 @@ class TestTurnLifecycleFinalization:
             prompt_request_id="req_1",
             session_id="sess_1",
         )
-        notification = lifecycle_manager.finalize_turn(session, "unsupported")
-        assert notification is not None
-        assert notification.params is not None
-        assert notification.params["stopReason"] == "end_turn"
+        stop_reason = lifecycle_manager.finalize_turn(session, "unsupported")
+        assert stop_reason == "end_turn"
 
 
 class TestTurnLifecycleClear:

@@ -134,7 +134,7 @@ class StateManager:
         """Добавляет событие в историю событий сессии.
 
         Используется для сохранения системных уведомлений: session/update,
-        turn_complete, permission requests, tool_call updates и т.д.
+        permission requests, tool_call updates и т.д.
 
         Args:
             session: Состояние сессии
@@ -189,9 +189,7 @@ def _sanitize_history_entry(
         return None
 
     # Требуем хотя бы один из content/text/content/message
-    has_content = any(
-        key in entry for key in ["content", "text", "message"]
-    )
+    has_content = any(key in entry for key in ["content", "text", "message"])
     if not has_content:
         logger.warning("history entry missing content fields")
         return None

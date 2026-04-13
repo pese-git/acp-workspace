@@ -112,18 +112,18 @@ class PromptOrchestrator:
         # Шаг 3: Обновление состояния сессии
         self.state_manager.update_session_title(session, text_preview)
         self.state_manager.add_user_message(session, prompt)
-        
+
         # Сохранить каждый user_message_chunk в events_history для полного replay
         # при загрузке сессии через session/load
         for block in prompt:
-            self.state_manager.add_event(session, {
-                "type": "session_update",
-                "update": {
-                    "sessionUpdate": "user_message_chunk",
-                    "content": block
-                }
-            })
-        
+            self.state_manager.add_event(
+                session,
+                {
+                    "type": "session_update",
+                    "update": {"sessionUpdate": "user_message_chunk", "content": block},
+                },
+            )
+
         self.state_manager.update_session_timestamp(session)
 
         # Шаг 4: Отправить ACK notification
@@ -153,20 +153,20 @@ class PromptOrchestrator:
         if agent_response_text:
             # Добавляем assistant message в историю
             self.state_manager.add_assistant_message(session, agent_response_text)
-            
+
             # Сохраняем agent_message_chunk в events_history в соответствии со спецификацией ACP
             # Формат должен соответствовать ContentBlock структуре протокола
-            self.state_manager.add_event(session, {
-                "type": "session_update",
-                "update": {
-                    "sessionUpdate": "agent_message_chunk",
-                    "content": {
-                        "type": "text",
-                        "text": agent_response_text
-                    }
-                }
-            })
-            
+            self.state_manager.add_event(
+                session,
+                {
+                    "type": "session_update",
+                    "update": {
+                        "sessionUpdate": "agent_message_chunk",
+                        "content": {"type": "text", "text": agent_response_text},
+                    },
+                },
+            )
+
             # Строим notification для отправки клиенту
             final_notification = _build_agent_response_notification(
                 session_id,
@@ -181,36 +181,28 @@ class PromptOrchestrator:
             summary,
         )
         notifications.append(session_info_notification)
-        
+
         # Добавляем session_info событие в events_history
-        self.state_manager.add_event(session, {
-            "type": "session_update",
-            "update": {
-                "sessionUpdate": "session_info",
-                "title": summary.get("title"),
-                "updated_at": summary.get("updated_at"),
-            }
-        })
+        self.state_manager.add_event(
+            session,
+            {
+                "type": "session_update",
+                "update": {
+                    "sessionUpdate": "session_info",
+                    "title": summary.get("title"),
+                    "updated_at": summary.get("updated_at"),
+                },
+            },
+        )
 
         # Шаг 8: Построить plan updates если нужно
         # Извлечем directives из параметров (если есть)
         # Для простоты пока не добавляем план
         # В реальном коде здесь была бы обработка directives
 
-        # Шаг 9: Завершить turn и добавить turn_complete событие
+        # Шаг 9: Завершить turn и вернуть стандартный response session/prompt
         stop_reason = "end_turn"
-        final_notification = self.turn_lifecycle_manager.finalize_turn(
-            session,
-            stop_reason,
-        )
-        if final_notification:
-            notifications.append(final_notification)
-            # Добавляем turn_complete событие в events_history
-            self.state_manager.add_event(session, {
-                "type": "turn_complete",
-                "stopReason": stop_reason,
-            })
-
+        self.turn_lifecycle_manager.finalize_turn(session, stop_reason)
         self.turn_lifecycle_manager.clear_active_turn(session)
 
         logger.debug(
@@ -219,7 +211,12 @@ class PromptOrchestrator:
             notifications_count=len(notifications),
         )
 
-        return ProtocolOutcome(response=None, notifications=notifications)
+        response = (
+            ACPMessage.response(request_id, {"stopReason": stop_reason})
+            if request_id is not None
+            else None
+        )
+        return ProtocolOutcome(response=response, notifications=notifications)
 
     def handle_cancel(
         self,
@@ -280,13 +277,8 @@ class PromptOrchestrator:
                 session.active_turn.pending_client_request.request_id,
             )
 
-        # Завершаем turn с stop_reason='cancel'
-        final_notification = self.turn_lifecycle_manager.finalize_turn(
-            session,
-            "cancel",
-        )
-        if final_notification:
-            notifications.append(final_notification)
+        # Фиксируем отмену turn с ACP-совместимым stopReason.
+        self.turn_lifecycle_manager.finalize_turn(session, "cancelled")
 
         self.turn_lifecycle_manager.clear_active_turn(session)
 
@@ -387,10 +379,7 @@ class PromptOrchestrator:
             return ProtocolOutcome(response=None, notifications=[])
 
         # Получаем tool_call_id из active_turn
-        if (
-            session.active_turn is None
-            or session.active_turn.permission_tool_call_id is None
-        ):
+        if session.active_turn is None or session.active_turn.permission_tool_call_id is None:
             logger.warning(
                 "no permission tool call in active turn",
                 session_id=session_id,

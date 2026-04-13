@@ -182,9 +182,11 @@ class TestPromptOrchestratorHandlePrompt:
 
         assert outcome.notifications is not None
         assert len(outcome.notifications) > 0
-        # Должны быть notifications с разными типами
+        # Должны быть notifications session/update
         methods = [n.method for n in outcome.notifications]
-        assert "session/update" in methods or "session/turn_complete" in methods
+        assert "session/update" in methods
+        assert outcome.response is not None
+        assert outcome.response.result == {"stopReason": "end_turn"}
 
     @pytest.mark.asyncio
     async def test_handle_prompt_with_empty_prompt(
@@ -230,9 +232,7 @@ class TestPromptOrchestratorHandlePrompt:
 
         # Должны быть notifications с ошибкой
         assert outcome.notifications is not None
-        error_found = any(
-            "error" in str(n.params).lower() for n in outcome.notifications
-        )
+        error_found = any("error" in str(n.params).lower() for n in outcome.notifications)
         assert error_found or len(outcome.notifications) > 0
 
     @pytest.mark.asyncio

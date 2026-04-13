@@ -68,22 +68,6 @@ class TestMessageRouter:
         assert routing_key.queue_type == "notification"
         assert routing_key.request_id is None
 
-    def test_route_notification_turn_complete(self) -> None:
-        """Сообщение session/turn_complete маршрутизируется как notification."""
-        router = MessageRouter()
-        message = {
-            "method": "session/turn_complete",
-            "params": {
-                "sessionId": "sess-1",
-                "stopReason": "end_turn",
-            },
-        }
-
-        routing_key = router.route(message)
-
-        assert routing_key.queue_type == "notification"
-        assert routing_key.request_id is None
-
     def test_route_permission_request(self) -> None:
         """Сообщение session/request_permission маршрутизируется как permission."""
         router = MessageRouter()
@@ -187,15 +171,6 @@ class TestMessageRouter:
         router = MessageRouter()
         message = {
             "method": "session/cancel",
-        }
-
-        assert router.is_notification(message) is True
-
-    def test_is_notification_turn_complete(self) -> None:
-        """is_notification возвращает True для session/turn_complete."""
-        router = MessageRouter()
-        message = {
-            "method": "session/turn_complete",
         }
 
         assert router.is_notification(message) is True

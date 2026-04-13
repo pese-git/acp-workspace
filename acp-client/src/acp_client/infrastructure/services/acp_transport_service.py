@@ -548,22 +548,6 @@ class ACPTransportService(TransportService):
                     if notification_task is not None and notification_task in done:
                         try:
                             notification_data = notification_task.result()
-                            if self._is_matching_turn_complete_notification(
-                                method=method,
-                                request_params=params,
-                                notification_data=notification_data,
-                            ):
-                                turn_complete_result = self._build_turn_complete_result(
-                                    request_id=request_id,
-                                    notification_data=notification_data,
-                                )
-                                self._logger.info(
-                                    "request_completed_by_turn_complete",
-                                    method=method,
-                                    request_id=request_id,
-                                )
-                                return turn_complete_result
-
                             await self._handle_notification_or_client_rpc(
                                 method=method,
                                 request_id=request_id,
@@ -671,53 +655,6 @@ class ACPTransportService(TransportService):
                 if request_id is not None and self._queues is not None:
                     cleanup_request_id: str | int = request_id
                     await self._queues.cleanup_response_queue(cleanup_request_id)
-
-    def _is_matching_turn_complete_notification(
-        self,
-        *,
-        method: str,
-        request_params: dict[str, Any] | None,
-        notification_data: dict[str, Any],
-    ) -> bool:
-        """Проверяет, что уведомление завершает текущий `session/prompt` запрос."""
-        if method != "session/prompt":
-            return False
-        if notification_data.get("method") != "session/turn_complete":
-            return False
-
-        notification_params = notification_data.get("params")
-        if not isinstance(notification_params, dict):
-            return True
-
-        notification_session_id = notification_params.get("sessionId")
-        request_session_id = (
-            request_params.get("sessionId") if isinstance(request_params, dict) else None
-        )
-        if not isinstance(notification_session_id, str) or not isinstance(request_session_id, str):
-            return True
-        return notification_session_id == request_session_id
-
-    def _build_turn_complete_result(
-        self,
-        *,
-        request_id: str | int,
-        notification_data: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Строит response-подобный payload из `session/turn_complete`."""
-        params = notification_data.get("params")
-        stop_reason = None
-        if isinstance(params, dict) and isinstance(params.get("stopReason"), str):
-            stop_reason = params.get("stopReason")
-
-        result: dict[str, Any] = {}
-        if stop_reason is not None:
-            result["stopReason"] = stop_reason
-
-        return {
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "result": result,
-        }
 
     async def _handle_permission_request(
         self,

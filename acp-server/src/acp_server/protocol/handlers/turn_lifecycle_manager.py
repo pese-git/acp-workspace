@@ -175,9 +175,10 @@ class TurnLifecycleManager:
             )
 
         # Определяем на основе директив
-        # Если keep_tool_pending, оставляем инструмент в ожидании
+        # ACP не определяет отдельный stop reason для pending-tool сценария,
+        # поэтому используем стандартное завершение turn.
         if directives.keep_tool_pending:
-            return "tool_pending"
+            return "end_turn"
 
         # Default
         return "end_turn"
@@ -186,15 +187,15 @@ class TurnLifecycleManager:
         self,
         session: SessionState,
         stop_reason: str,
-    ) -> ACPMessage | None:
-        """Финализирует active turn и строит финальное notification.
+    ) -> str | None:
+        """Финализирует active turn и возвращает нормализованный stop reason.
 
         Args:
             session: Состояние сессии
             stop_reason: Причина завершения turn
 
         Returns:
-            ACPMessage с session_turn_complete или None если нет active turn
+            Нормализованный stop reason или None если нет active turn
         """
         if session.active_turn is None:
             logger.warning(
@@ -203,32 +204,19 @@ class TurnLifecycleManager:
             )
             return None
 
-        session_id = session.session_id
-
         # Нормализуем stop reason
         supported = _get_supported_stop_reasons()
         normalized_reason = _normalize_stop_reason(stop_reason, supported)
 
-        # Строим notification
-        notification = ACPMessage.notification(
-            "session/turn_complete",
-            {
-                "sessionId": session_id,
-                "stopReason": normalized_reason,
-            },
-        )
-
         logger.debug(
             "turn finalized",
-            session_id=session_id,
+            session_id=session.session_id,
             stop_reason=normalized_reason,
         )
 
-        return notification
+        return normalized_reason
 
-    def finalize_active_turn(
-        self, session: SessionState, *, stop_reason: str
-    ) -> ACPMessage | None:
+    def finalize_active_turn(self, session: SessionState, *, stop_reason: str) -> ACPMessage | None:
         """Финализирует текущий active turn и очищает его состояние.
 
         Args:
@@ -236,7 +224,7 @@ class TurnLifecycleManager:
             stop_reason: Причина завершения (e.g., "end_turn", "cancelled")
 
         Returns:
-            ACPMessage с session/turn_complete или None если нет active_turn
+            ACPMessage response для исходного `session/prompt` или None если нет active_turn
         """
         active_turn = session.active_turn
         if active_turn is None or active_turn.prompt_request_id is None:
@@ -297,10 +285,10 @@ def _get_supported_stop_reasons() -> set[str]:
     """
     return {
         "end_turn",
-        "cancel",
-        "tool_pending",
-        "permission_required",
-        "error",
+        "max_tokens",
+        "max_turn_requests",
+        "refusal",
+        "cancelled",
     }
 
 

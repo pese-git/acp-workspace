@@ -24,7 +24,7 @@ def _serialize_available_commands(
     commands: list,
 ) -> list[dict[str, Any]]:
     """Сериализует список available_commands для JSON.
-    
+
     Преобразует Pydantic модели в dict для JSON сериализации.
     """
     result: list[dict[str, Any]] = []
@@ -40,16 +40,16 @@ def _serialize_available_commands(
 
 def _cleanup_session_state(session: SessionState) -> None:
     """Очищает незавершенные операции при переключении сессии.
-    
+
     Выполняет следующие действия для безопасного переключения:
     1. Отменяет active turn, если он активен
     2. Отмечает все pending tool calls как cancelled
     3. Добавляет permission request IDs в cancelled_permission_requests
     4. Добавляет RPC request IDs в cancelled_client_rpc_requests
-    
+
     Аргументы:
         session: SessionState для очистки.
-    
+
     Пример использования:
         _cleanup_session_state(session)
     """
@@ -57,21 +57,19 @@ def _cleanup_session_state(session: SessionState) -> None:
     if session.active_turn is not None:
         session.active_turn.cancel_requested = True
         session.active_turn.phase = "cancelled"
-        
+
         # Если был permission request, отменить его
         if session.active_turn.permission_request_id is not None:
-            session.cancelled_permission_requests.add(
-                session.active_turn.permission_request_id
-            )
-        
+            session.cancelled_permission_requests.add(session.active_turn.permission_request_id)
+
         # Если был pending client request, отменить его
         if session.active_turn.pending_client_request is not None:
             session.cancelled_client_rpc_requests.add(
                 session.active_turn.pending_client_request.request_id
             )
-        
+
         session.active_turn = None
-    
+
     # Отметить все pending tool calls как cancelled
     for _tool_call_id, tool_call in session.tool_calls.items():
         if tool_call.status == "pending":
@@ -124,9 +122,7 @@ def session_new(
         )
 
     # Создаем сессию через фабрику
-    config_values = {
-        config_id: str(spec["default"]) for config_id, spec in config_specs.items()
-    }
+    config_values = {config_id: str(spec["default"]) for config_id, spec in config_specs.items()}
 
     session_state = SessionFactory.create_session(
         cwd=cwd,
@@ -231,27 +227,23 @@ def session_load(
     session.mcp_servers = [server for server in mcp_servers if isinstance(server, dict)]
 
     notifications: list[ACPMessage] = []
-    
+
     # Реплей из events_history - восстанавливаем полную историю session/update уведомлений
     # согласно спецификации ACP (protocol/03-Session Setup.md, раздел 132)
     # Агент MUST replay всю историю через session/update уведомления
     for event in session.events_history:
         event_type = event.get("type")
-        
+
         if event_type == "session_update":
             # Восстанавливаем session/update уведомления из сохранённых событий
             update_data = event.get("update", {})
             if update_data:
                 notifications.append(
                     ACPMessage.notification(
-                        "session/update",
-                        {
-                            "sessionId": session_id,
-                            "update": update_data
-                        }
+                        "session/update", {"sessionId": session_id, "update": update_data}
                     )
                 )
-        # Пропускаем другие типы событий (turn_complete, permission requests и т.д.)
+        # Пропускаем другие типы событий (permission requests и т.д.)
         # при replay, так как они не требуют восстановления UI
 
     if session.latest_plan:
@@ -322,9 +314,7 @@ def session_load(
                 "sessionId": session_id,
                 "update": {
                     "sessionUpdate": "available_commands_update",
-                    "availableCommands": _serialize_available_commands(
-                        session.available_commands
-                    ),
+                    "availableCommands": _serialize_available_commands(session.available_commands),
                 },
             },
         )
