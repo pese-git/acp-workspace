@@ -320,3 +320,19 @@ def test_restore_session_persists_all_replay_updates(tmp_path) -> None:
     assert isinstance(cached_replay_updates, list)
     assert len(cached_replay_updates) == 3
     assert cached_replay_updates[1]["params"]["update"]["sessionUpdate"] == "tool_call"
+
+
+def test_streaming_flag_resets_after_background_session_completion(
+    chat_view_model: ChatViewModel,
+) -> None:
+    """Глобальный is_streaming сбрасывается после завершения неактивной сессии."""
+
+    # Имитируем ситуацию, когда prompt-input уже отключен в UI.
+    chat_view_model.is_streaming.value = True
+
+    # Завершаем поток в неактивной для UI сессии.
+    chat_view_model.set_active_session("sess_active")
+    chat_view_model._set_streaming_state("sess_background", is_streaming=True, clear_text=False)
+    chat_view_model._set_streaming_state("sess_background", is_streaming=False, clear_text=True)
+
+    assert chat_view_model.is_streaming.value is False

@@ -1,6 +1,5 @@
 """Тесты для MessageRouter - маршрутизации сообщений."""
 
-
 from acp_client.infrastructure.services.message_router import (
     MessageRouter,
 )
@@ -69,6 +68,22 @@ class TestMessageRouter:
         assert routing_key.queue_type == "notification"
         assert routing_key.request_id is None
 
+    def test_route_notification_turn_complete(self) -> None:
+        """Сообщение session/turn_complete маршрутизируется как notification."""
+        router = MessageRouter()
+        message = {
+            "method": "session/turn_complete",
+            "params": {
+                "sessionId": "sess-1",
+                "stopReason": "end_turn",
+            },
+        }
+
+        routing_key = router.route(message)
+
+        assert routing_key.queue_type == "notification"
+        assert routing_key.request_id is None
+
     def test_route_permission_request(self) -> None:
         """Сообщение session/request_permission маршрутизируется как permission."""
         router = MessageRouter()
@@ -83,6 +98,38 @@ class TestMessageRouter:
         routing_key = router.route(message)
 
         assert routing_key.queue_type == "permission"
+        assert routing_key.request_id is None
+
+    def test_route_permission_request_with_id(self) -> None:
+        """session/request_permission c id маршрутизируется как permission."""
+        router = MessageRouter()
+        message = {
+            "id": "perm-1",
+            "method": "session/request_permission",
+            "params": {
+                "sessionId": "sess-1",
+            },
+        }
+
+        routing_key = router.route(message)
+
+        assert routing_key.queue_type == "permission"
+        assert routing_key.request_id is None
+
+    def test_route_fs_rpc_request_with_id(self) -> None:
+        """fs/* request c id маршрутизируется в notification queue."""
+        router = MessageRouter()
+        message = {
+            "id": "rpc-1",
+            "method": "fs/read_text_file",
+            "params": {
+                "path": "/tmp/test.txt",
+            },
+        }
+
+        routing_key = router.route(message)
+
+        assert routing_key.queue_type == "notification"
         assert routing_key.request_id is None
 
     def test_route_unknown_message(self) -> None:
@@ -140,6 +187,15 @@ class TestMessageRouter:
         router = MessageRouter()
         message = {
             "method": "session/cancel",
+        }
+
+        assert router.is_notification(message) is True
+
+    def test_is_notification_turn_complete(self) -> None:
+        """is_notification возвращает True для session/turn_complete."""
+        router = MessageRouter()
+        message = {
+            "method": "session/turn_complete",
         }
 
         assert router.is_notification(message) is True

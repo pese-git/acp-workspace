@@ -12,13 +12,15 @@ from typing import Any
 
 import structlog
 
+from acp_client.messages import JsonRpcId
+
 
 @dataclass(frozen=True)
 class RoutingKey:
     """Ключ маршрутизации для сообщения."""
 
     queue_type: str  # "response", "notification", "permission", "unknown"
-    request_id: int | None = None  # Для response сообщений
+    request_id: JsonRpcId | None = None  # Для response сообщений
 
 
 class MessageRouter:
@@ -45,18 +47,9 @@ class MessageRouter:
         Returns:
             RoutingKey с информацией о маршруте
         """
-        # Проверяем, это ответ на запрос (есть id)
+        # Сначала анализируем method: server->client RPC requests тоже содержат id,
+        # поэтому приоритет по id здесь ломал маршрутизацию и приводил к дедлоку.
         message_id = message.get("id")
-        if message_id is not None:
-            # Это RPC ответ
-            self._logger.debug(
-                "route_response_message",
-                message_id=message_id,
-                method=message.get("method"),
-            )
-            return RoutingKey(queue_type="response", request_id=message_id)
-
-        # Проверяем метод (для уведомлений и запросов)
         method = message.get("method")
 
         if method == "session/update":
@@ -64,10 +57,31 @@ class MessageRouter:
             self._logger.debug("route_notification_update", method=method)
             return RoutingKey(queue_type="notification")
 
+        if method == "session/turn_complete":
+            # Асинхронное уведомление о завершении prompt-turn
+            self._logger.debug("route_turn_complete_notification", method=method)
+            return RoutingKey(queue_type="notification")
+
         if method == "session/request_permission":
             # Запрос разрешения (требует ответа)
             self._logger.debug("route_permission_request", method=method)
             return RoutingKey(queue_type="permission")
+
+        if isinstance(method, str) and (method.startswith("fs/") or method.startswith("terminal/")):
+            # Agent->client RPC (fs/*, terminal/*) обрабатываем как уведомления,
+            # чтобы request_with_callbacks мог забрать запрос, вызвать callback
+            # и отправить response клиенту.
+            self._logger.debug("route_client_rpc_request", method=method)
+            return RoutingKey(queue_type="notification")
+
+        if message_id is not None:
+            # Это обычный RPC response
+            self._logger.debug(
+                "route_response_message",
+                message_id=message_id,
+                method=method,
+            )
+            return RoutingKey(queue_type="response", request_id=message_id)
 
         if method == "session/cancel":
             # Отмена запроса (асинхронное уведомление)
@@ -89,14 +103,12 @@ class MessageRouter:
     def is_notification(self, message: dict[str, Any]) -> bool:
         """Проверяет, это асинхронное уведомление (нет id, есть method)."""
         method = message.get("method")
-        return (
-            message.get("id") is None
-            and method in ("session/update", "session/cancel")
+        return message.get("id") is None and method in (
+            "session/update",
+            "session/cancel",
+            "session/turn_complete",
         )
 
     def is_permission_request(self, message: dict[str, Any]) -> bool:
         """Проверяет, это запрос разрешения."""
-        return (
-            message.get("id") is None
-            and message.get("method") == "session/request_permission"
-        )
+        return message.get("id") is None and message.get("method") == "session/request_permission"

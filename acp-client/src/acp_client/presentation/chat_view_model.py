@@ -759,6 +759,16 @@ class ChatViewModel(BaseViewModel):
             self.is_streaming.value = is_streaming
             if clear_text:
                 self.streaming_text.value = ""
+            return
+
+        # Если завершили поток неактивной сессии, синхронизируем общий UI-флаг,
+        # чтобы поле prompt не оставалось disabled после фонового завершения turn.
+        if not is_streaming:
+            any_streaming = any(
+                state_item.is_streaming for state_item in self._session_states.values()
+            )
+            if not any_streaming:
+                self.is_streaming.value = False
 
     def _set_last_stop_reason(self, session_id: str, stop_reason: str | None) -> None:
         """Сохраняет stop reason для сессии и синхронизирует активный UI."""

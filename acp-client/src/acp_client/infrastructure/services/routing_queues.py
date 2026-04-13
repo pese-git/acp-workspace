@@ -13,6 +13,8 @@ from typing import Any
 
 import structlog
 
+from acp_client.messages import JsonRpcId
+
 
 class RoutingQueues:
     """Управляет системой очередей маршрутизации.
@@ -36,7 +38,7 @@ class RoutingQueues:
         self._logger = structlog.get_logger("routing_queues")
 
         # Очереди RPC ответов: {request_id → asyncio.Queue}
-        self._response_queues: dict[int, asyncio.Queue[dict[str, Any]]] = {}
+        self._response_queues: dict[JsonRpcId, asyncio.Queue[dict[str, Any]]] = {}
 
         # Общая очередь уведомлений
         self._notification_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
@@ -58,7 +60,7 @@ class RoutingQueues:
         return self._permission_queue
 
     async def get_or_create_response_queue(
-        self, request_id: int
+        self, request_id: JsonRpcId
     ) -> asyncio.Queue[dict[str, Any]]:
         """Получить или создать очередь для конкретного request_id.
 
@@ -75,14 +77,12 @@ class RoutingQueues:
             if request_id not in self._response_queues:
                 queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
                 self._response_queues[request_id] = queue
-                self._logger.debug(
-                    "response_queue_created", request_id=request_id
-                )
+                self._logger.debug("response_queue_created", request_id=request_id)
                 return queue
             else:
                 return self._response_queues[request_id]
 
-    async def response_queue_exists(self, request_id: int) -> bool:
+    async def response_queue_exists(self, request_id: JsonRpcId) -> bool:
         """Проверить, существует ли очередь для request_id.
 
         Args:
@@ -94,7 +94,7 @@ class RoutingQueues:
         async with self._response_queues_lock:
             return request_id in self._response_queues
 
-    async def put_response(self, request_id: int, message: dict[str, Any]) -> None:
+    async def put_response(self, request_id: JsonRpcId, message: dict[str, Any]) -> None:
         """Положить RPC ответ в очередь по request_id.
 
         Args:
@@ -150,7 +150,7 @@ class RoutingQueues:
             method=message.get("method"),
         )
 
-    async def cleanup_response_queue(self, request_id: int) -> None:
+    async def cleanup_response_queue(self, request_id: JsonRpcId) -> None:
         """Очистить очередь ответов после использования.
 
         Args:
@@ -163,9 +163,7 @@ class RoutingQueues:
         async with self._response_queues_lock:
             if request_id in self._response_queues:
                 del self._response_queues[request_id]
-                self._logger.debug(
-                    "response_queue_cleaned", request_id=request_id
-                )
+                self._logger.debug("response_queue_cleaned", request_id=request_id)
 
     async def broadcast_connection_error(self, error: Exception) -> None:
         """Отправить ошибку подключения всем pending очередям.

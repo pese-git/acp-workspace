@@ -23,9 +23,7 @@ class TestBackgroundReceiveLoop:
         # Создаем mock транспорт
         transport = AsyncMock(spec=WebSocketTransport)
         # Имитируем бесконечное получение сообщений (будет остановлено флагом)
-        transport.receive_text = AsyncMock(
-            side_effect=asyncio.CancelledError()
-        )
+        transport.receive_text = AsyncMock(side_effect=asyncio.CancelledError())
 
         router = MessageRouter()
         queues = RoutingQueues()
@@ -97,13 +95,39 @@ class TestBackgroundReceiveLoop:
         await loop.start()
 
         # Ждем сообщения в очереди уведомлений
-        received = await asyncio.wait_for(
-            queues.notification_queue.get(), timeout=2.0
-        )
+        received = await asyncio.wait_for(queues.notification_queue.get(), timeout=2.0)
 
         assert received == notification
 
         # Останавливаем loop
+        await loop.stop()
+
+    @pytest.mark.asyncio
+    async def test_turn_complete_dispatched_to_notification_queue(self) -> None:
+        """Сообщения session/turn_complete распределяются в notification queue."""
+        transport = AsyncMock(spec=WebSocketTransport)
+
+        notification = {
+            "method": "session/turn_complete",
+            "params": {
+                "sessionId": "sess-1",
+                "stopReason": "end_turn",
+            },
+        }
+        transport.receive_text = AsyncMock(
+            side_effect=[json.dumps(notification), asyncio.CancelledError()]
+        )
+
+        router = MessageRouter()
+        queues = RoutingQueues()
+        loop = BackgroundReceiveLoop(transport, router, queues)
+
+        await loop.start()
+
+        received = await asyncio.wait_for(queues.notification_queue.get(), timeout=2.0)
+
+        assert received == notification
+
         await loop.stop()
 
     @pytest.mark.asyncio
@@ -128,13 +152,63 @@ class TestBackgroundReceiveLoop:
         await loop.start()
 
         # Ждем сообщения в очереди разрешений
-        received = await asyncio.wait_for(
-            queues.permission_queue.get(), timeout=2.0
-        )
+        received = await asyncio.wait_for(queues.permission_queue.get(), timeout=2.0)
 
         assert received == permission
 
         # Останавливаем loop
+        await loop.stop()
+
+    @pytest.mark.asyncio
+    async def test_permission_request_with_id_dispatched_to_permission_queue(self) -> None:
+        """session/request_permission c id попадает в permission queue."""
+        transport = AsyncMock(spec=WebSocketTransport)
+
+        permission = {
+            "id": "perm-1",
+            "method": "session/request_permission",
+            "params": {"sessionId": "sess-1"},
+        }
+        transport.receive_text = AsyncMock(
+            side_effect=[json.dumps(permission), asyncio.CancelledError()]
+        )
+
+        router = MessageRouter()
+        queues = RoutingQueues()
+        loop = BackgroundReceiveLoop(transport, router, queues)
+
+        await loop.start()
+
+        received = await asyncio.wait_for(queues.permission_queue.get(), timeout=2.0)
+
+        assert received == permission
+
+        await loop.stop()
+
+    @pytest.mark.asyncio
+    async def test_fs_request_with_id_dispatched_to_notification_queue(self) -> None:
+        """fs/* request c id попадает в notification queue."""
+        transport = AsyncMock(spec=WebSocketTransport)
+
+        fs_request = {
+            "id": "rpc-1",
+            "method": "fs/read_text_file",
+            "params": {"path": "/tmp/test.txt"},
+        }
+        transport.receive_text = AsyncMock(
+            side_effect=[json.dumps(fs_request), asyncio.CancelledError()]
+        )
+
+        router = MessageRouter()
+        queues = RoutingQueues()
+        loop = BackgroundReceiveLoop(transport, router, queues)
+
+        await loop.start()
+
+        received = await asyncio.wait_for(queues.notification_queue.get(), timeout=2.0)
+
+        assert received == fs_request
+
         await loop.stop()
 
     @pytest.mark.asyncio
@@ -260,12 +334,12 @@ class TestBackgroundReceiveLoop:
         """Запуск loop несколько раз - вторая попытка игнорируется."""
         # Создаем mock транспорт
         transport = AsyncMock(spec=WebSocketTransport)
-        
+
         # Даем транспорту долго обрабатывать чтобы таска не завершилась
         async def slow_receive_text():
             await asyncio.sleep(10)
             return json.dumps({"id": 1, "result": "ok"})
-        
+
         transport.receive_text = slow_receive_text
 
         router = MessageRouter()
