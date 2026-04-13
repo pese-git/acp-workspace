@@ -56,11 +56,13 @@ class TestSessionPromptValidation:
         """Создает тестовую сессию."""
         session = SessionState(
             session_id="sess_1",
+            cwd="/tmp",
+            mcp_servers=[],
             config_values={},
             permission_policy={},
             tool_calls={},
             history=[],
-            latest_plan=None,
+            latest_plan=[],
             active_turn=None,
         )
         return {"sess_1": session}
@@ -108,11 +110,13 @@ class TestSessionPromptWithOrchestrator:
         """Создает тестовую сессию."""
         return SessionState(
             session_id="sess_1",
+            cwd="/tmp",
+            mcp_servers=[],
             config_values={},
             permission_policy={},
             tool_calls={},
             history=[],
-            latest_plan=None,
+            latest_plan=[],
             active_turn=None,
         )
 
@@ -155,11 +159,13 @@ class TestSessionPromptComponentIntegration:
         """Создает сессию с инициализированным turn."""
         session = SessionState(
             session_id="sess_1",
+            cwd="/tmp",
+            mcp_servers=[],
             config_values={"mode": "ask"},
             permission_policy={},
             tool_calls={},
             history=[],
-            latest_plan=None,
+            latest_plan=[],
             active_turn=ActiveTurnState(
                 prompt_request_id="req_1",
                 session_id="sess_1",
@@ -174,7 +180,7 @@ class TestSessionPromptComponentIntegration:
         # Act - обновляем заголовок сессии
         orchestrator.state_manager.update_session_title(
             session=session,
-            title="New Title",
+            text_preview="New Title",
         )
 
         # Assert
@@ -204,6 +210,7 @@ class TestSessionPromptComponentIntegration:
         """TurnLifecycleManager правильно определяет stop reason."""
         # Assume session has active_turn
         assert session.active_turn is not None
+        request_id = session.active_turn.prompt_request_id
 
         # Act
         final_message = orchestrator.turn_lifecycle_manager.finalize_active_turn(
@@ -214,7 +221,8 @@ class TestSessionPromptComponentIntegration:
         # Assert
         assert session.active_turn is None
         assert final_message is not None
-        assert final_message.method == "session/update"
+        assert final_message.id == request_id
+        assert final_message.result == {"stopReason": "end_turn"}
 
     def test_tool_call_handler_creates_tool_calls(
         self, orchestrator: PromptOrchestrator, session: SessionState
@@ -255,11 +263,13 @@ class TestSessionPromptErrorHandling:
         """Создает словарь сессий."""
         session = SessionState(
             session_id="sess_1",
+            cwd="/tmp",
+            mcp_servers=[],
             config_values={},
             permission_policy={},
             tool_calls={},
             history=[],
-            latest_plan=None,
+            latest_plan=[],
             active_turn=None,
         )
         return {"sess_1": session}
@@ -299,11 +309,13 @@ class TestPromptIntegrationWithAllComponents:
         orchestrator = create_prompt_orchestrator()
         session = SessionState(
             session_id="sess_1",
+            cwd="/tmp",
+            mcp_servers=[],
             config_values={"mode": "ask"},
             permission_policy={},
             tool_calls={},
             history=[],
-            latest_plan=None,
+            latest_plan=[],
             active_turn=None,
         )
         sessions = {"sess_1": session}
@@ -336,7 +348,7 @@ class TestPromptIntegrationWithAllComponents:
                 session_id="sess_1",
             )
         tool_call_id = orchestrator.tool_call_handler.create_tool_call(
-            session, "Test", "terminal"
+            session, title="Test", kind="terminal"
         )
 
         # 4. PermissionManager

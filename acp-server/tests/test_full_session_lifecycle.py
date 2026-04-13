@@ -12,9 +12,8 @@ from typing import Any
 import pytest
 
 from acp_server.protocol.handlers.prompt import create_prompt_orchestrator
-from acp_server.protocol.handlers.session import session_load, session_new
+from acp_server.protocol.handlers.session import session_load
 from acp_server.protocol.session_factory import SessionFactory
-from acp_server.protocol.state import SessionState
 
 
 class TestFullSessionLifecycle:
@@ -123,7 +122,8 @@ class TestFullSessionLifecycle:
                 n.params.get("update", {}).get("sessionUpdate") == "user_message_chunk")
         ]
         assert len(replayed_user_notifications) == 1
-        assert replayed_user_notifications[0].params["update"]["content"]["text"] == "Hello, how are you?"
+        user_text = replayed_user_notifications[0].params["update"]["content"]["text"]
+        assert user_text == "Hello, how are you?"
         
         # Ищем replayed agent_message_chunk
         replayed_agent_notifications = [
@@ -341,5 +341,9 @@ class TestFullSessionLifecycle:
             else:
                 actual_text = actual_content.get("text")
             
-            assert actual_type == expected_type, f"Event {i}: expected {expected_type}, got {actual_type}"
-            assert actual_text == expected_text, f"Event {i}: expected '{expected_text}', got '{actual_text}'"
+            assert (
+                actual_type == expected_type
+            ), f"Event {i}: expected {expected_type}, got {actual_type}"
+            assert (
+                actual_text == expected_text
+            ), f"Event {i}: expected '{expected_text}', got '{actual_text}'"

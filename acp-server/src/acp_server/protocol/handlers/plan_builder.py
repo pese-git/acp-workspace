@@ -105,6 +105,20 @@ class PlanBuilder:
 
         return normalized_entries or None
 
+    def normalize_plan_entries(
+        self,
+        raw_entries: Any,
+    ) -> list[dict[str, str]] | None:
+        """Alias для validate_plan_entries для обратной совместимости.
+
+        Args:
+            raw_entries: Сырые entries из directives или LLM response
+
+        Returns:
+            Нормализованный список {content, priority, status} или None
+        """
+        return self.validate_plan_entries(raw_entries)
+
     def build_plan_notification(
         self,
         session_id: str,

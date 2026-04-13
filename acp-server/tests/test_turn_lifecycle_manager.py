@@ -300,6 +300,7 @@ class TestTurnLifecycleFinalization:
         assert notification is not None
         assert isinstance(notification, ACPMessage)
         assert notification.method == "session/turn_complete"
+        assert notification.params is not None
         assert notification.params["sessionId"] == "sess_1"
         assert notification.params["stopReason"] == "end_turn"
 
@@ -326,6 +327,7 @@ class TestTurnLifecycleFinalization:
             )
             notification = lifecycle_manager.finalize_turn(session, stop_reason)
             assert notification is not None
+            assert notification.params is not None
             assert notification.params["stopReason"] == stop_reason
 
     def test_finalize_turn_normalizes_stop_reason(
@@ -340,6 +342,7 @@ class TestTurnLifecycleFinalization:
         )
         notification = lifecycle_manager.finalize_turn(session, "unsupported")
         assert notification is not None
+        assert notification.params is not None
         assert notification.params["stopReason"] == "end_turn"
 
 

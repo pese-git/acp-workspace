@@ -226,6 +226,28 @@ class TurnLifecycleManager:
 
         return notification
 
+    def finalize_active_turn(
+        self, session: SessionState, *, stop_reason: str
+    ) -> ACPMessage | None:
+        """Финализирует текущий active turn и очищает его состояние.
+
+        Args:
+            session: Состояние сессии
+            stop_reason: Причина завершения (e.g., "end_turn", "cancelled")
+
+        Returns:
+            ACPMessage с session/turn_complete или None если нет active_turn
+        """
+        active_turn = session.active_turn
+        if active_turn is None or active_turn.prompt_request_id is None:
+            return None
+
+        session.active_turn = None
+        return ACPMessage.response(
+            active_turn.prompt_request_id,
+            {"stopReason": stop_reason},
+        )
+
     def clear_active_turn(self, session: SessionState) -> None:
         """Очищает active turn (устанавливает в None).
 

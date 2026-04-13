@@ -4,14 +4,12 @@
 """
 
 import json
-import tempfile
-from pathlib import Path
 from typing import Any
 
 import pytest
 
 from acp_server.protocol.handlers.prompt import create_prompt_orchestrator
-from acp_server.protocol.handlers.session import session_load, session_new
+from acp_server.protocol.handlers.session import session_load
 from acp_server.protocol.session_factory import SessionFactory
 
 
@@ -45,7 +43,6 @@ class TestEndToEndWithStorage:
             runtime_capabilities=None,
         )
         
-        sessions = {session.session_id: session}
         orchestrator = create_prompt_orchestrator()
         
         # Act - Добавляем сообщение и проверяем формат события
