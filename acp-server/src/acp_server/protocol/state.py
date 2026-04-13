@@ -56,6 +56,9 @@ class SessionState:
     cancelled_client_rpc_requests: set[JsonRpcId] = field(default_factory=set)
     # Runtime-capabilities клиента, зафиксированные для этой сессии.
     runtime_capabilities: ClientRuntimeCapabilities | None = None
+    # История событий: session/update, turn_complete, permission requests и т.д.
+    # Используется для полного восстановления истории при перезагрузке сессии.
+    events_history: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(slots=True)

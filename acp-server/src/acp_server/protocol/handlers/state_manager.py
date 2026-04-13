@@ -114,6 +114,32 @@ class StateManager:
             timestamp=session.updated_at,
         )
 
+    def add_event(
+        self,
+        session: SessionState,
+        event_data: dict[str, Any],
+    ) -> None:
+        """Добавляет событие в историю событий сессии.
+
+        Используется для сохранения системных уведомлений: session/update,
+        turn_complete, permission requests, tool_call updates и т.д.
+
+        Args:
+            session: Состояние сессии
+            event_data: Данные события (будет добавлена временная метка)
+        """
+        # Добавляем временную метку к событию если еще не добавлена
+        event_entry = event_data.copy() if isinstance(event_data, dict) else event_data
+        if isinstance(event_entry, dict) and "timestamp" not in event_entry:
+            event_entry["timestamp"] = datetime.now(UTC).isoformat()
+
+        session.events_history.append(event_entry)
+        logger.debug(
+            "event added to events_history",
+            session_id=session.session_id,
+            event_type=event_entry.get("type", "unknown"),
+        )
+
     def get_session_summary(self, session: SessionState) -> dict[str, Any]:
         """Возвращает сводку состояния сессии для notifications.
 

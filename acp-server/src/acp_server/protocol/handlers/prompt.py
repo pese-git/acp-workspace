@@ -88,11 +88,13 @@ async def _handle_with_agent(
     session: SessionState,
     sessions: dict[str, SessionState],
     agent_orchestrator: AgentOrchestrator,
+    storage: Any | None = None,
 ) -> ProtocolOutcome:
     """Обрабатывает промпт через LLM-агента.
 
     Извлекает текст из prompt blocks, передает агенту для обработки,
     и формирует результат в виде ProtocolOutcome с notifications.
+    После обработки промпта сессия сохраняется в storage для персистентности истории.
 
     Args:
         request_id: ID запроса для response
@@ -100,6 +102,7 @@ async def _handle_with_agent(
         session: Состояние текущей сессии
         sessions: Словарь всех сессий
         agent_orchestrator: Оркестратор для обработки промпта
+        storage: SessionStorage для сохранения состояния (опционально)
 
     Returns:
         ProtocolOutcome с результатами обработки через агента
@@ -279,6 +282,14 @@ async def _handle_with_agent(
         session_title=session.title,
     )
 
+    # Сохраняем сессию в storage для персистентности истории после обработки агентом
+    if storage is not None:
+        try:
+            await storage.save_session(session)
+            logger.debug("session_saved_after_agent_processing", session_id=session_id)
+        except Exception as e:
+            logger.error("failed_to_save_session_after_agent_processing", error=str(e))
+
     return ProtocolOutcome(
         response=ACPMessage.response(request_id, {"stopReason": stop_reason}),
         notifications=notifications,
@@ -291,6 +302,7 @@ async def session_prompt(
     sessions: dict[str, SessionState],
     config_specs: dict[str, dict[str, Any]],
     agent_orchestrator: AgentOrchestrator | None = None,
+    storage: Any | None = None,
 ) -> ProtocolOutcome:
     """Обрабатывает пользовательский prompt-turn через PromptOrchestrator.
 
@@ -303,12 +315,15 @@ async def session_prompt(
     Если передан agent_orchestrator, обрабатывает промпт через LLM-агента.
     В противном случае использует legacy директивы для backward compatibility.
 
+    После обработки промпта сессия сохраняется в storage для персистентности истории.
+
     Args:
         request_id: ID запроса
         params: Параметры запроса (sessionId, prompt, ...)
         sessions: Словарь активных сессий
         config_specs: Спецификации конфигурационных опций (не используется в orchestrator)
         agent_orchestrator: Оркестратор агента для обработки через LLM (опционально)
+        storage: SessionStorage для сохранения состояния (опционально)
 
     Returns:
         ProtocolOutcome с notifications и response
@@ -373,6 +388,21 @@ async def session_prompt(
                 session_id=session_id,
                 notifications_count=len(outcome.notifications),
             )
+            
+            # Сохраняем сессию в storage после обработки оркестратором
+            if storage is not None:
+                try:
+                    await storage.save_session(session)
+                    logger.debug(
+                        "session_saved_after_orchestrator_processing",
+                        session_id=session_id,
+                    )
+                except Exception as e:
+                    logger.error(
+                        "failed_to_save_session_after_orchestrator_processing",
+                        error=str(e),
+                    )
+            
             return outcome
         except Exception as e:
             logger.error(
@@ -662,6 +692,15 @@ async def session_prompt(
         # Финальный response будет отправлен позже (автозавершение или cancel).
         if directives.keep_tool_pending and should_run_tool_flow:
             session.active_turn.phase = "waiting_tool_completion"
+        
+        # Сохраняем сессию в storage для персистентности истории даже при deferred completion
+        if storage is not None:
+            try:
+                await storage.save_session(session)
+                logger.debug("session_saved_after_prompt_deferred", session_id=session_id)
+            except Exception as e:
+                logger.error("failed_to_save_session_after_prompt_deferred", error=str(e))
+        
         return ProtocolOutcome(response=None, notifications=notifications)
 
     outcome = ProtocolOutcome(
@@ -669,6 +708,15 @@ async def session_prompt(
         notifications=notifications,
     )
     session.active_turn = None
+    
+    # Сохраняем сессию в storage для персистентности истории
+    if storage is not None:
+        try:
+            await storage.save_session(session)
+            logger.debug("session_saved_after_prompt", session_id=session_id)
+        except Exception as e:
+            logger.error("failed_to_save_session_after_prompt", error=str(e))
+    
     return outcome
 
 

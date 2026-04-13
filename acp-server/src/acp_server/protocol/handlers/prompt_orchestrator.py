@@ -118,14 +118,15 @@ class PromptOrchestrator:
         ack_notification = _build_ack_notification(session_id, text_preview)
         notifications.append(ack_notification)
 
-        # Шаг 5: Обработать через агента
+        # Шаг 5: Обработать через агента и получить ответ
+        agent_response_text = ""
         try:
-            updated_session = await agent_orchestrator.process_prompt(
+            # Agent Orchestrator теперь возвращает AgentResponse, не SessionState
+            agent_response = await agent_orchestrator.process_prompt(
                 session,
                 prompt_text,
             )
-            sessions[session_id] = updated_session
-            session = updated_session
+            agent_response_text = agent_response.text if agent_response else ""
         except Exception as e:
             error_message = f"Agent error: {str(e)}"
             error_notification = _build_error_notification(session_id, error_message)
@@ -136,13 +137,23 @@ class PromptOrchestrator:
                 error=str(e),
             )
 
-        # Шаг 6: Добавить ответ ассистента если есть
-        final_text = _extract_final_assistant_text(session.history)
-        if final_text:
-            self.state_manager.add_assistant_message(session, final_text)
+        # Шаг 6: Добавить ответ ассистента в messages_history и создать события
+        if agent_response_text:
+            # Добавляем assistant message в историю
+            self.state_manager.add_assistant_message(session, agent_response_text)
+            
+            # Добавляем события в events_history
+            # События отправляются клиенту и сохраняются для полного восстановления
+            self.state_manager.add_event(session, {
+                "type": "session_update",
+                "event": "agent_message_chunk",
+                "content": agent_response_text,
+            })
+            
+            # Строим notification для отправки клиенту
             final_notification = _build_agent_response_notification(
                 session_id,
-                final_text,
+                agent_response_text,
             )
             notifications.append(final_notification)
 
@@ -153,13 +164,21 @@ class PromptOrchestrator:
             summary,
         )
         notifications.append(session_info_notification)
+        
+        # Добавляем это событие в events_history
+        self.state_manager.add_event(session, {
+            "type": "session_update",
+            "event": "session_info",
+            "title": summary.get("title"),
+            "updated_at": summary.get("updated_at"),
+        })
 
         # Шаг 8: Построить plan updates если нужно
         # Извлечем directives из параметров (если есть)
         # Для простоты пока не добавляем план
         # В реальном коде здесь была бы обработка directives
 
-        # Шаг 9: Завершить turn
+        # Шаг 9: Завершить turn и добавить turn_complete событие
         stop_reason = "end_turn"
         final_notification = self.turn_lifecycle_manager.finalize_turn(
             session,
@@ -167,6 +186,11 @@ class PromptOrchestrator:
         )
         if final_notification:
             notifications.append(final_notification)
+            # Добавляем turn_complete событие в events_history
+            self.state_manager.add_event(session, {
+                "type": "turn_complete",
+                "stopReason": stop_reason,
+            })
 
         self.turn_lifecycle_manager.clear_active_turn(session)
 

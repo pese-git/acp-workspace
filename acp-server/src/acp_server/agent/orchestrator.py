@@ -8,7 +8,7 @@ from acp_server.agent.base import AgentContext, AgentResponse, LLMAgent
 from acp_server.agent.naive import NaiveAgent
 from acp_server.agent.state import OrchestratorConfig
 from acp_server.llm.base import LLMMessage, LLMProvider
-from acp_server.protocol.state import SessionState, ToolCallState
+from acp_server.protocol.state import SessionState
 from acp_server.tools.base import ToolRegistry
 
 # Используем structlog для структурированного логирования
@@ -61,15 +61,23 @@ class AgentOrchestrator:
         self,
         session_state: SessionState,
         prompt: str,
-    ) -> SessionState:
-        """Обработать промпт и обновить состояние сессии.
+    ) -> AgentResponse:
+        """Обработать промпт и вернуть ответ агента.
+
+        Согласно архитектуре двухуровневой истории, этот метод:
+        - НЕ добавляет assistant message в историю сессии
+        - НЕ модифицирует session_state
+        - ТОЛЬКО возвращает текст ответа агента
+        
+        История сообщений обновляется в PromptOrchestrator,
+        что обеспечивает централизованное управление сохранением.
 
         Args:
             session_state: Текущее состояние сессии
             prompt: Текст промпта от пользователя
 
         Returns:
-            Обновленное состояние сессии с результатами обработки
+            AgentResponse с текстом ответа и информацией о tool calls
         """
         # Создать контекст агента из состояния сессии
         agent_context = self._create_agent_context(session_state, prompt)
@@ -77,13 +85,19 @@ class AgentOrchestrator:
         # Вызвать агента для обработки промпта
         agent_response = await self.agent.process_prompt(agent_context)
 
-        # Обновить состояние сессии с результатами
-        updated_state = self._update_session_state(
-            session_state,
-            agent_response,
+        # Логируем результат обработки
+        logger.info(
+            "agent processed prompt successfully",
+            session_id=session_state.session_id,
+            response_length=len(agent_response.text),
+        )
+        logger.debug(
+            "agent response content",
+            content=agent_response.text[:200],
         )
 
-        return updated_state
+        # Возвращаем ответ агента без модификации session_state
+        return agent_response
 
     def _create_agent_context(
         self,
@@ -120,66 +134,6 @@ class AgentOrchestrator:
             available_tools=available_tools,
             config=session_state.config_values,
         )
-
-    def _update_session_state(
-        self,
-        session_state: SessionState,
-        response: AgentResponse,
-    ) -> SessionState:
-        """Обновить SessionState результатами от агента.
-
-        Args:
-            session_state: Исходное состояние сессии
-            response: Ответ от агента
-
-        Returns:
-            Обновленное состояние сессии
-        """
-        # Копируем состояние для модификации
-        updated_state = session_state
-
-        # Добавить user message в историю
-        updated_state.history.append({
-            "type": "text",
-            "role": "user",
-            "text": "User prompt",
-        })
-
-        # Добавить assistant message в историю
-        updated_state.history.append({
-            "type": "text",
-            "role": "assistant",
-            "text": response.text,
-        })
-        
-        # Логирование добавленного ответа ассистента в историю
-        logger.info(
-            "assistant message added to session history",
-            session_id=updated_state.session_id,
-            message_length=len(response.text),
-        )
-        logger.debug(
-            "assistant message content",
-            content=response.text[:200],
-        )
-
-        # Если есть tool calls, обновить их в состоянии
-        if response.tool_calls:
-            for tool_call in response.tool_calls:
-                # Создать ToolCallState для каждого вызова инструмента
-                tool_call_id = f"call_{len(updated_state.tool_calls)}"
-                tool_call_state = ToolCallState(
-                    tool_call_id=tool_call_id,
-                    title=tool_call.name,
-                    kind="other",
-                    status="pending",
-                )
-                updated_state.tool_calls[tool_call_id] = tool_call_state
-
-        # Обновить счетчик tool calls
-        updated_state.tool_call_counter = len(updated_state.tool_calls)
-
-        return updated_state
 
     def _convert_to_llm_messages(
         self,

@@ -273,6 +273,7 @@ class ACPProtocol:
                 self._sessions,
                 self._config_specs,
                 agent_orchestrator=self._agent_orchestrator,
+                storage=self._storage,
             )
 
         if method == "session/cancel":
