@@ -406,6 +406,57 @@ acp-server/src/acp_server/
 └── # Остальные модули...
 ```
 
+## Tool Calls Integration
+
+ACP сервер поддерживает встроенные инструменты для взаимодействия с локальной средой клиента:
+
+### Файловая система (fs/*)
+
+- **fs/read_text_file** - Чтение текстовых файлов
+  - Параметры: `path`, `line` (опционально), `limit` (опционально)
+  - Requires permission: `read`
+  
+- **fs/write_text_file** - Запись текстовых файлов
+  - Параметры: `path`, `content`
+  - Metadata: `diff` (unified diff формат)
+  - Requires permission: `write`
+
+### Терминал (terminal/*)
+
+- **terminal/create** - Создание терминала и выполнение команды
+  - Параметры: `command`, `args`, `env`, `cwd`, `output_byte_limit`
+  - Metadata: `terminal_id`
+  - Requires permission: `execute`
+  
+- **terminal/wait_for_exit** - Ожидание завершения процесса
+  - Параметры: `terminal_id`
+  - Metadata: `exit_code`
+  
+- **terminal/release** - Освобождение терминала
+  - Параметры: `terminal_id`
+
+### Permission Flow
+
+В режиме `mode: "ask"` сервер запрашивает разрешение перед выполнением инструментов:
+
+1. Агент возвращает tool calls в response
+2. Сервер отправляет `session/request_permission` notification
+3. Клиент отвечает через `session/respond_to_permission`
+4. Сервер выполняет или отклоняет tool call
+
+Поддерживаемые опции разрешений:
+- `allow_once` - Разрешить один раз
+- `allow_always` - Разрешить всегда (сохраняется в policy)
+- `reject_once` - Отклонить один раз
+- `reject_always` - Отклонить всегда (сохраняется в policy)
+
+### Примеры использования
+
+См. тесты в:
+- `tests/test_fs_executors.py`
+- `tests/test_terminal_executors.py`
+- `tests/test_tool_integration.py`
+
 ## Проверки
 
 ```bash

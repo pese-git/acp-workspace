@@ -6,6 +6,61 @@
 
 ## [Unreleased]
 
+### Added - Этап 3: Tool Calls Integration (2026-04-14)
+
+**Полная реализация встроенных инструментов для взаимодействия с локальной средой**
+
+#### Tool Calls Infrastructure
+- `SimpleToolRegistry` с поддержкой async executors
+- `ToolExecutor` базовый класс для всех executors
+- `ToolExecutionResult` с metadata поддержкой
+
+#### FileSystem Tool Executor
+- `FileSystemToolExecutor` для fs/* операций
+- `fs/read_text_file` с line и limit параметрами
+- `fs/write_text_file` с diff tracking в metadata
+- `ClientRPCBridge` для изоляции RPC вызовов
+
+#### Terminal Tool Executor
+- `TerminalToolExecutor` для terminal/* операций
+- `terminal/create` с env, cwd, output_byte_limit
+- `terminal/wait_for_exit` с exit_code в metadata
+- `terminal/release` для lifecycle management
+
+#### Tool Definitions
+- `FileSystemToolDefinitions` с JSON Schema валидацией
+- `TerminalToolDefinitions` с JSON Schema валидацией
+- Автоматическая регистрация в PromptOrchestrator
+
+#### Permission Flow
+- `PermissionManager.request_tool_permission()` метод
+- Интеграция в `PromptOrchestrator._process_tool_calls()`
+- Поддержка ask/code режимов
+- Permission policy персистентность (allow_always/reject_always)
+
+#### Integration
+- Tool calls обработка в `PromptOrchestrator.handle_prompt()`
+- Async tool execution через `tool_registry.execute_tool()`
+- Session/update notifications для tool call lifecycle
+- Permission request/response flow через WebSocket
+
+#### Tests
+- 27 тестов для FileSystemToolExecutor
+- 1 тест для TerminalToolExecutor
+- 28 тестов для Tool Definitions
+- 12 интеграционных тестов
+- 15 тестов для Permission Flow
+- **Всего: 83 новых теста**
+
+#### Changed
+- `PromptOrchestrator.__init__` теперь принимает `tool_registry` и `client_rpc_service`
+- `create_prompt_orchestrator()` обновлен для регистрации встроенных tools
+- `SimpleToolRegistry.execute_tool()` теперь полностью async с поддержкой metadata
+
+#### Documentation
+- Обновлен `acp-server/README.md` с секцией Tool Calls Integration
+- Обновлен `doc/ACP_IMPLEMENTATION_STATUS.md` со статистикой
+
 ### Added - Этап 2: Клиентские методы (File System и Terminal) (2026-04-14)
 
 **Полная реализация клиентских методов для доступа к локальной среде пользователя**

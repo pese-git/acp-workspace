@@ -15,11 +15,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from acp_server.protocol.state import SessionState, ToolCallState
+from acp_server.protocol.state import SessionState
 from acp_server.tools.executors.filesystem_executor import FileSystemToolExecutor
 from acp_server.tools.executors.terminal_executor import TerminalToolExecutor
 from acp_server.tools.integrations.client_rpc_bridge import ClientRPCBridge
 from acp_server.tools.integrations.permission_checker import PermissionChecker
+
 
 class TestToolExecutionErrorHandling:
     """Тесты обработки ошибок при выполнении инструментов."""

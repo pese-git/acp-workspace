@@ -409,18 +409,12 @@ async def session_prompt(
 
     # Если передан agent_orchestrator, использовать оркестратор для полной обработки
     if agent_orchestrator is not None:
-        # Проверить, что tool_registry и client_rpc_service переданы
+        # Создать оркестратор с доступными параметрами
+        # tool_registry и client_rpc_service опциональны для совместимости
         if tool_registry is None or client_rpc_service is None:
-            logger.error(
-                "tool_registry or client_rpc_service not provided for agent processing",
+            logger.warning(
+                "tool_registry or client_rpc_service not provided, tool execution will not be available",
                 session_id=session_id,
-            )
-            return ProtocolOutcome(
-                response=ACPMessage.error_response(
-                    request_id,
-                    code=-32603,
-                    message="Internal error: tool registry or RPC service not configured",
-                )
             )
 
         orchestrator = create_prompt_orchestrator(tool_registry, client_rpc_service)
