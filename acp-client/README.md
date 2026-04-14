@@ -154,6 +154,68 @@ acp-client/
 
 Подробнее см. [`doc/architecture/CONTENT_TYPES_ARCHITECTURE.md`](../doc/architecture/CONTENT_TYPES_ARCHITECTURE.md)
 
+## Обработка запросов от агента
+
+Клиент обрабатывает RPC запросы от агента для выполнения операций в локальной среде пользователя.
+
+### File System Handler
+
+Обработка файловых операций:
+
+- **`fs/read_text_file`** — чтение текстовых файлов с поддержкой диапазонов строк
+  - Безопасное чтение с валидацией пути
+  - Защита от path traversal атак
+  - Поддержка start_line и end_line для чтения части файла
+
+- **`fs/write_text_file`** — запись текстовых файлов с контролем создания
+  - Валидация пути и контроля создания новых файлов
+  - Sandbox режим с base_path
+  - Поддержка флагов create и overwrite
+
+**Реализация:**
+- [`FileSystemHandler`](src/acp_client/infrastructure/handlers/file_system_handler.py) — обработчик запросов
+- [`FileSystemExecutor`](src/acp_client/infrastructure/services/file_system_executor.py) — исполнитель операций
+- Асинхронные операции через `aiofiles` для неблокирующего I/O
+
+### Terminal Handler
+
+Управление терминальными процессами:
+
+- **`terminal/create`** — создание терминала и запуск команды
+  - Запуск subprocess с контролем окружения
+  - Поддержка аргументов и рабочей директории
+  - Автоматическая буферизация output
+
+- **`terminal/output`** — получение output терминала
+  - Чтение буферизованного output с лимитом размера
+  - Поддержка skip_bytes для пагинации
+
+- **`terminal/wait_for_exit`** — ожидание завершения процесса
+  - Асинхронное ожидание с таймаутом
+  - Возврат exit code при завершении
+
+- **`terminal/kill`** — принудительное завершение процесса
+  - Отправка сигнала SIGTERM/SIGKILL
+  - Очистка ресурсов процесса
+
+- **`terminal/release`** — освобождение ресурсов терминала
+  - Закрытие потоков ввода/вывода
+  - Удаление из трекера активных терминалов
+
+**Реализация:**
+- [`TerminalHandler`](src/acp_client/infrastructure/handlers/terminal_handler.py) — обработчик запросов
+- [`TerminalExecutor`](src/acp_client/infrastructure/services/terminal_executor.py) — исполнитель операций
+- Жизненный цикл терминала: CREATED → RUNNING → EXITED → RELEASED
+
+### Безопасность
+
+- **Защита от path traversal** — валидация всех путей файлов
+- **Sandbox режим** — ограничение доступа к файлам в пределах base_path
+- **Валидация параметров** — проверка всех входящих параметров
+- **Логирование операций** — structured logging всех операций
+
+Подробнее см. [`doc/architecture/CLIENT_METHODS_ARCHITECTURE.md`](../doc/architecture/CLIENT_METHODS_ARCHITECTURE.md)
+
 ## 🎯 Основные возможности
 
 ### TUI Интерфейс

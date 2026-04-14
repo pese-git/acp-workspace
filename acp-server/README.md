@@ -164,6 +164,67 @@ uv run acp-server --log-level DEBUG --log-json
 
 Подробнее см. [`doc/architecture/CONTENT_TYPES_ARCHITECTURE.md`](../../doc/architecture/CONTENT_TYPES_ARCHITECTURE.md)
 
+## Клиентские методы (Agent → Client RPC)
+
+Агент может вызывать методы на клиенте для доступа к локальной среде пользователя.
+
+### ClientRPCService
+
+Сервис для инициирования RPC вызовов на клиенте:
+
+```python
+from acp_server.client_rpc import ClientRPCService
+
+# Создать сервис
+rpc_service = ClientRPCService(
+    send_request_callback=transport.send,
+    client_capabilities=client_caps,
+    timeout=30.0
+)
+
+# Прочитать файл на клиенте
+content = await rpc_service.read_text_file(
+    session_id="sess_123",
+    path="/path/to/file.txt"
+)
+
+# Создать терминал на клиенте
+terminal_id = await rpc_service.create_terminal(
+    session_id="sess_123",
+    command="npm",
+    args=["test"]
+)
+
+# Получить output терминала
+output = await rpc_service.terminal_output(
+    session_id="sess_123",
+    terminal_id=terminal_id,
+    max_bytes=10000
+)
+```
+
+### Поддерживаемые методы
+
+#### File System
+- `read_text_file(path, start_line, end_line)` — чтение текстовых файлов с поддержкой диапазонов строк
+- `write_text_file(path, content, create, overwrite)` — запись текстовых файлов с контролем создания
+
+#### Terminal
+- `create_terminal(command, args, cwd)` — создание терминала и запуск команды
+- `terminal_output(terminal_id, max_bytes)` — получение output терминала
+- `wait_for_exit(terminal_id)` — ожидание завершения процесса
+- `kill_terminal(terminal_id)` — принудительное завершение процесса
+- `release_terminal(terminal_id)` — освобождение ресурсов терминала
+
+### Особенности
+
+- **Проверка возможностей:** Сервис проверяет `clientCapabilities` перед вызовом каждого метода
+- **Управление timeout:** Автоматическое управление ожидающими запросами с таймаутом
+- **Обработка ошибок:** Специализированные исключения для различных типов ошибок
+- **Безопасность:** Валидация всех параметров перед отправкой на клиент
+
+Подробнее см. [`doc/architecture/CLIENT_METHODS_ARCHITECTURE.md`](../../doc/architecture/CLIENT_METHODS_ARCHITECTURE.md)
+
 ## ACP методы
 
 - `authenticate`

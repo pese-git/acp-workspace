@@ -6,6 +6,83 @@
 
 ## [Unreleased]
 
+### Added - Этап 2: Клиентские методы (File System и Terminal) (2026-04-14)
+
+**Полная реализация клиентских методов для доступа к локальной среде пользователя**
+
+#### Архитектура
+- Создан архитектурный документ [`doc/architecture/CLIENT_METHODS_ARCHITECTURE.md`](doc/architecture/CLIENT_METHODS_ARCHITECTURE.md) (1600+ строк)
+- Исправлено понимание направления вызовов: Agent → Client RPC
+- 6 диаграмм Mermaid (Component, Sequence, State, Class)
+
+#### acp-server: ClientRPCService
+
+- Реализован [`ClientRPCService`](acp-server/src/acp_server/client_rpc/service.py) для инициирования RPC на клиент
+- 12 Pydantic V2 моделей для File System и Terminal методов
+- Иерархия исключений (ClientRPCError, ClientRPCTimeoutError, ClientCapabilityMissingError, ClientRPCResponseError)
+- Проверка clientCapabilities перед вызовами
+- Управление pending requests с timeout
+- 23 unit теста ✅
+
+#### acp-client: Handlers и Executors
+
+**FileSystemExecutor и FileSystemHandler:**
+- Асинхронные операции с файлами (read/write)
+- Валидация путей и защита от path traversal
+- Поддержка диапазонов строк для чтения
+- Sandbox режим с base_path
+- Обработка fs/read_text_file, fs/write_text_file
+- 13 unit тестов на каждый метод ✅
+
+**TerminalExecutor и TerminalHandler:**
+- Управление жизненным циклом процессов
+- Асинхронное чтение output с буферизацией
+- Поддержка лимитов на размер output
+- 5 состояний: CREATED → RUNNING → EXITED → RELEASED
+- Обработка всех 5 terminal методов:
+  - terminal/create (6 тестов)
+  - terminal/output (3 теста)
+  - terminal/wait_for_exit (3 теста)
+  - terminal/kill (3 теста)
+  - terminal/release (3 теста)
+- Итого 18 unit тестов ✅
+
+**Интеграция с DI container:**
+- Регистрация handlers в HandlerRegistry
+- Автоматическое подключение к transport layer
+
+#### Зависимости
+
+- Добавлена `aiofiles>=23.2.0` для асинхронных файловых операций
+
+#### Тестирование
+
+- **82 теста** (23 server + 59 client)
+- Все тесты PASSED ✅
+- Покрытие: валидация, обработка ошибок, edge cases
+- Ruff и pyright проверки пройдены
+
+#### Безопасность
+
+- Защита от path traversal атак
+- Sandbox режим для файловых операций
+- Валидация всех входящих параметров
+- Structured logging всех операций
+
+#### Документация
+
+- **Архитектурный план:** [`doc/architecture/CLIENT_METHODS_ARCHITECTURE.md`](doc/architecture/CLIENT_METHODS_ARCHITECTURE.md) — полная архитектура
+- **Спецификация:** [`doc/Agent Client Protocol/protocol/09-File System.md`](doc/Agent Client Protocol/protocol/09-File System.md) и [`doc/Agent Client Protocol/protocol/10-Terminal.md`](doc/Agent Client Protocol/protocol/10-Terminal.md)
+
+#### Метрики качества
+| Метрика | Значение |
+|---------|----------|
+| acp-server (ClientRPCService) | 4 файла, ~500 LOC, 23 теста ✅ |
+| acp-client (Handlers + Executors) | 6 файлов, ~924 LOC, 59 тестов ✅ |
+| **Всего** | **10 файлов, ~1424 LOC, 82 теста ✅** |
+| ruff check | ✅ 0 ошибок |
+| type check | ✅ 0 ошибок |
+
 ### Added - Content Types Implementation (Этап 1) (2026-04-14)
 
 **Полная реализация Content типов согласно ACP спецификации**

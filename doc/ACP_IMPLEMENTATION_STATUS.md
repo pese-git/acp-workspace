@@ -104,6 +104,88 @@
 - **Архитектурный план:** [`doc/architecture/CONTENT_TYPES_ARCHITECTURE.md`](doc/architecture/CONTENT_TYPES_ARCHITECTURE.md)
 - **Спецификация:** [`doc/Agent Client Protocol/protocol/06-Content.md`](doc/Agent Client Protocol/protocol/06-Content.md)
 
+## Клиентские методы (Этап 2) ✅
+
+### Статус: ✅ Реализовано
+
+#### File System методы
+
+| Метод | Направление | Статус | Тесты | Описание |
+|-------|-------------|--------|-------|----------|
+| `fs/read_text_file` | Agent → Client | ✅ | 13 | Чтение текстовых файлов с поддержкой диапазонов |
+| `fs/write_text_file` | Agent → Client | ✅ | 13 | Запись текстовых файлов с валидацией |
+
+**Реализация:**
+- **Server**: [`ClientRPCService`](acp-server/src/acp_server/client_rpc/service.py) — инициирование RPC
+- **Client**: [`FileSystemHandler`](acp-client/src/acp_client/infrastructure/handlers/file_system_handler.py) + [`FileSystemExecutor`](acp-client/src/acp_client/infrastructure/services/file_system_executor.py)
+
+**Особенности:**
+- Защита от path traversal атак
+- Sandbox режим с base_path
+- Асинхронные операции через aiofiles
+- Capability check перед вызовами
+
+#### Terminal методы
+
+| Метод | Направление | Статус | Тесты | Описание |
+|-------|-------------|--------|-------|----------|
+| `terminal/create` | Agent → Client | ✅ | 6 | Создание терминала и запуск команды |
+| `terminal/output` | Agent → Client | ✅ | 3 | Получение output терминала |
+| `terminal/wait_for_exit` | Agent → Client | ✅ | 3 | Ожидание завершения процесса |
+| `terminal/kill` | Agent → Client | ✅ | 3 | Принудительное завершение процесса |
+| `terminal/release` | Agent → Client | ✅ | 3 | Освобождение ресурсов терминала |
+
+**Реализация:**
+- **Server**: [`ClientRPCService`](acp-server/src/acp_server/client_rpc/service.py) — инициирование RPC
+- **Client**: [`TerminalHandler`](acp-client/src/acp_client/infrastructure/handlers/terminal_handler.py) + [`TerminalExecutor`](acp-client/src/acp_client/infrastructure/services/terminal_executor.py)
+
+**Особенности:**
+- Асинхронное управление процессами
+- Буферизация output с лимитами
+- Жизненный цикл: CREATED → RUNNING → EXITED → RELEASED
+- Правильное управление ресурсами
+
+#### Архитектура
+
+**Bidirectional JSON-RPC:**
+```
+Agent (acp-server)                    Client (acp-client)
+    |                                        |
+    | ClientRPCService                       |
+    |   ↓                                    |
+    | send_request(fs/read_text_file)        |
+    |--------------------------------→       |
+    |                                  HandlerRegistry
+    |                                        ↓
+    |                                  FileSystemHandler
+    |                                        ↓
+    |                                  FileSystemExecutor
+    |                                        ↓
+    |                                  Local File System
+    |                                        |
+    |       ←--------------------------------|
+    |   response {content: "..."}            |
+```
+
+**Документация:**
+- [`doc/architecture/CLIENT_METHODS_ARCHITECTURE.md`](doc/architecture/CLIENT_METHODS_ARCHITECTURE.md) — полная архитектура с 6 диаграммами
+- [`doc/Agent Client Protocol/protocol/09-File System.md`](doc/Agent Client Protocol/protocol/09-File System.md) — спецификация File System методов
+- [`doc/Agent Client Protocol/protocol/10-Terminal.md`](doc/Agent Client Protocol/protocol/10-Terminal.md) — спецификация Terminal методов
+
+#### Статистика
+
+| Компонент | Файлы | Строк кода | Тесты |
+|-----------|-------|-----------|-------|
+| acp-server (ClientRPCService) | 4 | ~500 | 23 |
+| acp-client (Handlers + Executors) | 6 | ~924 | 59 |
+| **Всего** | **10** | **~1424** | **82** |
+
+#### Следующие шаги
+
+- **Фаза 5**: Интеграция с Permission Management (запрос разрешений для write_text_file и terminal/create)
+- **Интеграция с Tool Calls**: использование fs/* и terminal/* внутри tool call execution
+- **Transport integration**: подключение handlers к реальному transport layer
+
 ## Приоритетный backlog
 
 1. Финализировать production execution backend для `session/prompt` (убрать оставшийся in-memory executor stub и подключить реальное выполнение инструментов).
