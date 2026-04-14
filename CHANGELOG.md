@@ -6,6 +6,75 @@
 
 ## [Unreleased]
 
+### Added - Content Types Implementation (Этап 1) (2026-04-14)
+
+**Полная реализация Content типов согласно ACP спецификации**
+
+#### Реализованные Content типы
+- ✅ **TextContent** — текстовые сообщения
+- ✅ **ImageContent** — изображения (PNG, JPEG, GIF, WebP) с поддержкой base64 кодирования
+- ✅ **AudioContent** — аудиоданные (WAV, MP3, MPEG) с поддержкой base64 кодирования
+- ✅ **EmbeddedResourceContent** — встроенные ресурсы с метаданными
+- ✅ **ResourceLinkContent** — ссылки на ресурсы с типом и uri
+
+#### Архитектура реализации
+- **Структура:** Pydantic dataclasses с валидацией типов
+- **Полиморфизм:** Discriminated union для безопасного типирования
+- **Кодирование:** Base64 для бинарных данных (изображения, аудио)
+- **Совместимость:** Идентичная реализация на server и client сторонах
+
+#### Модули реализации
+
+**acp-server** (`acp-server/src/acp_server/protocol/content/`):
+- `base.py` — базовые классы и интерфейсы
+- `text.py` — TextContent реализация
+- `image.py` — ImageContent реализация с валидацией MIME типов
+- `audio.py` — AudioContent реализация с валидацией MIME типов
+- `embedded.py` — EmbeddedResourceContent реализация
+- `resource_link.py` — ResourceLinkContent реализация
+- `__init__.py` — экспорт публичного API
+
+**acp-client** (`acp-client/src/acp_client/domain/content/`):
+- `base.py` — базовые классы и интерфейсы
+- `text.py` — TextContent реализация
+- `image.py` — ImageContent реализация с валидацией MIME типов
+- `audio.py` — AudioContent реализация с валидацией MIME типов
+- `embedded.py` — EmbeddedResourceContent реализация
+- `resource_link.py` — ResourceLinkContent реализация
+- `__init__.py` — экспорт публичного API
+
+#### Тестирование
+- **Server unit тесты:** 40 тестов
+  - `test_content_base.py` — базовая функциональность
+  - `test_content_text.py` — TextContent
+  - `test_content_image.py` — ImageContent
+  - `test_content_audio.py` — AudioContent
+  - `test_content_embedded.py` — EmbeddedResourceContent
+  - `test_content_resource_link.py` — ResourceLinkContent
+
+- **Client unit тесты:** 40 тестов (аналогичная структура)
+
+- **Integration тесты:** 52 теста
+  - Server integration: 20 тестов (`test_content_integration.py`)
+  - Client integration: 25 тестов (`test_content_integration.py`)
+  - Cross-compatibility: 7 тестов (`test_content_cross_compatibility.py`)
+
+- **Итого:** 132 теста (100% успешность)
+
+#### Документация
+- **Архитектурный план:** [`doc/architecture/CONTENT_TYPES_ARCHITECTURE.md`](doc/architecture/CONTENT_TYPES_ARCHITECTURE.md) — полное описание дизайна и реализации
+- **Спецификация:** [`doc/Agent Client Protocol/protocol/06-Content.md`](doc/Agent Client Protocol/protocol/06-Content.md) — официальная спецификация протокола
+
+#### Метрики качества
+| Метрика | Значение |
+|---------|----------|
+| Unit тесты | 80/80 ✅ |
+| Integration тесты | 52/52 ✅ |
+| Всего тестов | 132/132 ✅ |
+| ruff check | ✅ 0 ошибок |
+| type check | ✅ 0 ошибок |
+| Покрытие | 100% критических путей |
+
 ### Added - ACP Server Phase 1 Critical Refactoring (2026-04-11)
 
 **Критический рефакторинг архитектуры acp-server с целью разрешения проблем модульности, типизации и дублирования кода**

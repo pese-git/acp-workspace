@@ -58,6 +58,52 @@
 - Архитектура стала более модульной и расширяемой
 - Упрощено добавление новых features и storage backends
 
+## Content Types (Этап 1) ✅
+
+### Реализовано
+- ✅ TextContent - текстовое содержимое
+- ✅ ImageContent - изображения (PNG, JPEG, GIF, WebP)
+- ✅ AudioContent - аудиоданные (WAV, MP3, MPEG)
+- ✅ EmbeddedResourceContent - встроенные ресурсы
+- ✅ ResourceLinkContent - ссылки на ресурсы
+
+### Архитектура
+- Pydantic dataclasses с валидацией
+- Discriminated union для полиморфизма
+- Base64 кодирование для бинарных данных
+- Полная совместимость между server и client
+
+### Модули реализации
+
+#### acp-server
+- `acp-server/src/acp_server/protocol/content/` — модули Content типов:
+  - `base.py` — базовые классы и интерфейсы
+  - `text.py` — TextContent
+  - `image.py` — ImageContent
+  - `audio.py` — AudioContent
+  - `embedded.py` — EmbeddedResourceContent
+  - `resource_link.py` — ResourceLinkContent
+  - `__init__.py` — экспорт публичного API
+
+#### acp-client
+- `acp-client/src/acp_client/domain/content/` — модули Content типов:
+  - `base.py` — базовые классы и интерфейсы
+  - `text.py` — TextContent
+  - `image.py` — ImageContent
+  - `audio.py` — AudioContent
+  - `embedded.py` — EmbeddedResourceContent
+  - `resource_link.py` — ResourceLinkContent
+  - `__init__.py` — экспорт публичного API
+
+### Тестирование
+- **Unit тесты:** 80 (40 server + 40 client)
+- **Integration тесты:** 52 (20 server + 25 client + 7 cross-compatibility)
+- **Всего:** 132 теста (100% успех)
+
+### Документация
+- **Архитектурный план:** [`doc/architecture/CONTENT_TYPES_ARCHITECTURE.md`](doc/architecture/CONTENT_TYPES_ARCHITECTURE.md)
+- **Спецификация:** [`doc/Agent Client Protocol/protocol/06-Content.md`](doc/Agent Client Protocol/protocol/06-Content.md)
+
 ## Приоритетный backlog
 
 1. Финализировать production execution backend для `session/prompt` (убрать оставшийся in-memory executor stub и подключить реальное выполнение инструментов).

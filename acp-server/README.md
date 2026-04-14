@@ -150,6 +150,20 @@ uv run acp-server --log-level DEBUG --log-json
 - **deferred prompt completed** — завершение отложенного prompt (connection_id, session_id)
 - **deferred prompt cancelled** — отмена отложенного prompt (connection_id, session_id)
 
+## Content Types
+
+Сервер поддерживает следующие типы контента согласно ACP спецификации:
+
+- **TextContent** - текстовые сообщения
+- **ImageContent** - изображения (base64, PNG, JPEG, GIF, WebP)
+- **AudioContent** - аудиоданные (base64, WAV, MP3, MPEG)
+- **EmbeddedResourceContent** - встроенные ресурсы
+- **ResourceLinkContent** - ссылки на ресурсы
+
+Реализация использует Pydantic dataclasses с валидацией и discriminated union для полиморфизма.
+
+Подробнее см. [`doc/architecture/CONTENT_TYPES_ARCHITECTURE.md`](../../doc/architecture/CONTENT_TYPES_ARCHITECTURE.md)
+
 ## ACP методы
 
 - `authenticate`

@@ -140,6 +140,20 @@ acp-client/
 └── README.md                      # Этот файл
 ```
 
+## Content Types
+
+Клиент поддерживает полный спектр Content типов согласно ACP спецификации:
+
+- **TextContent** - текстовые сообщения
+- **ImageContent** - изображения (base64, PNG, JPEG, GIF, WebP)
+- **AudioContent** - аудиоданные (base64, WAV, MP3, MPEG)
+- **EmbeddedResourceContent** - встроенные ресурсы
+- **ResourceLinkContent** - ссылки на ресурсы
+
+Реализация находится в `src/acp_client/domain/content/` и полностью совместима с серверной реализацией.
+
+Подробнее см. [`doc/architecture/CONTENT_TYPES_ARCHITECTURE.md`](../doc/architecture/CONTENT_TYPES_ARCHITECTURE.md)
+
 ## 🎯 Основные возможности
 
 ### TUI Интерфейс
