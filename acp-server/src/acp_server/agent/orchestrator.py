@@ -37,6 +37,10 @@ class AgentOrchestrator:
             config: Конфигурация с LLM provider и tool registry
             llm_provider: Провайдер LLM для запросов
             tool_registry: Реестр инструментов для выполнения
+            
+        Примечание:
+            Встроенные инструменты (fs/*, terminal/*) регистрируются
+            в PromptOrchestrator, где доступен контекст сессии.
         """
         self.config = config
         self.llm_provider = llm_provider

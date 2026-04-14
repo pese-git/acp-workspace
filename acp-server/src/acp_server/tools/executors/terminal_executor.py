@@ -1,0 +1,321 @@
+"""Executor для терминальных операций через ClientRPC."""
+
+from __future__ import annotations
+
+from typing import Any
+
+import structlog
+
+from acp_server.protocol.state import SessionState
+from acp_server.tools.base import ToolExecutionResult
+from acp_server.tools.executors.base import ToolExecutor
+from acp_server.tools.integrations.client_rpc_bridge import ClientRPCBridge
+from acp_server.tools.integrations.permission_checker import PermissionChecker
+
+logger = structlog.get_logger()
+
+
+class TerminalToolExecutor(ToolExecutor):
+    """Executor для терминальных операций через ClientRPC.
+    
+    Поддерживает:
+    - terminal/create (запуск команды)
+    - terminal/wait_for_exit (ожидание завершения)
+    - terminal/release (освобождение терминала)
+    
+    Интегрирует проверку разрешений, логирование и lifecycle management.
+    """
+
+    def __init__(
+        self,
+        client_rpc_bridge: ClientRPCBridge,
+        permission_checker: PermissionChecker,
+    ) -> None:
+        """Инициализировать executor с зависимостями.
+        
+        Args:
+            client_rpc_bridge: Адаптер для ClientRPCService.
+            permission_checker: Адаптер для PermissionManager.
+        """
+        self._bridge = client_rpc_bridge
+        self._permission_checker = permission_checker
+
+    async def execute(
+        self,
+        session: SessionState,
+        arguments: dict[str, Any],
+    ) -> ToolExecutionResult:
+        """Выполнить инструмент на основе аргументов.
+        
+        Args:
+            session: Состояние сессии.
+            arguments: Словарь аргументов инструмента.
+                Ожидается поле 'operation' для выбора метода.
+                
+        Returns:
+            ToolExecutionResult с результатом выполнения.
+        """
+        operation = arguments.get("operation")
+        
+        if operation == "create":
+            return await self.execute_create(
+                session=session,
+                command=arguments.get("command", ""),
+                args=arguments.get("args"),
+                env=arguments.get("env"),
+                cwd=arguments.get("cwd"),
+                output_byte_limit=arguments.get("output_byte_limit"),
+            )
+        elif operation == "wait_for_exit":
+            return await self.execute_wait_for_exit(
+                session=session,
+                terminal_id=arguments.get("terminal_id", ""),
+            )
+        elif operation == "release":
+            return await self.execute_release(
+                session=session,
+                terminal_id=arguments.get("terminal_id", ""),
+            )
+        else:
+            return ToolExecutionResult(
+                success=False,
+                error=f"Неизвестная операция: {operation}",
+            )
+
+    async def execute_create(
+        self,
+        session: SessionState,
+        command: str,
+        args: list[str] | None = None,
+        env: dict[str, str] | None = None,
+        cwd: str | None = None,
+        output_byte_limit: int | None = None,
+    ) -> ToolExecutionResult:
+        """Создать терминал и запустить команду через ClientRPC.
+        
+        Args:
+            session: Состояние сессии.
+            command: Команда для выполнения.
+            args: Аргументы команды (опционально).
+            env: Переменные окружения (опционально).
+            cwd: Рабочая директория (опционально).
+            output_byte_limit: Лимит байт output (опционально).
+            
+        Returns:
+            ToolExecutionResult с terminal_id в metadata.
+        """
+        try:
+            logger.debug(
+                "Начало выполнения terminal/create",
+                extra={
+                    "session_id": session.session_id,
+                    "command": command,
+                    "cwd": cwd,
+                },
+            )
+            
+            # Проверка разрешения
+            if self._permission_checker.should_request_permission(
+                session, "execute"
+            ):
+                logger.debug(
+                    "Требуется разрешение для выполнения команды",
+                    extra={"session_id": session.session_id, "command": command},
+                )
+                # Примечание: Здесь должна быть интеграция с PromptOrchestrator
+                # для ожидания разрешения в ask-режиме. На данный момент пропускаем.
+            
+            # Вызов ClientRPC для создания терминала
+            terminal_id = await self._bridge.create_terminal(
+                session=session,
+                command=command,
+                args=args,
+                env=env,
+                cwd=cwd,
+                output_byte_limit=output_byte_limit,
+            )
+            
+            if terminal_id is None:
+                return ToolExecutionResult(
+                    success=False,
+                    error=f"Ошибка при создании терминала для команды: {command}",
+                )
+            
+            logger.debug(
+                "Терминал успешно создан",
+                extra={
+                    "session_id": session.session_id,
+                    "terminal_id": terminal_id,
+                    "command": command,
+                },
+            )
+            
+            # Сохранить terminal_id в session для отслеживания
+            if not hasattr(session, "active_terminals"):
+                session.active_terminals = {}
+            session.active_terminals[terminal_id] = {
+                "command": command,
+                "cwd": cwd,
+            }
+            
+            return ToolExecutionResult(
+                success=True,
+                output=f"Терминал создан с ID: {terminal_id}",
+                metadata={
+                    "terminal_id": terminal_id,
+                    "command": command,
+                },
+            )
+            
+        except Exception as e:
+            logger.error(
+                "Ошибка при создании терминала",
+                extra={
+                    "session_id": session.session_id,
+                    "command": command,
+                    "error": str(e),
+                },
+            )
+            return ToolExecutionResult(
+                success=False,
+                error=f"Ошибка при создании терминала: {str(e)}",
+            )
+
+    async def execute_wait_for_exit(
+        self,
+        session: SessionState,
+        terminal_id: str,
+    ) -> ToolExecutionResult:
+        """Ожидать завершения терминала через ClientRPC.
+        
+        Args:
+            session: Состояние сессии.
+            terminal_id: ID терминала.
+            
+        Returns:
+            ToolExecutionResult с exit_code и output.
+        """
+        try:
+            logger.debug(
+                "Начало выполнения terminal/wait_for_exit",
+                extra={
+                    "session_id": session.session_id,
+                    "terminal_id": terminal_id,
+                },
+            )
+            
+            # Вызов ClientRPC для ожидания завершения
+            result = await self._bridge.wait_terminal_exit(
+                session=session,
+                terminal_id=terminal_id,
+            )
+            
+            if result is None:
+                return ToolExecutionResult(
+                    success=False,
+                    error=f"Ошибка при ожидании завершения терминала: {terminal_id}",
+                )
+            
+            exit_code = result.get("exit_code", -1)
+            output = result.get("output", "")
+            
+            logger.debug(
+                "Терминал завершен",
+                extra={
+                    "session_id": session.session_id,
+                    "terminal_id": terminal_id,
+                    "exit_code": exit_code,
+                },
+            )
+            
+            return ToolExecutionResult(
+                success=True,
+                output=output,
+                metadata={
+                    "terminal_id": terminal_id,
+                    "exit_code": exit_code,
+                },
+            )
+            
+        except Exception as e:
+            logger.error(
+                "Ошибка при ожидании завершения терминала",
+                extra={
+                    "session_id": session.session_id,
+                    "terminal_id": terminal_id,
+                    "error": str(e),
+                },
+            )
+            return ToolExecutionResult(
+                success=False,
+                error=f"Ошибка при ожидании завершения терминала: {str(e)}",
+            )
+
+    async def execute_release(
+        self,
+        session: SessionState,
+        terminal_id: str,
+    ) -> ToolExecutionResult:
+        """Освободить терминал через ClientRPC.
+        
+        Args:
+            session: Состояние сессии.
+            terminal_id: ID терминала.
+            
+        Returns:
+            ToolExecutionResult с результатом освобождения.
+        """
+        try:
+            logger.debug(
+                "Начало выполнения terminal/release",
+                extra={
+                    "session_id": session.session_id,
+                    "terminal_id": terminal_id,
+                },
+            )
+            
+            # Вызов ClientRPC для освобождения терминала
+            success = await self._bridge.release_terminal(
+                session=session,
+                terminal_id=terminal_id,
+            )
+            
+            if not success:
+                return ToolExecutionResult(
+                    success=False,
+                    error=f"Ошибка при освобождении терминала: {terminal_id}",
+                )
+            
+            logger.debug(
+                "Терминал успешно освобожден",
+                extra={
+                    "session_id": session.session_id,
+                    "terminal_id": terminal_id,
+                },
+            )
+            
+            # Удалить terminal_id из session
+            if hasattr(session, "active_terminals"):
+                session.active_terminals.pop(terminal_id, None)
+            
+            return ToolExecutionResult(
+                success=True,
+                output=f"Терминал {terminal_id} успешно освобожден",
+                metadata={
+                    "terminal_id": terminal_id,
+                },
+            )
+            
+        except Exception as e:
+            logger.error(
+                "Ошибка при освобождении терминала",
+                extra={
+                    "session_id": session.session_id,
+                    "terminal_id": terminal_id,
+                    "error": str(e),
+                },
+            )
+            return ToolExecutionResult(
+                success=False,
+                error=f"Ошибка при освобождении терминала: {str(e)}",
+            )

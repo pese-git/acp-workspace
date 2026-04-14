@@ -6,6 +6,7 @@ tool calls, и других компонентов протокола.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -59,6 +60,9 @@ class SessionState:
     # История событий: session/update, permission requests и т.д.
     # Используется для полного восстановления истории при перезагрузке сессии.
     events_history: list[dict[str, Any]] = field(default_factory=list)
+    # Ожидающие asyncio.Future для permission requests (request_id -> Future).
+    # Используется для асинхронного ожидания ответов пользователя на запросы разрешений.
+    pending_permission_requests: dict[JsonRpcId, asyncio.Future] = field(default_factory=dict)
 
 
 @dataclass(slots=True)

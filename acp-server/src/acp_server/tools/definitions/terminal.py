@@ -1,0 +1,134 @@
+"""Определения для терминальных инструментов (terminal/*)."""
+
+from __future__ import annotations
+
+from acp_server.tools.base import ToolDefinition
+
+
+class TerminalToolDefinitions:
+    """Фабрика для создания определений терминальных инструментов.
+    
+    Поддерживает:
+    - terminal/create: Создание терминала и запуск команды
+    - terminal/wait_for_exit: Ожидание завершения процесса
+    - terminal/release: Освобождение терминала
+    """
+
+    @staticmethod
+    def create() -> ToolDefinition:
+        """Создать определение для инструмента terminal/create.
+        
+        Позволяет LLM создавать терминалы и запускать команды
+        в окружении клиента с поддержкой параметров запуска.
+        
+        Returns:
+            ToolDefinition для регистрации в реестре.
+        """
+        return ToolDefinition(
+            name="execute_command",
+            description=(
+                "Create a new terminal and execute a command. "
+                "Returns terminal ID for subsequent operations like wait_for_exit and release."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "Command to execute (e.g., 'npm', 'python')",
+                    },
+                    "args": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Command arguments (optional)",
+                    },
+                    "env": {
+                        "type": "object",
+                        "description": "Environment variables to set (optional)",
+                        "additionalProperties": {"type": "string"},
+                    },
+                    "cwd": {
+                        "type": "string",
+                        "description": "Working directory for the command (optional)",
+                    },
+                    "output_byte_limit": {
+                        "type": "integer",
+                        "description": "Maximum output bytes to retain (optional)",
+                    },
+                    "operation": {
+                        "type": "string",
+                        "description": "Internal: operation type (create)",
+                    },
+                },
+                "required": ["command"],
+            },
+            kind="execute",
+            requires_permission=True,
+        )
+
+    @staticmethod
+    def wait_for_exit() -> ToolDefinition:
+        """Создать определение для инструмента terminal/wait_for_exit.
+        
+        Позволяет LLM ожидать завершения выполнения команды в терминале
+        и получить exit code вместе с output.
+        
+        Returns:
+            ToolDefinition для регистрации в реестре.
+        """
+        return ToolDefinition(
+            name="wait_for_exit",
+            description=(
+                "Wait for a terminal to complete execution and retrieve the exit code and output. "
+                "Use after execute_command to get the result of a long-running command."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "terminal_id": {
+                        "type": "string",
+                        "description": "Terminal ID returned by execute_command",
+                    },
+                    "operation": {
+                        "type": "string",
+                        "description": "Internal: operation type (wait_for_exit)",
+                    },
+                },
+                "required": ["terminal_id"],
+            },
+            kind="read",
+            requires_permission=False,
+        )
+
+    @staticmethod
+    def release() -> ToolDefinition:
+        """Создать определение для инструмента terminal/release.
+        
+        Позволяет LLM освобождать ресурсы терминала после завершения работы.
+        
+        Returns:
+            ToolDefinition для регистрации в реестре.
+        """
+        return ToolDefinition(
+            name="release_terminal",
+            description=(
+                "Release terminal resources and clean up. "
+                "Should be called after wait_for_exit to free up resources."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "terminal_id": {
+                        "type": "string",
+                        "description": "Terminal ID returned by execute_command",
+                    },
+                    "operation": {
+                        "type": "string",
+                        "description": "Internal: operation type (release)",
+                    },
+                },
+                "required": ["terminal_id"],
+            },
+            kind="delete",
+            requires_permission=False,
+        )

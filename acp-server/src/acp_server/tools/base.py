@@ -19,11 +19,24 @@ class ToolDefinition:
 
 @dataclass
 class ToolExecutionResult:
-    """Результат выполнения инструмента."""
+    """Результат выполнения инструмента.
+    
+    Атрибуты:
+        success: Успешно ли выполнен инструмент
+        output: Текстовый вывод инструмента (опционально)
+        error: Сообщение об ошибке при неудачном выполнении (опционально)
+        metadata: Дополнительные метаданные для специфичных инструментов (опционально)
+    
+    Примеры использования metadata:
+        - terminal_id для terminal/create: {"terminal_id": "term_xyz789"}
+        - diff для fs/write_text_file: {"diff": "--- old\\n+++ new\\n..."}
+        - file_size для fs/read_text_file: {"file_size": 1024, "lines": 50}
+    """
 
     success: bool
     output: str | None = None
     error: str | None = None
+    metadata: dict[str, Any] | None = None
 
 
 class ToolRegistry(ABC):
