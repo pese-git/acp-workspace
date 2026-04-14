@@ -44,7 +44,7 @@ class OpenAIProvider(LLMProvider):
             }
         """
         logger.debug("initializing openai provider")
-        
+
         api_key = config.get("api_key")
         self._model = config.get("model", "gpt-4o")
         self._temperature = config.get("temperature", 0.7)
@@ -94,10 +94,7 @@ class OpenAIProvider(LLMProvider):
         )
 
         # Преобразовать сообщения в формат OpenAI
-        openai_messages = [
-            {"role": msg.role, "content": msg.content}
-            for msg in messages
-        ]
+        openai_messages = [{"role": msg.role, "content": msg.content} for msg in messages]
 
         # Подготовить параметры запроса
         request_params = {
@@ -123,7 +120,7 @@ class OpenAIProvider(LLMProvider):
             )
 
             parsed_response = self._parse_completion(response)
-            
+
             # Логирование полученного ответа от LLM
             logger.info(
                 "llm response received",
@@ -140,7 +137,7 @@ class OpenAIProvider(LLMProvider):
                 tool_calls_count=len(parsed_response.tool_calls),
                 stop_reason=parsed_response.stop_reason,
             )
-            
+
             return parsed_response
 
         except Exception as e:
@@ -173,10 +170,7 @@ class OpenAIProvider(LLMProvider):
         )
 
         # Преобразовать сообщения
-        openai_messages = [
-            {"role": msg.role, "content": msg.content}
-            for msg in messages
-        ]
+        openai_messages = [{"role": msg.role, "content": msg.content} for msg in messages]
 
         request_params = {
             "model": self._model,
@@ -212,7 +206,7 @@ class OpenAIProvider(LLMProvider):
                         tool_calls=[],
                         stop_reason="streaming",
                     )
-            
+
             logger.debug(
                 "openai stream completed",
                 total_chunks=chunk_count,

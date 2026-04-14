@@ -36,11 +36,11 @@ DEFERRED_PROMPT_TIMEOUT = 30.0
 
 def _truncate_payload(payload: str, max_length: int = 500) -> str:
     """Обрезает payload для логирования, сохраняя значимую часть.
-    
+
     Args:
         payload: Строка payload для обрезки
         max_length: Максимальная длина результата
-        
+
     Returns:
         Обрезанный payload или полный, если он короче max_length
     """
@@ -92,7 +92,7 @@ class ACPHttpServer:
         self.config = config or AppConfig()
         # Оркестратор агента инициализируется в методе run()
         self._agent_orchestrator: AgentOrchestrator | None = None
-        
+
         # Логируем инициализацию сервера
         logger.debug(
             "acp http server initialized",
@@ -158,13 +158,13 @@ class ACPHttpServer:
         """
         # Инициализируем LLM провайдера на основе конфигурации
         llm_provider = await self._initialize_llm_provider()
-        
+
         # Создаем AgentOrchestrator если есть провайдер
         agent_orchestrator: AgentOrchestrator | None = None
         if llm_provider is not None:
             # Создаем реестр инструментов (пока пустой, можно расширить в будущем)
             tool_registry = SimpleToolRegistry()
-            
+
             # Создаем конфигурацию оркестратора на основе глобального конфига
             orchestrator_config = OrchestratorConfig(
                 enabled=True,
@@ -174,19 +174,19 @@ class ACPHttpServer:
                 max_tokens=self.config.llm.max_tokens,
                 llm_provider_class="openai" if self.config.llm.provider == "openai" else "mock",
             )
-            
+
             # Инициализируем оркестратор
             agent_orchestrator = AgentOrchestrator(
                 config=orchestrator_config,
                 llm_provider=llm_provider,
                 tool_registry=tool_registry,
             )
-            
+
             logger.info(
                 "agent orchestrator initialized",
                 system_prompt_length=len(self.config.agent.system_prompt),
             )
-        
+
         # Сохраняем оркестратор для использования в обработчике
         self._agent_orchestrator = agent_orchestrator
 
@@ -197,7 +197,7 @@ class ACPHttpServer:
         await runner.setup()
         site = web.TCPSite(runner, host=self.host, port=self.port)
         await site.start()
-        
+
         # Логируем запуск сервера
         logger.info(
             "server started",
@@ -225,14 +225,14 @@ class ACPHttpServer:
         connection_id = str(uuid.uuid4())[:8]
         remote_addr = request.remote or "unknown"
         start_time = time.time()
-        
+
         # Логируем установку нового WebSocket подключения
         logger.info(
             "ws connection request received",
             connection_id=connection_id,
             remote_addr=remote_addr,
         )
-        
+
         # Логируем подключение клиента
         logger.info(
             "ws connection established",
@@ -252,7 +252,7 @@ class ACPHttpServer:
         deferred_prompt_tasks: dict[str, asyncio.Task[None]] = {}
         # По ACP любые session-методы в WS доступны только после initialize.
         initialized = False
-        
+
         # Создаем логгер с контекстом подключения
         conn_logger = logger.bind(connection_id=connection_id)
 
@@ -266,13 +266,13 @@ class ACPHttpServer:
                         acp_request = ACPMessage.from_json(message.data)
                         method_name = acp_request.method
                         request_id = str(acp_request.id) if acp_request.id is not None else None
-                        
+
                         # Логируем получение данных с payload
                         conn_logger.debug(
                             "message received",
                             payload=_truncate_payload(message.data),
                         )
-                        
+
                         if method_name is None:
                             outcome = protocol.handle_client_response(acp_request)
                         else:
@@ -303,7 +303,7 @@ class ACPHttpServer:
                                 if isinstance(raw_session_id, str):
                                     session_id = raw_session_id
                             outcome = await protocol.handle(acp_request)
-                        
+
                         # Логируем входящий запрос с методом и сессией
                         conn_logger.info(
                             "request received",
@@ -372,7 +372,7 @@ class ACPHttpServer:
                             has_error=outcome.response.error is not None,
                             payload=_truncate_payload(response_json),
                         )
-                    
+
                     # Отправляем дополнительные ответы
                     for followup_response in outcome.followup_responses:
                         followup_json = followup_response.to_json()
@@ -404,7 +404,7 @@ class ACPHttpServer:
                             session_id=session_id_to_cancel,
                         )
                     deferred_prompt_tasks.pop(session_id_to_cancel, None)
-            
+
             # Логируем закрытие соединения с продолжительностью и статусом
             duration = time.time() - start_time
             conn_logger.info(
@@ -438,19 +438,16 @@ class ACPHttpServer:
         Пример использования:
             task = asyncio.create_task(server._complete_deferred_prompt(...))
         """
-        
+
         conn_logger = logger.bind(connection_id=connection_id, session_id=session_id)
 
         try:
             # Небольшая задержка оставляет окно для входящего `session/cancel`.
             await asyncio.sleep(0.05)
-            
+
             # Выполняем завершение turn с timeout
             try:
-                response = protocol.complete_active_turn(
-                    session_id, 
-                    stop_reason="end_turn"
-                )
+                response = protocol.complete_active_turn(session_id, stop_reason="end_turn")
             except TimeoutError:
                 conn_logger.warning(
                     "deferred prompt completion timeout",
@@ -464,7 +461,7 @@ class ACPHttpServer:
                     exc_info=True,
                 )
                 response = None
-            
+
             # Отправляем response если он есть и соединение еще живо
             if response is not None and not ws.closed:
                 try:
@@ -480,7 +477,7 @@ class ACPHttpServer:
                 conn_logger.debug("deferred prompt skipped (websocket closed)")
             else:
                 conn_logger.debug("deferred prompt skipped (no response)")
-                
+
         except asyncio.CancelledError:
             # Нормальная ветка: отмена задачи при `session/cancel`.
             conn_logger.info("deferred prompt cancelled by client")

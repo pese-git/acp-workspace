@@ -58,10 +58,7 @@ def initialize(
         )
 
     negotiated_version = supported_protocol_versions[-1]
-    if (
-        isinstance(requested_version, int)
-        and requested_version in supported_protocol_versions
-    ):
+    if isinstance(requested_version, int) and requested_version in supported_protocol_versions:
         negotiated_version = requested_version
 
     # Инициализация capability negotiation для ACP v1.

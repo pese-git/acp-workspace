@@ -40,9 +40,7 @@ class DirectiveResolver:
     """Резолвер директив и slash-команд."""
 
     @staticmethod
-    def resolve(
-        params: dict[str, Any], content: str | list[dict[str, Any]]
-    ) -> ResolvedDirectives:
+    def resolve(params: dict[str, Any], content: str | list[dict[str, Any]]) -> ResolvedDirectives:
         """
         Резолвит директивы из параметров запроса и содержимого.
 

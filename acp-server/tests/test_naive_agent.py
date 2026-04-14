@@ -44,7 +44,7 @@ def error_tool() -> None:
 def tool_registry() -> SimpleToolRegistry:
     """Создать реестр с тестовыми инструментами."""
     registry = SimpleToolRegistry()
-    
+
     # Регистрация калькулятора
     calc_tool = ToolDefinition(
         name="calculator",
@@ -60,7 +60,7 @@ def tool_registry() -> SimpleToolRegistry:
         kind="math",
     )
     registry.register(calc_tool, simple_calculator)
-    
+
     # Регистрация echo инструмента
     echo_def = ToolDefinition(
         name="echo",
@@ -72,7 +72,7 @@ def tool_registry() -> SimpleToolRegistry:
         kind="other",
     )
     registry.register(echo_def, echo_tool)
-    
+
     # Регистрация error инструмента
     error_def = ToolDefinition(
         name="error_tool",
@@ -81,7 +81,7 @@ def tool_registry() -> SimpleToolRegistry:
         kind="other",
     )
     registry.register(error_def, error_tool)
-    
+
     return registry
 
 
@@ -110,9 +110,9 @@ async def test_simple_response_without_tool_calls(
         available_tools=tool_registry.list_tools(),
         config={},
     )
-    
+
     response = await naive_agent.process_prompt(context)
-    
+
     assert response.text == "Test response"
     assert response.tool_calls == []
     assert response.stop_reason == "end_turn"
@@ -123,19 +123,21 @@ async def test_single_tool_call_success(
     tool_registry: SimpleToolRegistry,
 ) -> None:
     """Тест успешного выполнения одного tool call."""
+
     # Создать провайдер, который возвращает tool call в первый раз,
     # потом финальный ответ
     class SingleToolCallProvider(MockLLMProvider):
         """Провайдер для одного tool call."""
-        
+
         def __init__(self):
             super().__init__(response="Final answer")
             self.call_count = 0
-        
+
         async def create_completion(self, messages, tools=None, **kwargs):
             from acp_server.llm.base import LLMResponse
+
             self.call_count += 1
-            
+
             if self.call_count == 1:
                 tool_call = LLMToolCall(
                     id="call_1",
@@ -153,10 +155,10 @@ async def test_single_tool_call_success(
                     tool_calls=[],
                     stop_reason="end_turn",
                 )
-    
+
     llm = SingleToolCallProvider()
     agent = NaiveAgent(llm=llm, tools=tool_registry)
-    
+
     context = AgentContext(
         session_id="test-session",
         prompt=[{"type": "text", "text": "Calculate 2 + 3"}],
@@ -164,9 +166,9 @@ async def test_single_tool_call_success(
         available_tools=tool_registry.list_tools(),
         config={},
     )
-    
+
     response = await agent.process_prompt(context)
-    
+
     # После выполнения tool, агент должен вернуть финальный ответ
     assert response.stop_reason == "end_turn"
     assert response.text == "The result is 5"
@@ -190,14 +192,14 @@ async def test_multiple_tool_calls_in_single_response(
             arguments={"text": "World"},
         ),
     ]
-    
+
     llm = MockLLMProvider(
         response="I'll echo both texts",
         tool_calls=tool_calls,
     )
-    
+
     agent = NaiveAgent(llm=llm, tools=tool_registry)
-    
+
     context = AgentContext(
         session_id="test-session",
         prompt=[{"type": "text", "text": "Echo hello and world"}],
@@ -205,9 +207,9 @@ async def test_multiple_tool_calls_in_single_response(
         available_tools=tool_registry.list_tools(),
         config={},
     )
-    
+
     response = await agent.process_prompt(context)
-    
+
     # Агент должен обработать оба tool calls
     assert response is not None
     assert response.metadata["iterations"] >= 1
@@ -223,30 +225,32 @@ async def test_tool_call_chain(
     tool_registry: SimpleToolRegistry,
 ) -> None:
     """Тест цепочки tool calls (tool -> response -> tool -> response)."""
+
     # После выполнения первого tool, LLM должен вернуть второй
     # Для этого создаем специальный провайдер, который ведет себя по-разному
     # при повторных вызовах
     class ChainedMockLLMProvider(MockLLMProvider):
         """Mock провайдер для тестирования цепочек."""
-        
+
         def __init__(self) -> None:
             super().__init__(response="Final answer")
             self.call_count = 0
-        
+
         async def create_completion(self, messages, tools=None, **kwargs):
             """Вернуть разные ответы в зависимости от количества вызовов."""
             self.call_count += 1
-            
+
             if self.call_count == 1:
                 # Первый вызов - вернуть tool call
                 return self._get_response_with_tool_call()
             else:
                 # Последующие вызовы - вернуть финальный ответ
                 return self._get_final_response()
-        
+
         def _get_response_with_tool_call(self):
             """Вернуть ответ с tool call."""
             from acp_server.llm.base import LLMResponse
+
             tool_call = LLMToolCall(
                 id="call_1",
                 name="calculator",
@@ -257,19 +261,20 @@ async def test_tool_call_chain(
                 tool_calls=[tool_call],
                 stop_reason="tool_use",
             )
-        
+
         def _get_final_response(self):
             """Вернуть финальный ответ."""
             from acp_server.llm.base import LLMResponse
+
             return LLMResponse(
                 text="The result is 8",
                 tool_calls=[],
                 stop_reason="end_turn",
             )
-    
+
     llm = ChainedMockLLMProvider()
     agent = NaiveAgent(llm=llm, tools=tool_registry)
-    
+
     context = AgentContext(
         session_id="test-session",
         prompt=[{"type": "text", "text": "Calculate 5 + 3 and tell me the result"}],
@@ -277,9 +282,9 @@ async def test_tool_call_chain(
         available_tools=tool_registry.list_tools(),
         config={},
     )
-    
+
     response = await agent.process_prompt(context)
-    
+
     # Агент должен выполнить tool и вернуть финальный ответ
     assert response.text == "The result is 8"
     assert response.metadata["iterations"] >= 2
@@ -295,12 +300,14 @@ async def test_max_iterations_exceeded(
     tool_registry: SimpleToolRegistry,
 ) -> None:
     """Тест достижения максимума итераций."""
+
     # Создать провайдер, который всегда возвращает tool calls
     class InfiniteToolCallProvider(MockLLMProvider):
         """Провайдер, который бесконечно возвращает tool calls."""
-        
+
         async def create_completion(self, messages, tools=None, **kwargs):
             from acp_server.llm.base import LLMResponse
+
             tool_call = LLMToolCall(
                 id="call_1",
                 name="echo",
@@ -311,10 +318,10 @@ async def test_max_iterations_exceeded(
                 tool_calls=[tool_call],
                 stop_reason="tool_use",
             )
-    
+
     llm = InfiniteToolCallProvider()
     agent = NaiveAgent(llm=llm, tools=tool_registry, max_iterations=3)
-    
+
     context = AgentContext(
         session_id="test-session",
         prompt=[{"type": "text", "text": "Loop forever"}],
@@ -322,9 +329,9 @@ async def test_max_iterations_exceeded(
         available_tools=tool_registry.list_tools(),
         config={},
     )
-    
+
     response = await agent.process_prompt(context)
-    
+
     # Должен вернуть ошибку max_iterations
     assert response.stop_reason == "max_iterations"
     assert response.metadata["iterations"] == 3
@@ -340,14 +347,14 @@ async def test_tool_not_found(
         name="nonexistent_tool",
         arguments={},
     )
-    
+
     llm = MockLLMProvider(
         response="Using nonexistent tool",
         tool_calls=[tool_call],
     )
-    
+
     agent = NaiveAgent(llm=llm, tools=tool_registry)
-    
+
     context = AgentContext(
         session_id="test-session",
         prompt=[{"type": "text", "text": "Use nonexistent tool"}],
@@ -355,9 +362,9 @@ async def test_tool_not_found(
         available_tools=tool_registry.list_tools(),
         config={},
     )
-    
+
     response = await agent.process_prompt(context)
-    
+
     # Агент должен обработать ошибку и вернуть ответ
     assert response is not None
 
@@ -367,18 +374,20 @@ async def test_tool_execution_error(
     tool_registry: SimpleToolRegistry,
 ) -> None:
     """Тест обработки исключения при выполнении инструмента."""
+
     # После выполнения tool с ошибкой, LLM должен вернуть финальный ответ
     class ErrorHandlingProvider(MockLLMProvider):
         """Провайдер для обработки ошибок."""
-        
+
         def __init__(self):
             super().__init__(response="Final answer")
             self.call_count = 0
-        
+
         async def create_completion(self, messages, tools=None, **kwargs):
             from acp_server.llm.base import LLMResponse
+
             self.call_count += 1
-            
+
             if self.call_count == 1:
                 tool_call = LLMToolCall(
                     id="call_1",
@@ -396,10 +405,10 @@ async def test_tool_execution_error(
                     tool_calls=[],
                     stop_reason="end_turn",
                 )
-    
+
     llm = ErrorHandlingProvider()
     agent = NaiveAgent(llm=llm, tools=tool_registry)
-    
+
     context = AgentContext(
         session_id="test-session",
         prompt=[{"type": "text", "text": "Call error tool"}],
@@ -407,9 +416,9 @@ async def test_tool_execution_error(
         available_tools=tool_registry.list_tools(),
         config={},
     )
-    
+
     response = await agent.process_prompt(context)
-    
+
     assert response is not None
     assert response.metadata["iterations"] >= 2
 
@@ -432,9 +441,9 @@ async def test_empty_prompt(
         available_tools=tool_registry.list_tools(),
         config={},
     )
-    
+
     response = await naive_agent.process_prompt(context)
-    
+
     assert response is not None
     assert response.text == "Test response"
 
@@ -449,7 +458,7 @@ async def test_with_conversation_history(
         LLMMessage(role="user", content="First message"),
         LLMMessage(role="assistant", content="First response"),
     ]
-    
+
     context = AgentContext(
         session_id="test-session",
         prompt=[{"type": "text", "text": "Second message"}],
@@ -457,9 +466,9 @@ async def test_with_conversation_history(
         available_tools=tool_registry.list_tools(),
         config={},
     )
-    
+
     response = await naive_agent.process_prompt(context)
-    
+
     assert response is not None
     assert response.text == "Test response"
 
@@ -475,12 +484,12 @@ async def test_add_to_history(
 ) -> None:
     """Тест добавления сообщений в историю."""
     session_id = "test-session"
-    
+
     naive_agent.add_to_history(session_id, "user", "Hello")
     naive_agent.add_to_history(session_id, "assistant", "Hi there")
-    
+
     history = naive_agent.get_session_history(session_id)
-    
+
     assert len(history) == 2
     assert history[0].role == "user"
     assert history[0].content == "Hello"
@@ -494,14 +503,14 @@ async def test_end_session(
 ) -> None:
     """Тест завершения сессии и очистки истории."""
     session_id = "test-session"
-    
+
     # Добавить сообщения
     naive_agent.add_to_history(session_id, "user", "Hello")
     assert len(naive_agent.get_session_history(session_id)) == 1
-    
+
     # Завершить сессию
     await naive_agent.end_session(session_id)
-    
+
     # История должна быть пустой
     assert len(naive_agent.get_session_history(session_id)) == 0
 
@@ -518,12 +527,12 @@ async def test_initialize_agent(
     """Тест инициализации агента."""
     llm = MockLLMProvider()
     agent = NaiveAgent(llm=llm, tools=tool_registry)
-    
+
     new_llm = MockLLMProvider(response="New response")
     new_tools = SimpleToolRegistry()
-    
+
     await agent.initialize(new_llm, new_tools, {})
-    
+
     # Убедиться, что зависимости обновлены
     assert agent.llm is new_llm
     assert agent.tools is new_tools
@@ -550,9 +559,9 @@ async def test_format_prompt_with_multiple_blocks(
         available_tools=tool_registry.list_tools(),
         config={},
     )
-    
+
     response = await naive_agent.process_prompt(context)
-    
+
     assert response is not None
     # Проверить, что промпт был правильно объединен
     assert response.text == "Test response"
@@ -568,18 +577,20 @@ async def test_integration_with_mock_provider(
     tool_registry: SimpleToolRegistry,
 ) -> None:
     """Интеграционный тест с MockLLMProvider."""
+
     # Создать провайдер, который выполняет две операции
     class IntegrationMockProvider(MockLLMProvider):
         """Mock провайдер для интеграционного теста."""
-        
+
         def __init__(self):
             super().__init__(response="Calculation complete")
             self.call_count = 0
-        
+
         async def create_completion(self, messages, tools=None, **kwargs):
             from acp_server.llm.base import LLMResponse
+
             self.call_count += 1
-            
+
             if self.call_count == 1:
                 # Первый вызов - запрос калькулятора
                 tool_call = LLMToolCall(
@@ -599,10 +610,10 @@ async def test_integration_with_mock_provider(
                     tool_calls=[],
                     stop_reason="end_turn",
                 )
-    
+
     llm = IntegrationMockProvider()
     agent = NaiveAgent(llm=llm, tools=tool_registry)
-    
+
     context = AgentContext(
         session_id="test-session",
         prompt=[{"type": "text", "text": "What is 7 * 6?"}],
@@ -610,9 +621,9 @@ async def test_integration_with_mock_provider(
         available_tools=tool_registry.list_tools(),
         config={},
     )
-    
+
     response = await agent.process_prompt(context)
-    
+
     assert response.text == "The answer is 42"
     assert response.stop_reason == "end_turn"
     assert response.metadata["iterations"] >= 2

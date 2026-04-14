@@ -243,7 +243,7 @@ def _validate_entry_structure(entry: Any) -> bool:
         return False
 
     # Требуем хотя бы content или title
-    has_title = ("content" in entry or "title" in entry)
+    has_title = "content" in entry or "title" in entry
     if not has_title:
         return False
 

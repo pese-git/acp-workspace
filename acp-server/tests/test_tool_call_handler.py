@@ -83,9 +83,9 @@ class TestToolCallHandlerStatusUpdates:
     ) -> None:
         """Проверяет переход pending → in_progress."""
         tool_call_id = handler.create_tool_call(session, title="Test", kind="execute")
-        
+
         handler.update_tool_call_status(session, tool_call_id, "in_progress")
-        
+
         assert session.tool_calls[tool_call_id].status == "in_progress"
 
     def test_update_in_progress_to_completed(
@@ -94,10 +94,10 @@ class TestToolCallHandlerStatusUpdates:
         """Проверяет переход in_progress → completed."""
         tool_call_id = handler.create_tool_call(session, title="Test", kind="execute")
         handler.update_tool_call_status(session, tool_call_id, "in_progress")
-        
+
         content = [{"type": "content", "content": {"type": "text", "text": "Done"}}]
         handler.update_tool_call_status(session, tool_call_id, "completed", content=content)
-        
+
         assert session.tool_calls[tool_call_id].status == "completed"
         assert session.tool_calls[tool_call_id].content == content
 
@@ -106,9 +106,9 @@ class TestToolCallHandlerStatusUpdates:
     ) -> None:
         """Проверяет переход pending → cancelled."""
         tool_call_id = handler.create_tool_call(session, title="Test", kind="execute")
-        
+
         handler.update_tool_call_status(session, tool_call_id, "cancelled")
-        
+
         assert session.tool_calls[tool_call_id].status == "cancelled"
 
     def test_update_pending_to_failed(
@@ -116,9 +116,9 @@ class TestToolCallHandlerStatusUpdates:
     ) -> None:
         """Проверяет переход pending → failed."""
         tool_call_id = handler.create_tool_call(session, title="Test", kind="execute")
-        
+
         handler.update_tool_call_status(session, tool_call_id, "failed")
-        
+
         assert session.tool_calls[tool_call_id].status == "failed"
 
     def test_reject_invalid_transition_completed_to_in_progress(
@@ -128,10 +128,10 @@ class TestToolCallHandlerStatusUpdates:
         tool_call_id = handler.create_tool_call(session, title="Test", kind="execute")
         handler.update_tool_call_status(session, tool_call_id, "in_progress")
         handler.update_tool_call_status(session, tool_call_id, "completed")
-        
+
         # Попытаемся вернуться в in_progress (должно быть отклонено)
         handler.update_tool_call_status(session, tool_call_id, "in_progress")
-        
+
         # Статус остается completed
         assert session.tool_calls[tool_call_id].status == "completed"
 
@@ -141,19 +141,19 @@ class TestToolCallHandlerStatusUpdates:
         """Проверяет отказ от невалидного перехода cancelled → in_progress."""
         tool_call_id = handler.create_tool_call(session, title="Test", kind="execute")
         handler.update_tool_call_status(session, tool_call_id, "cancelled")
-        
+
         # Попытаемся перейти в in_progress (должно быть отклонено)
         handler.update_tool_call_status(session, tool_call_id, "in_progress")
-        
+
         assert session.tool_calls[tool_call_id].status == "cancelled"
 
     def test_update_with_content(self, handler: ToolCallHandler, session: SessionState) -> None:
         """Проверяет обновление статуса с контентом."""
         tool_call_id = handler.create_tool_call(session, title="Test", kind="execute")
-        
+
         content = [{"type": "content", "content": {"type": "text", "text": "Result"}}]
         handler.update_tool_call_status(session, tool_call_id, "in_progress", content=content)
-        
+
         assert session.tool_calls[tool_call_id].content == content
 
     def test_update_nonexistent_tool_call(
@@ -162,7 +162,7 @@ class TestToolCallHandlerStatusUpdates:
         """Проверяет, что обновление несуществующего tool call игнорируется."""
         # Попытаемся обновить несуществующий tool call
         handler.update_tool_call_status(session, "nonexistent", "completed")
-        
+
         # Ничего не должно случиться (no exception, no change)
         assert "nonexistent" not in session.tool_calls
 
@@ -175,19 +175,19 @@ class TestToolCallHandlerExecutorMode:
     ) -> None:
         """Проверяет executor mode: pending → in_progress → completed."""
         tool_call_id = handler.create_tool_call(session, title="Test", kind="execute")
-        
+
         updates = handler.build_executor_execution_updates(
             session=session,
             session_id="test_session",
             tool_call_id=tool_call_id,
             leave_running=False,
         )
-        
+
         # Должны быть 2 notification: in_progress и completed
         assert len(updates) == 2
         assert updates[0].method == "session/update"
         assert updates[1].method == "session/update"
-        
+
         # Проверяем статусы в session
         assert session.tool_calls[tool_call_id].status == "completed"
 
@@ -196,14 +196,14 @@ class TestToolCallHandlerExecutorMode:
     ) -> None:
         """Проверяет executor mode с leave_running=True."""
         tool_call_id = handler.create_tool_call(session, title="Test", kind="execute")
-        
+
         updates = handler.build_executor_execution_updates(
             session=session,
             session_id="test_session",
             tool_call_id=tool_call_id,
             leave_running=True,
         )
-        
+
         # Должна быть только 1 notification: in_progress
         assert len(updates) == 1
         assert session.tool_calls[tool_call_id].status == "in_progress"
@@ -217,14 +217,14 @@ class TestToolCallHandlerPolicyMode:
     ) -> None:
         """Проверяет policy mode с разрешением: pending → in_progress → completed."""
         tool_call_id = handler.create_tool_call(session, title="Test", kind="execute")
-        
+
         updates = handler.build_policy_execution_updates(
             session=session,
             session_id="test_session",
             tool_call_id=tool_call_id,
             allowed=True,
         )
-        
+
         # Должны быть 2 notification: in_progress и completed
         assert len(updates) == 2
         assert session.tool_calls[tool_call_id].status == "completed"
@@ -234,14 +234,14 @@ class TestToolCallHandlerPolicyMode:
     ) -> None:
         """Проверяет policy mode с отказом: pending → cancelled."""
         tool_call_id = handler.create_tool_call(session, title="Test", kind="execute")
-        
+
         updates = handler.build_policy_execution_updates(
             session=session,
             session_id="test_session",
             tool_call_id=tool_call_id,
             allowed=False,
         )
-        
+
         # Должна быть 1 notification: cancelled
         assert len(updates) == 1
         assert session.tool_calls[tool_call_id].status == "cancelled"
@@ -256,15 +256,15 @@ class TestToolCallHandlerCancellation:
         id1 = handler.create_tool_call(session, title="Test1", kind="execute")
         id2 = handler.create_tool_call(session, title="Test2", kind="read")
         id3 = handler.create_tool_call(session, title="Test3", kind="delete")
-        
+
         # Переводим в разные статусы
         handler.update_tool_call_status(session, id1, "in_progress")
         handler.update_tool_call_status(session, id2, "in_progress")
         handler.update_tool_call_status(session, id2, "completed")
-        
+
         # Отменяем все активные
         updates = handler.cancel_active_tools(session, "test_session")
-        
+
         # Должны быть отмены для id1 и id3 (в_progress и pending)
         assert len(updates) == 2
         assert session.tool_calls[id1].status == "cancelled"
@@ -278,9 +278,9 @@ class TestToolCallHandlerCancellation:
         id1 = handler.create_tool_call(session, title="Test", kind="execute")
         handler.update_tool_call_status(session, id1, "in_progress")
         handler.update_tool_call_status(session, id1, "completed")
-        
+
         updates = handler.cancel_active_tools(session, "test_session")
-        
+
         # Не должно быть notifications, так как tool call уже завершен
         assert len(updates) == 0
         assert session.tool_calls[id1].status == "completed"
@@ -288,7 +288,7 @@ class TestToolCallHandlerCancellation:
     def test_cancel_empty_session(self, handler: ToolCallHandler, session: SessionState) -> None:
         """Проверяет отмену в пустой сессии (без tool calls)."""
         updates = handler.cancel_active_tools(session, "test_session")
-        
+
         assert len(updates) == 0
 
 
@@ -303,11 +303,11 @@ class TestToolCallHandlerNotifications:
             title="Test Tool",
             kind="execute",
         )
-        
+
         assert msg.method == "session/update"
         assert msg.params is not None
         assert msg.params["sessionId"] == "sess_1"
-        
+
         update = msg.params["update"]
         assert update["sessionUpdate"] == "tool_call"
         assert update["toolCallId"] == "call_001"
@@ -325,7 +325,7 @@ class TestToolCallHandlerNotifications:
             kind="read",
             locations=locations,
         )
-        
+
         update = msg.params["update"]
         assert update["locations"] == locations
 
@@ -336,11 +336,11 @@ class TestToolCallHandlerNotifications:
             tool_call_id="call_001",
             status="in_progress",
         )
-        
+
         assert msg.method == "session/update"
         assert msg.params is not None
         assert msg.params["sessionId"] == "sess_1"
-        
+
         update = msg.params["update"]
         assert update["sessionUpdate"] == "tool_call_update"
         assert update["toolCallId"] == "call_001"
@@ -355,7 +355,7 @@ class TestToolCallHandlerNotifications:
             status="completed",
             content=content,
         )
-        
+
         update = msg.params["update"]
         assert update["content"] == content
 

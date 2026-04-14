@@ -61,13 +61,13 @@ class MockLLMProvider(LLMProvider):
             tool_calls=self.tool_calls,
             stop_reason="end_turn" if not self.tool_calls else "tool_use",
         )
-        
+
         logger.debug(
             "mock llm completion response created",
             response_length=len(self.response),
             stop_reason=response.stop_reason,
         )
-        
+
         return response
 
     async def stream_completion(  # type: ignore[override]

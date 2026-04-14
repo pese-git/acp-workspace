@@ -4,7 +4,6 @@
 Проверяет резолвинг директив и slash-команд из параметров prompt запроса.
 """
 
-
 from acp_server.protocol.prompt_handlers import DirectiveResolver
 from acp_server.protocol.state import PromptDirectives
 

@@ -67,9 +67,7 @@ class TestSessionPromptValidation:
         )
         return {"sess_1": session}
 
-    def test_session_prompt_missing_session_id(
-        self, sessions: dict[str, SessionState]
-    ) -> None:
+    def test_session_prompt_missing_session_id(self, sessions: dict[str, SessionState]) -> None:
         """Возвращает ошибку при отсутствии sessionId."""
         # Placeholder для тестирования отсутствия sessionId
         # Для асинхронной функции понадобится pytest-asyncio
@@ -82,16 +80,12 @@ class TestSessionPromptValidation:
         # sessionId должен быть str, а не int
         assert True  # placeholder
 
-    def test_session_prompt_session_not_found(
-        self, sessions: dict[str, SessionState]
-    ) -> None:
+    def test_session_prompt_session_not_found(self, sessions: dict[str, SessionState]) -> None:
         """Возвращает ошибку при отсутствии сессии."""
         # Попытаемся использовать несуществующий sessionId
         assert True  # placeholder
 
-    def test_session_prompt_invalid_prompt_type(
-        self, sessions: dict[str, SessionState]
-    ) -> None:
+    def test_session_prompt_invalid_prompt_type(self, sessions: dict[str, SessionState]) -> None:
         """Возвращает ошибку при неправильном типе prompt."""
         # prompt должен быть list, а не string
         assert True  # placeholder
@@ -133,9 +127,7 @@ class TestSessionPromptWithOrchestrator:
         assert orchestrator.state_manager is not None
         assert session.active_turn is None  # По умолчанию нет активного turn
 
-    def test_orchestrator_integrates_all_components(
-        self, orchestrator: PromptOrchestrator
-    ) -> None:
+    def test_orchestrator_integrates_all_components(self, orchestrator: PromptOrchestrator) -> None:
         """Все компоненты интегрированы в PromptOrchestrator."""
         # Проверяем наличие всех компонентов
         assert orchestrator.state_manager is not None
@@ -186,9 +178,7 @@ class TestSessionPromptComponentIntegration:
         # Assert
         assert session.title == "New Title"
 
-    def test_plan_builder_normalizes_plan_entries(
-        self, orchestrator: PromptOrchestrator
-    ) -> None:
+    def test_plan_builder_normalizes_plan_entries(self, orchestrator: PromptOrchestrator) -> None:
         """PlanBuilder нормализует plan entries."""
         # Arrange
         raw_entries = [
@@ -242,9 +232,7 @@ class TestSessionPromptComponentIntegration:
         assert isinstance(tool_call, ToolCallState)
         assert tool_call.title == "Test Tool"
 
-    def test_permission_manager_builds_options(
-        self, orchestrator: PromptOrchestrator
-    ) -> None:
+    def test_permission_manager_builds_options(self, orchestrator: PromptOrchestrator) -> None:
         """PermissionManager создает permission options."""
         # Act
         options = orchestrator.permission_manager.build_permission_options()
@@ -282,9 +270,7 @@ class TestSessionPromptErrorHandling:
         # Assert - проверим, что обработка ошибок работает
         assert params.get("sessionId") is None
 
-    def test_error_on_invalid_content(
-        self, sessions: dict[str, SessionState]
-    ) -> None:
+    def test_error_on_invalid_content(self, sessions: dict[str, SessionState]) -> None:
         """Возвращает error response при невалидном контенте."""
         # Arrange
         invalid_prompt = [
@@ -337,9 +323,7 @@ class TestPromptIntegrationWithAllComponents:
         plan_entries = [
             {"title": "Phase 1", "status": "pending"},
         ]
-        normalized_plan = orchestrator.plan_builder.normalize_plan_entries(
-            plan_entries
-        )
+        normalized_plan = orchestrator.plan_builder.normalize_plan_entries(plan_entries)
 
         # 3. ToolCallHandler
         if not session.active_turn:

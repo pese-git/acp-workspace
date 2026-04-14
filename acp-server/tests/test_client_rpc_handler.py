@@ -205,9 +205,9 @@ class TestClientRPCHandlerFsRead:
     ) -> None:
         """Проверяет структуру подготовленного fs/read request."""
         directives.fs_read_path = "/var/log/app.log"
-        
+
         prepared = handler.prepare_fs_read_request(session, "sess_1", directives)
-        
+
         assert prepared is not None
         assert prepared.kind == "fs_read"
         assert len(prepared.messages) == 2  # tool_call notification + request
@@ -220,9 +220,9 @@ class TestClientRPCHandlerFsRead:
         """Проверяет, что подготовка fs/read создает tool call."""
         directives.fs_read_path = "file.txt"
         initial_counter = session.tool_call_counter
-        
+
         prepared = handler.prepare_fs_read_request(session, "sess_1", directives)
-        
+
         assert prepared is not None
         assert session.tool_call_counter > initial_counter
 
@@ -231,9 +231,9 @@ class TestClientRPCHandlerFsRead:
     ) -> None:
         """Проверяет, что невалидный путь возвращает None."""
         directives.fs_read_path = ""
-        
+
         prepared = handler.prepare_fs_read_request(session, "sess_1", directives)
-        
+
         assert prepared is None
 
     def test_prepare_fs_read_no_capability(
@@ -246,9 +246,9 @@ class TestClientRPCHandlerFsRead:
             fs_write=True,
         )
         directives.fs_read_path = "file.txt"
-        
+
         prepared = handler.prepare_fs_read_request(session, "sess_1", directives)
-        
+
         assert prepared is None
 
     def test_prepare_fs_read_no_path_directive(
@@ -256,9 +256,9 @@ class TestClientRPCHandlerFsRead:
     ) -> None:
         """Проверяет, что отсутствие fs_read_path возвращает None."""
         directives.fs_read_path = None
-        
+
         prepared = handler.prepare_fs_read_request(session, "sess_1", directives)
-        
+
         assert prepared is None
 
 
@@ -271,9 +271,9 @@ class TestClientRPCHandlerFsWrite:
         """Проверяет структуру подготовленного fs/write request."""
         directives.fs_write_path = "file.txt"
         directives.fs_write_content = "Hello World"
-        
+
         prepared = handler.prepare_fs_write_request(session, "sess_1", directives)
-        
+
         assert prepared is not None
         assert prepared.kind == "fs_write"
         assert len(prepared.messages) == 2
@@ -288,9 +288,9 @@ class TestClientRPCHandlerFsWrite:
         directives.fs_write_path = "file.txt"
         directives.fs_write_content = "content"
         initial_counter = session.tool_call_counter
-        
+
         prepared = handler.prepare_fs_write_request(session, "sess_1", directives)
-        
+
         assert prepared is not None
         assert session.tool_call_counter > initial_counter
 
@@ -300,9 +300,9 @@ class TestClientRPCHandlerFsWrite:
         """Проверяет, что отсутствие content возвращает None."""
         directives.fs_write_path = "file.txt"
         directives.fs_write_content = None
-        
+
         prepared = handler.prepare_fs_write_request(session, "sess_1", directives)
-        
+
         assert prepared is None
 
     def test_prepare_fs_write_no_capability(
@@ -316,9 +316,9 @@ class TestClientRPCHandlerFsWrite:
         )
         directives.fs_write_path = "file.txt"
         directives.fs_write_content = "content"
-        
+
         prepared = handler.prepare_fs_write_request(session, "sess_1", directives)
-        
+
         assert prepared is None
 
 
@@ -330,9 +330,9 @@ class TestClientRPCHandlerTerminal:
     ) -> None:
         """Проверяет структуру подготовленного terminal request."""
         directives.terminal_command = "ls -la"
-        
+
         prepared = handler.prepare_terminal_request(session, "sess_1", directives)
-        
+
         assert prepared is not None
         assert prepared.kind == "terminal_create"
         assert len(prepared.messages) == 2
@@ -345,9 +345,9 @@ class TestClientRPCHandlerTerminal:
         """Проверяет, что подготовка terminal создает tool call."""
         directives.terminal_command = "pwd"
         initial_counter = session.tool_call_counter
-        
+
         prepared = handler.prepare_terminal_request(session, "sess_1", directives)
-        
+
         assert prepared is not None
         assert session.tool_call_counter > initial_counter
 
@@ -356,9 +356,9 @@ class TestClientRPCHandlerTerminal:
     ) -> None:
         """Проверяет, что отсутствие command возвращает None."""
         directives.terminal_command = None
-        
+
         prepared = handler.prepare_terminal_request(session, "sess_1", directives)
-        
+
         assert prepared is None
 
     def test_prepare_terminal_no_capability(
@@ -371,9 +371,9 @@ class TestClientRPCHandlerTerminal:
             fs_write=True,
         )
         directives.terminal_command = "ls"
-        
+
         prepared = handler.prepare_terminal_request(session, "sess_1", directives)
-        
+
         assert prepared is None
 
 
@@ -387,9 +387,9 @@ class TestClientRPCHandlerPrepareHelper:
         directives.fs_read_path = "read.txt"
         directives.fs_write_path = "write.txt"
         directives.fs_write_content = "content"
-        
+
         prepared = handler.prepare_fs_request(session, "sess_1", directives)
-        
+
         # Должен подготовить fs_read, а не fs_write
         assert prepared is not None
         assert prepared.kind == "fs_read"
@@ -401,9 +401,9 @@ class TestClientRPCHandlerPrepareHelper:
         directives.fs_read_path = None
         directives.fs_write_path = "write.txt"
         directives.fs_write_content = "content"
-        
+
         prepared = handler.prepare_fs_request(session, "sess_1", directives)
-        
+
         assert prepared is not None
         assert prepared.kind == "fs_write"
 
@@ -413,9 +413,9 @@ class TestClientRPCHandlerPrepareHelper:
         """Проверяет, что отсутствие путей возвращает None."""
         directives.fs_read_path = None
         directives.fs_write_path = None
-        
+
         prepared = handler.prepare_fs_request(session, "sess_1", directives)
-        
+
         assert prepared is None
 
 
@@ -431,7 +431,7 @@ class TestClientRPCHandlerResponseHandling:
             PendingClientRequestState,
             ToolCallState,
         )
-        
+
         tool_call_id = "call_001"
         session.tool_calls[tool_call_id] = ToolCallState(
             tool_call_id=tool_call_id,
@@ -439,7 +439,7 @@ class TestClientRPCHandlerResponseHandling:
             kind="read",
             status="pending",
         )
-        
+
         pending = PendingClientRequestState(
             request_id="req_1",
             kind="fs_read",
@@ -451,10 +451,10 @@ class TestClientRPCHandlerResponseHandling:
             session_id="sess_1",
             pending_client_request=pending,
         )
-        
+
         error = {"message": "File not found"}
         updates = handler.handle_pending_response(session, "sess_1", "fs_read", None, error)
-        
+
         assert len(updates) > 0
         assert session.tool_calls[tool_call_id].status == "failed"
 
@@ -463,10 +463,10 @@ class TestClientRPCHandlerResponseHandling:
     ) -> None:
         """Проверяет обработку когда нет active_turn."""
         session.active_turn = None
-        
+
         result = {"content": "data"}
         updates = handler.handle_pending_response(session, "sess_1", "fs_read", result, None)
-        
+
         assert len(updates) == 0
 
     def test_handle_response_no_pending_request(
@@ -474,14 +474,14 @@ class TestClientRPCHandlerResponseHandling:
     ) -> None:
         """Проверяет обработку когда нет pending_client_request."""
         from acp_server.protocol.state import ActiveTurnState
-        
+
         session.active_turn = ActiveTurnState(
             prompt_request_id="prompt_1",
             session_id="sess_1",
             pending_client_request=None,
         )
-        
+
         result = {"content": "data"}
         updates = handler.handle_pending_response(session, "sess_1", "fs_read", result, None)
-        
+
         assert len(updates) == 0

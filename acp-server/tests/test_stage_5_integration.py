@@ -148,9 +148,7 @@ class TestSessionCancelStage5:
         )
         return {"sess_1": session}
 
-    def test_session_cancel_with_active_turn(
-        self, sessions: dict[str, SessionState]
-    ) -> None:
+    def test_session_cancel_with_active_turn(self, sessions: dict[str, SessionState]) -> None:
         """Отменяет активный turn через PromptOrchestrator."""
         # Arrange
         request_id: JsonRpcId | None = "cancel_1"
@@ -166,9 +164,7 @@ class TestSessionCancelStage5:
         session = sessions["sess_1"]
         assert session.active_turn is None
 
-    def test_session_cancel_as_notification(
-        self, sessions: dict[str, SessionState]
-    ) -> None:
+    def test_session_cancel_as_notification(self, sessions: dict[str, SessionState]) -> None:
         """Обрабатывает cancel как notification (без request_id)."""
         # Arrange
         request_id: JsonRpcId | None = None
@@ -397,7 +393,7 @@ class TestPromptOrchestratorIntegrationFullStack:
             session,
             "end_turn",
         )
-        
+
         # Act - очистка turn состояния
         orchestrator.turn_lifecycle_manager.clear_active_turn(session)
 
@@ -515,7 +511,8 @@ class TestSessionPromptWithOrchestratorIntegration:
 
         # Assert - проверяем, что были созданы notifications
         notification_types = [
-            n.params["update"]["sessionUpdate"] for n in outcome.notifications
+            n.params["update"]["sessionUpdate"]
+            for n in outcome.notifications
             if n.params is not None
         ]
         assert "agent_message_chunk" in notification_types or len(notification_types) > 0

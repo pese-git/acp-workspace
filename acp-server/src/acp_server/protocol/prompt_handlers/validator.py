@@ -33,9 +33,7 @@ class PromptValidator:
 
         session_id = params["sessionId"]
         if not isinstance(session_id, str) or not session_id:
-            raise ValidationError(
-                f"sessionId должен быть непустой строкой, получен: {session_id}"
-            )
+            raise ValidationError(f"sessionId должен быть непустой строкой, получен: {session_id}")
 
         # Проверка content
         if "content" not in params:

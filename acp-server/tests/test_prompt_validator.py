@@ -40,9 +40,7 @@ class TestPromptValidatorValidateRequest:
         params = {
             "content": "Hello, world!",
         }
-        with pytest.raises(
-            ValidationError, match="Отсутствует обязательный параметр sessionId"
-        ):
+        with pytest.raises(ValidationError, match="Отсутствует обязательный параметр sessionId"):
             PromptValidator.validate_request(params)
 
     def test_validate_request_empty_session_id(self) -> None:
@@ -51,9 +49,7 @@ class TestPromptValidatorValidateRequest:
             "sessionId": "",
             "content": "Hello, world!",
         }
-        with pytest.raises(
-            ValidationError, match="sessionId должен быть непустой строкой"
-        ):
+        with pytest.raises(ValidationError, match="sessionId должен быть непустой строкой"):
             PromptValidator.validate_request(params)
 
     def test_validate_request_invalid_session_id_type(self) -> None:
@@ -62,9 +58,7 @@ class TestPromptValidatorValidateRequest:
             "sessionId": 123,
             "content": "Hello, world!",
         }
-        with pytest.raises(
-            ValidationError, match="sessionId должен быть непустой строкой"
-        ):
+        with pytest.raises(ValidationError, match="sessionId должен быть непустой строкой"):
             PromptValidator.validate_request(params)
 
     def test_validate_request_missing_content(self) -> None:
@@ -72,9 +66,7 @@ class TestPromptValidatorValidateRequest:
         params = {
             "sessionId": "sess_1",
         }
-        with pytest.raises(
-            ValidationError, match="Отсутствует обязательный параметр content"
-        ):
+        with pytest.raises(ValidationError, match="Отсутствует обязательный параметр content"):
             PromptValidator.validate_request(params)
 
     def test_validate_request_empty_string_content(self) -> None:
@@ -83,9 +75,7 @@ class TestPromptValidatorValidateRequest:
             "sessionId": "sess_1",
             "content": "",
         }
-        with pytest.raises(
-            ValidationError, match="content не может быть пустой строкой"
-        ):
+        with pytest.raises(ValidationError, match="content не может быть пустой строкой"):
             PromptValidator.validate_request(params)
 
     def test_validate_request_whitespace_only_content(self) -> None:
@@ -94,9 +84,7 @@ class TestPromptValidatorValidateRequest:
             "sessionId": "sess_1",
             "content": "   \t\n   ",
         }
-        with pytest.raises(
-            ValidationError, match="content не может быть пустой строкой"
-        ):
+        with pytest.raises(ValidationError, match="content не может быть пустой строкой"):
             PromptValidator.validate_request(params)
 
     def test_validate_request_empty_list_content(self) -> None:
@@ -105,9 +93,7 @@ class TestPromptValidatorValidateRequest:
             "sessionId": "sess_1",
             "content": [],
         }
-        with pytest.raises(
-            ValidationError, match="content не может быть пустым списком"
-        ):
+        with pytest.raises(ValidationError, match="content не может быть пустым списком"):
             PromptValidator.validate_request(params)
 
     def test_validate_request_invalid_content_type(self) -> None:
@@ -116,9 +102,7 @@ class TestPromptValidatorValidateRequest:
             "sessionId": "sess_1",
             "content": 123,
         }
-        with pytest.raises(
-            ValidationError, match="content должен быть строкой или списком"
-        ):
+        with pytest.raises(ValidationError, match="content должен быть строкой или списком"):
             PromptValidator.validate_request(params)
 
     def test_validate_request_content_dict_is_invalid(self) -> None:
@@ -127,9 +111,7 @@ class TestPromptValidatorValidateRequest:
             "sessionId": "sess_1",
             "content": {"type": "text", "text": "Hello"},
         }
-        with pytest.raises(
-            ValidationError, match="content должен быть строкой или списком"
-        ):
+        with pytest.raises(ValidationError, match="content должен быть строкой или списком"):
             PromptValidator.validate_request(params)
 
 

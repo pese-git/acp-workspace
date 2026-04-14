@@ -46,7 +46,7 @@ logger = structlog.get_logger()
 
 def create_prompt_orchestrator() -> PromptOrchestrator:
     """Создает полностью инициализированный PromptOrchestrator со всеми компонентами.
-    
+
     Инициирует и собирает все необходимые компоненты:
     - StateManager: управление состоянием сессии
     - PlanBuilder: построение планов
@@ -54,10 +54,10 @@ def create_prompt_orchestrator() -> PromptOrchestrator:
     - ToolCallHandler (Этап 2): управление tool calls
     - PermissionManager (Этап 2): управление разрешениями
     - ClientRPCHandler (Этап 2): управление client RPC запросами
-    
+
     Returns:
         PromptOrchestrator: Готовый к использованию оркестратор
-        
+
     Пример использования:
         orchestrator = create_prompt_orchestrator()
         outcome = await orchestrator.handle_prompt(...)
@@ -68,7 +68,7 @@ def create_prompt_orchestrator() -> PromptOrchestrator:
     tool_call_handler = ToolCallHandler()
     permission_manager = PermissionManager()
     client_rpc_handler = ClientRPCHandler()
-    
+
     orchestrator = PromptOrchestrator(
         state_manager=state_manager,
         plan_builder=plan_builder,
@@ -77,7 +77,7 @@ def create_prompt_orchestrator() -> PromptOrchestrator:
         permission_manager=permission_manager,
         client_rpc_handler=client_rpc_handler,
     )
-    
+
     logger.debug("PromptOrchestrator created with all components")
     return orchestrator
 
@@ -198,9 +198,7 @@ async def _handle_with_agent(
                 "sessionId": session_id,
                 "update": {
                     "sessionUpdate": "available_commands_update",
-                    "availableCommands": _serialize_available_commands(
-                        session.available_commands
-                    ),
+                    "availableCommands": _serialize_available_commands(session.available_commands),
                 },
             },
         )
@@ -307,7 +305,7 @@ async def session_prompt(
     """Обрабатывает пользовательский prompt-turn через PromptOrchestrator.
 
     Этап 5: Глубокая интеграция оркестратора.
-    
+
     Метод валидирует контент и делегирует обработку PromptOrchestrator,
     который управляет всеми компонентами (StateManager, PlanBuilder,
     TurnLifecycleManager, ToolCallHandler, PermissionManager, ClientRPCHandler).
@@ -371,7 +369,7 @@ async def session_prompt(
         return ProtocolOutcome(response=content_error)
 
     # === ЭТАП 2: Обработка через PromptOrchestrator ===
-    
+
     # Если передан agent_orchestrator, использовать оркестратор для полной обработки
     if agent_orchestrator is not None:
         orchestrator = create_prompt_orchestrator()
@@ -388,7 +386,7 @@ async def session_prompt(
                 session_id=session_id,
                 notifications_count=len(outcome.notifications),
             )
-            
+
             # Сохраняем сессию в storage после обработки оркестратором
             if storage is not None:
                 try:
@@ -402,7 +400,7 @@ async def session_prompt(
                         "failed_to_save_session_after_orchestrator_processing",
                         error=str(e),
                     )
-            
+
             return outcome
         except Exception as e:
             logger.error(
@@ -673,9 +671,7 @@ async def session_prompt(
                 "sessionId": session_id,
                 "update": {
                     "sessionUpdate": "available_commands_update",
-                    "availableCommands": _serialize_available_commands(
-                        session.available_commands
-                    ),
+                    "availableCommands": _serialize_available_commands(session.available_commands),
                 },
             },
         )
@@ -692,7 +688,7 @@ async def session_prompt(
         # Финальный response будет отправлен позже (автозавершение или cancel).
         if directives.keep_tool_pending and should_run_tool_flow:
             session.active_turn.phase = "waiting_tool_completion"
-        
+
         # Сохраняем сессию в storage для персистентности истории даже при deferred completion
         if storage is not None:
             try:
@@ -700,7 +696,7 @@ async def session_prompt(
                 logger.debug("session_saved_after_prompt_deferred", session_id=session_id)
             except Exception as e:
                 logger.error("failed_to_save_session_after_prompt_deferred", error=str(e))
-        
+
         return ProtocolOutcome(response=None, notifications=notifications)
 
     outcome = ProtocolOutcome(
@@ -708,7 +704,7 @@ async def session_prompt(
         notifications=notifications,
     )
     session.active_turn = None
-    
+
     # Сохраняем сессию в storage для персистентности истории
     if storage is not None:
         try:
@@ -716,7 +712,7 @@ async def session_prompt(
             logger.debug("session_saved_after_prompt", session_id=session_id)
         except Exception as e:
             logger.error("failed_to_save_session_after_prompt", error=str(e))
-    
+
     return outcome
 
 
@@ -748,7 +744,7 @@ def session_cancel(
     """
 
     session_id = params.get("sessionId")
-    
+
     # Проверить, что sessionId передан и сессия существует
     if not isinstance(session_id, str) or session_id not in sessions:
         # Если sessionId невалиден или сессия не найдена, вернуть пустой результат
@@ -758,9 +754,9 @@ def session_cancel(
             response=ACPMessage.response(request_id, None),
             notifications=[],
         )
-    
+
     session = sessions[session_id]
-    
+
     # === ЭТАП 1: Использовать PromptOrchestrator для обработки отмены ===
     orchestrator = create_prompt_orchestrator()
     try:

@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 class ToolCallHandler:
     """Управляет жизненным циклом tool calls в prompt-turn.
-    
+
     Инкапсулирует логику создания tool calls, обновления их статуса,
     построения notifications и отмены активных tool calls.
     """
@@ -61,13 +61,13 @@ class ToolCallHandler:
 
     def can_run_tools(self, session: SessionState) -> bool:
         """Проверяет, доступен ли tool-runtime для текущей сессии.
-        
+
         Tool-runtime доступен, если клиент заявил о наличии хотя бы одной
         из capability: terminal, fs_read или fs_write.
-        
+
         Args:
             session: Состояние сессии
-        
+
         Returns:
             True если есть хотя бы одна capability, иначе False
         """
@@ -85,16 +85,16 @@ class ToolCallHandler:
         kind: str,
     ) -> str:
         """Создает новый tool call, возвращает его ID.
-        
+
         Использует локально монотонный счетчик для генерации стабильных ID
         вида "call_NNN". Записывает ToolCallState в session.tool_calls.
-        
+
         Args:
             session: Состояние сессии
             title: Название для UI (e.g., "Tool execution")
             kind: Категория tool (read, edit, delete, move, search, execute,
                 think, fetch, switch_mode, other)
-        
+
         Returns:
             ID вида "call_NNN" (e.g., "call_001", "call_002")
         """
@@ -118,14 +118,14 @@ class ToolCallHandler:
         content: list[dict[str, Any]] | None = None,
     ) -> None:
         """Обновляет статус tool call с проверкой допустимых переходов.
-        
+
         Матрица допустимых переходов:
         - pending → in_progress, cancelled, failed
         - in_progress → completed, cancelled, failed
         - completed, cancelled, failed → (терминальные состояния)
-        
+
         Если переход невалиден, игнорирует обновление.
-        
+
         Args:
             session: Состояние сессии
             tool_call_id: ID tool call'а для обновления
@@ -154,17 +154,17 @@ class ToolCallHandler:
         locations: list[dict[str, str]] | None = None,
     ) -> ACPMessage:
         """Строит tool_call notification для отправки клиенту.
-        
+
         Создает сообщение с информацией о новом tool call, включающее
         его идентификатор, title, kind и опциональные locations.
-        
+
         Args:
             session_id: ID сессии
             tool_call_id: ID tool call'а
             title: Название для UI
             kind: Категория tool
             locations: Опциональные locations (e.g., file paths)
-        
+
         Returns:
             ACPMessage типа notification с sessionUpdate="tool_call"
         """
@@ -194,16 +194,16 @@ class ToolCallHandler:
         content: list[dict[str, Any]] | None = None,
     ) -> ACPMessage:
         """Строит tool_call_update notification для отправки клиенту.
-        
+
         Создает сообщение об изменении статуса существующего tool call,
         опционально включая контент результата.
-        
+
         Args:
             session_id: ID сессии
             tool_call_id: ID tool call'а
             status: Новый статус (in_progress, completed, cancelled, failed)
             content: Опциональный контент (результаты tool call)
-        
+
         Returns:
             ACPMessage типа notification с sessionUpdate="tool_call_update"
         """
@@ -231,16 +231,16 @@ class ToolCallHandler:
         leave_running: bool = False,
     ) -> list[ACPMessage]:
         """Executor mode: генерирует lifecycle updates для tool execution.
-        
+
         В режиме executor tool-runtime выполняется автоматически без запроса
         разрешения. Генерирует цепочку: in_progress → completed (или remains running).
-        
+
         Args:
             session: Состояние сессии (будет обновлено)
             session_id: ID сессии
             tool_call_id: ID tool call'а
             leave_running: Если True, оставляет tool в статусе in_progress
-        
+
         Returns:
             Список ACPMessage notifications для отправки клиенту
         """
@@ -287,17 +287,17 @@ class ToolCallHandler:
         allowed: bool,
     ) -> list[ACPMessage]:
         """Policy mode: генерирует updates после решения по разрешению.
-        
+
         В режиме ask пользователь принимает решение о запуске tool.
         На основе решения (allowed/rejected) генерирует соответствующие
         notifications: completed (если allowed) или cancelled (если rejected).
-        
+
         Args:
             session: Состояние сессии (будет обновлено)
             session_id: ID сессии
             tool_call_id: ID tool call'а
             allowed: True для разрешения, False для отказа
-        
+
         Returns:
             Список ACPMessage notifications для отправки клиенту
         """
@@ -314,7 +314,7 @@ class ToolCallHandler:
 
         # Пользователь разрешил выполнение
         notifications: list[ACPMessage] = []
-        
+
         # Переводим в in_progress
         self.update_tool_call_status(session, tool_call_id, "in_progress")
         notifications.append(
@@ -324,7 +324,7 @@ class ToolCallHandler:
                 status="in_progress",
             )
         )
-        
+
         # Переводим в completed
         completed_content = [
             {
@@ -357,26 +357,26 @@ class ToolCallHandler:
         session_id: str,
     ) -> list[ACPMessage]:
         """Отменяет все активные (pending, in_progress) tool calls.
-        
+
         Используется при отмене prompt-turn или других событиях,
         требующих отмены всех незавершенных tool calls.
         Игнорирует tool calls в терминальных состояниях.
-        
+
         Args:
             session: Состояние сессии (будет обновлено)
             session_id: ID сессии
-        
+
         Returns:
             Список ACPMessage notifications об отмене tool calls
         """
         notifications: list[ACPMessage] = []
-        
+
         # Итерируем по всем tool calls и отменяем активные
         for tool_call in session.tool_calls.values():
             if tool_call.status not in {"pending", "in_progress"}:
                 # Пропускаем завершенные/отмененные tool calls
                 continue
-            
+
             self.update_tool_call_status(
                 session,
                 tool_call.tool_call_id,
@@ -389,5 +389,5 @@ class ToolCallHandler:
                     status="cancelled",
                 )
             )
-        
+
         return notifications

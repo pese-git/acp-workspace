@@ -8,7 +8,7 @@ from acp_server.tools.base import ToolDefinition, ToolExecutionResult, ToolRegis
 
 class SimpleToolRegistry(ToolRegistry):
     """Простой реестр инструментов с хранением в памяти.
-    
+
     Хранит определения инструментов и их обработчики (handlers).
     Позволяет регистрировать, получать и выполнять инструменты.
     """
@@ -26,28 +26,28 @@ class SimpleToolRegistry(ToolRegistry):
         handler: Callable,
     ) -> None:
         """Регистрация инструмента и его обработчика.
-        
+
         Args:
             tool: Определение инструмента (ToolDefinition)
             handler: Callable обработчик инструмента
-            
+
         Raises:
             ValueError: Если имя инструмента пустое
         """
         # Проверка, что имя инструмента не пустое
         if not tool.name or not tool.name.strip():
             raise ValueError("Имя инструмента не может быть пустым")
-        
+
         # Регистрация инструмента и его обработчика
         self._tools[tool.name] = tool
         self._handlers[tool.name] = handler
 
     def get(self, name: str) -> ToolDefinition | None:
         """Получение определения инструмента по имени.
-        
+
         Args:
             name: Имя инструмента
-            
+
         Returns:
             Определение инструмента или None, если не найден
         """
@@ -55,7 +55,7 @@ class SimpleToolRegistry(ToolRegistry):
 
     def list_tools(self) -> list[ToolDefinition]:
         """Получение списка всех зарегистрированных инструментов.
-        
+
         Returns:
             Список определений инструментов
         """
@@ -67,14 +67,14 @@ class SimpleToolRegistry(ToolRegistry):
         arguments: dict[str, Any],
     ) -> ToolExecutionResult:
         """Выполнение инструмента по имени с переданными аргументами.
-        
+
         Args:
             name: Имя инструмента
             arguments: Словарь аргументов для обработчика
-            
+
         Returns:
             Результат выполнения (ToolExecutionResult)
-            
+
         Raises:
             ValueError: Если инструмент не найден
         """
@@ -84,17 +84,17 @@ class SimpleToolRegistry(ToolRegistry):
                 success=False,
                 error=f"Инструмент '{name}' не найден в реестре",
             )
-        
+
         # Получение обработчика
         handler = self._handlers[name]
-        
+
         try:
             # Выполнение обработчика с аргументами
             output = handler(**arguments)
-            
+
             # Преобразование вывода в строку если необходимо
             output_str = str(output) if output is not None else None
-            
+
             return ToolExecutionResult(
                 success=True,
                 output=output_str,
@@ -132,7 +132,7 @@ class SimpleToolRegistry(ToolRegistry):
         include_permission_required: bool = True,
     ) -> list[ToolDefinition]:
         """Получить доступные инструменты для сессии.
-        
+
         В упрощенной реализации возвращает все инструменты.
         """
         # Для простого реестра - возвращаем все инструменты

@@ -68,7 +68,7 @@ class AgentOrchestrator:
         - НЕ добавляет assistant message в историю сессии
         - НЕ модифицирует session_state
         - ТОЛЬКО возвращает текст ответа агента
-        
+
         История сообщений обновляется в PromptOrchestrator,
         что обеспечивает централизованное управление сохранением.
 
@@ -114,17 +114,13 @@ class AgentOrchestrator:
             Контекст для агента
         """
         # Получить историю сообщений из SessionState
-        conversation_history = self._convert_to_llm_messages(
-            session_state.history
-        )
+        conversation_history = self._convert_to_llm_messages(session_state.history)
 
         # Преобразовать промпт в формат list[dict]
         prompt_blocks = [{"type": "text", "text": prompt}]
 
         # Получить доступные инструменты для этой сессии
-        available_tools = self.tool_registry.get_available_tools(
-            session_state.session_id
-        )
+        available_tools = self.tool_registry.get_available_tools(session_state.session_id)
 
         # Создать и вернуть AgentContext
         return AgentContext(
@@ -152,8 +148,7 @@ class AgentOrchestrator:
         for entry in history:
             # Конвертировать Pydantic модель в dict если необходимо
             entry_dict = (
-                entry if isinstance(entry, dict)
-                else entry.model_dump()  # type: ignore[attr-defined]
+                entry if isinstance(entry, dict) else entry.model_dump()  # type: ignore[attr-defined]
             )
 
             # Определить роль сообщения
@@ -187,10 +182,12 @@ class AgentOrchestrator:
         history: list[dict[str, Any]] = []
 
         for msg in messages:
-            history.append({
-                "type": "text",
-                "role": msg.role,
-                "text": msg.content,
-            })
+            history.append(
+                {
+                    "type": "text",
+                    "role": msg.role,
+                    "text": msg.content,
+                }
+            )
 
         return history
