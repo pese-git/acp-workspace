@@ -9,6 +9,7 @@ repositories и ViewModels приложения.
 """
 
 import os
+from pathlib import Path
 from typing import Any
 
 import structlog
@@ -16,8 +17,11 @@ import structlog
 from acp_client.application.session_coordinator import SessionCoordinator
 from acp_client.infrastructure.di_container import ContainerBuilder
 from acp_client.infrastructure.events.bus import EventBus
+from acp_client.infrastructure.handlers import FileSystemHandler, TerminalHandler
 from acp_client.infrastructure.repositories import InMemorySessionRepository
 from acp_client.infrastructure.services.acp_transport_service import ACPTransportService
+from acp_client.infrastructure.services.file_system_executor import FileSystemExecutor
+from acp_client.infrastructure.services.terminal_executor import TerminalExecutor
 from acp_client.presentation.view_model_factory import ViewModelFactory
 
 
@@ -82,7 +86,21 @@ class DIBootstrapper:
             session_repo = InMemorySessionRepository()
             builder.register_singleton(InMemorySessionRepository, session_repo)
 
-            # 4. Регистрируем SessionCoordinator - оркестрация операций
+            # 4. Регистрируем FileSystem Executor и Handler
+            logger.debug("registering_file_system_executor_and_handler")
+            fs_executor = FileSystemExecutor(base_path=Path(cwd))
+            fs_handler = FileSystemHandler(fs_executor)
+            builder.register_singleton(FileSystemExecutor, fs_executor)
+            builder.register_singleton(FileSystemHandler, fs_handler)
+
+            # 5. Регистрируем Terminal Executor и Handler
+            logger.debug("registering_terminal_executor_and_handler")
+            term_executor = TerminalExecutor()
+            term_handler = TerminalHandler(term_executor)
+            builder.register_singleton(TerminalExecutor, term_executor)
+            builder.register_singleton(TerminalHandler, term_handler)
+
+            # 6. Регистрируем SessionCoordinator - оркестрация операций
             # Требует TransportService и SessionRepository
             logger.debug("registering_session_coordinator")
             coordinator = SessionCoordinator(
@@ -91,7 +109,7 @@ class DIBootstrapper:
             )
             builder.register_singleton(SessionCoordinator, coordinator)
 
-            # 5. Собираем контейнер и регистрируем ViewModels
+            # 7. Собираем контейнер и регистрируем ViewModels
             container = builder.build()
 
             logger.debug("registering_view_models")

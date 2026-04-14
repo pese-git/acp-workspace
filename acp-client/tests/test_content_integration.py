@@ -11,8 +11,6 @@ import base64
 import json
 from typing import Any
 
-import pytest
-
 from acp_client.domain.content import (
     AudioContent,
     EmbeddedResourceContent,
