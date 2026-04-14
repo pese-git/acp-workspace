@@ -16,6 +16,7 @@ from acp_server.protocol.handlers.state_manager import StateManager
 from acp_server.protocol.handlers.tool_call_handler import ToolCallHandler
 from acp_server.protocol.handlers.turn_lifecycle_manager import TurnLifecycleManager
 from acp_server.protocol.state import SessionState
+from acp_server.tools.registry import SimpleToolRegistry
 
 
 @pytest.fixture
@@ -55,6 +56,12 @@ def client_rpc_handler() -> ClientRPCHandler:
 
 
 @pytest.fixture
+def tool_registry() -> SimpleToolRegistry:
+    """Создает SimpleToolRegistry."""
+    return SimpleToolRegistry()
+
+
+@pytest.fixture
 def orchestrator(
     state_manager: StateManager,
     plan_builder: PlanBuilder,
@@ -62,6 +69,7 @@ def orchestrator(
     tool_call_handler: ToolCallHandler,
     permission_manager: PermissionManager,
     client_rpc_handler: ClientRPCHandler,
+    tool_registry: SimpleToolRegistry,
 ) -> PromptOrchestrator:
     """Создает PromptOrchestrator со всеми компонентами."""
     return PromptOrchestrator(
@@ -71,6 +79,8 @@ def orchestrator(
         tool_call_handler=tool_call_handler,
         permission_manager=permission_manager,
         client_rpc_handler=client_rpc_handler,
+        tool_registry=tool_registry,
+        client_rpc_service=None,
     )
 
 

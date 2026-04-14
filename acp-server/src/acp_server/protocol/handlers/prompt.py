@@ -11,7 +11,9 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from ...client_rpc.service import ClientRPCService
 from ...messages import ACPMessage, JsonRpcId
+from ...tools.base import ToolRegistry
 from ..state import (
     ActiveTurnState,
     PendingClientRequestState,
@@ -44,7 +46,10 @@ if TYPE_CHECKING:
 logger = structlog.get_logger()
 
 
-def create_prompt_orchestrator() -> PromptOrchestrator:
+def create_prompt_orchestrator(
+    tool_registry: ToolRegistry | None = None,
+    client_rpc_service: ClientRPCService | None = None,
+) -> PromptOrchestrator:
     """Создает полностью инициализированный PromptOrchestrator со всеми компонентами.
 
     Инициирует и собирает все необходимые компоненты:
@@ -54,12 +59,21 @@ def create_prompt_orchestrator() -> PromptOrchestrator:
     - ToolCallHandler (Этап 2): управление tool calls
     - PermissionManager (Этап 2): управление разрешениями
     - ClientRPCHandler (Этап 2): управление client RPC запросами
+    - ToolRegistry: реестр инструментов для выполнения (опционально)
+    - ClientRPCService: сервис для выполнения RPC запросов (опционально)
+
+    Если tool_registry и client_rpc_service не переданы, оркестратор будет создан
+    в режиме совместимости без поддержки выполнения встроенных инструментов.
+
+    Args:
+        tool_registry: Реестр инструментов для регистрации и выполнения tools (опционально)
+        client_rpc_service: Сервис ClientRPC для выполнения инструментов (опционально)
 
     Returns:
         PromptOrchestrator: Готовый к использованию оркестратор
 
     Пример использования:
-        orchestrator = create_prompt_orchestrator()
+        orchestrator = create_prompt_orchestrator(registry, rpc_service)
         outcome = await orchestrator.handle_prompt(...)
     """
     state_manager = StateManager()
@@ -69,6 +83,20 @@ def create_prompt_orchestrator() -> PromptOrchestrator:
     permission_manager = PermissionManager()
     client_rpc_handler = ClientRPCHandler()
 
+    # Если tool_registry или client_rpc_service не переданы, создать dummy instances
+    if tool_registry is None:
+        from acp_server.tools.registry import SimpleToolRegistry
+        tool_registry = SimpleToolRegistry()
+
+    if client_rpc_service is None:
+        # Создать minimal ClientRPCService для совместимости
+        # В реальном коде это должно быть передано из ACPProtocol
+        logger.warning(
+            "client_rpc_service not provided, using None for compatibility"
+        )
+        # Для совместимости с session_cancel, который не нуждается в RPC
+        client_rpc_service = None  # type: ignore[assignment]
+
     orchestrator = PromptOrchestrator(
         state_manager=state_manager,
         plan_builder=plan_builder,
@@ -76,9 +104,14 @@ def create_prompt_orchestrator() -> PromptOrchestrator:
         tool_call_handler=tool_call_handler,
         permission_manager=permission_manager,
         client_rpc_handler=client_rpc_handler,
+        tool_registry=tool_registry,
+        client_rpc_service=client_rpc_service,
     )
 
-    logger.debug("PromptOrchestrator created with all components")
+    logger.debug(
+        "PromptOrchestrator created with all components",
+        tools_registered=len(tool_registry.list_tools()),
+    )
     return orchestrator
 
 
@@ -301,6 +334,8 @@ async def session_prompt(
     config_specs: dict[str, dict[str, Any]],
     agent_orchestrator: AgentOrchestrator | None = None,
     storage: Any | None = None,
+    tool_registry: ToolRegistry | None = None,
+    client_rpc_service: ClientRPCService | None = None,
 ) -> ProtocolOutcome:
     """Обрабатывает пользовательский prompt-turn через PromptOrchestrator.
 
@@ -322,6 +357,8 @@ async def session_prompt(
         config_specs: Спецификации конфигурационных опций (не используется в orchestrator)
         agent_orchestrator: Оркестратор агента для обработки через LLM (опционально)
         storage: SessionStorage для сохранения состояния (опционально)
+        tool_registry: Реестр инструментов для выполнения (опционально)
+        client_rpc_service: Сервис ClientRPC для выполнения инструментов (опционально)
 
     Returns:
         ProtocolOutcome с notifications и response
@@ -372,7 +409,21 @@ async def session_prompt(
 
     # Если передан agent_orchestrator, использовать оркестратор для полной обработки
     if agent_orchestrator is not None:
-        orchestrator = create_prompt_orchestrator()
+        # Проверить, что tool_registry и client_rpc_service переданы
+        if tool_registry is None or client_rpc_service is None:
+            logger.error(
+                "tool_registry or client_rpc_service not provided for agent processing",
+                session_id=session_id,
+            )
+            return ProtocolOutcome(
+                response=ACPMessage.error_response(
+                    request_id,
+                    code=-32603,
+                    message="Internal error: tool registry or RPC service not configured",
+                )
+            )
+
+        orchestrator = create_prompt_orchestrator(tool_registry, client_rpc_service)
         try:
             outcome = await orchestrator.handle_prompt(
                 request_id=request_id,

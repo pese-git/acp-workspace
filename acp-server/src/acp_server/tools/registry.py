@@ -1,5 +1,6 @@
 """Простая реализация реестра инструментов для системы tools."""
 
+import inspect
 from collections.abc import Callable
 from typing import Any
 
@@ -158,6 +159,49 @@ class SimpleToolRegistry(ToolRegistry):
         tool_name: str,
         arguments: dict[str, Any],
     ) -> ToolExecutionResult:
-        """Выполнить инструмент (async версия для интерфейса ToolRegistry)."""
-        # В упрощенной реализации просто вызываем синхронную версию
-        return self.execute(tool_name, arguments)
+        """Выполнить инструмент асинхронно с поддержкой async executors.
+
+        Поддерживает как синхронные, так и асинхронные executors.
+        Metadata из ToolExecutionResult сохраняется в результате.
+
+        Args:
+            session_id: ID сессии для контекста выполнения
+            tool_name: Имя инструмента
+            arguments: Аргументы для выполнения
+
+        Returns:
+            ToolExecutionResult с успехом/ошибкой и metadata если доступен
+        """
+        # Проверка существования инструмента
+        if tool_name not in self._tools:
+            return ToolExecutionResult(
+                success=False,
+                error=f"Инструмент '{tool_name}' не найден в реестре",
+            )
+
+        # Получение обработчика
+        handler = self._handlers[tool_name]
+
+        try:
+            # Проверяем является ли обработчик асинхронным
+            if inspect.iscoroutinefunction(handler):
+                # Для async executors вызываем await
+                result = await handler(**arguments)
+            else:
+                # Для синхронных функций вызываем напрямую
+                output = handler(**arguments)
+                result = ToolExecutionResult(
+                    success=True,
+                    output=str(output) if output is not None else None,
+                )
+
+            # Возвращаем результат с сохранением metadata
+            return result
+
+        except Exception as exc:
+            # Обработка исключений при выполнении
+            error_msg = f"Ошибка при выполнении инструмента '{tool_name}': {str(exc)}"
+            return ToolExecutionResult(
+                success=False,
+                error=error_msg,
+            )

@@ -2,6 +2,7 @@
 
 Интегрирует все компоненты Этапа 2 и Этапа 3 для оркестрации
 обработки prompt-turn в системе ACP.
+Включает регистрацию и выполнение инструментов через tool registry.
 """
 
 from __future__ import annotations
@@ -10,7 +11,9 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from ...client_rpc.service import ClientRPCService
 from ...messages import ACPMessage, JsonRpcId
+from ...tools.base import ToolRegistry
 from ..state import ProtocolOutcome, SessionState
 from .client_rpc_handler import ClientRPCHandler
 from .permission_manager import PermissionManager
@@ -46,8 +49,12 @@ class PromptOrchestrator:
         tool_call_handler: ToolCallHandler,
         permission_manager: PermissionManager,
         client_rpc_handler: ClientRPCHandler,
+        tool_registry: ToolRegistry,
+        client_rpc_service: ClientRPCService | None = None,
     ):
         """Инициализирует оркестратор со всеми компонентами.
+
+        Регистрирует встроенные инструменты (fs/*, terminal/*) и их executors.
 
         Args:
             state_manager: Менеджер состояния сессии
@@ -56,6 +63,8 @@ class PromptOrchestrator:
             tool_call_handler: Обработчик tool calls
             permission_manager: Менеджер разрешений
             client_rpc_handler: Обработчик client RPC запросов
+            tool_registry: Реестр инструментов для регистрации tools
+            client_rpc_service: Сервис ClientRPC для выполнения инструментов (опционально)
         """
         self.state_manager = state_manager
         self.plan_builder = plan_builder
@@ -63,8 +72,40 @@ class PromptOrchestrator:
         self.tool_call_handler = tool_call_handler
         self.permission_manager = permission_manager
         self.client_rpc_handler = client_rpc_handler
+        self.tool_registry = tool_registry
+        self.client_rpc_service = client_rpc_service
 
-        logger.debug("PromptOrchestrator initialized with all components")
+        # Создать bridge и permission checker для executors только если RPC service доступен
+        if client_rpc_service is not None:
+            # Импортировать только при необходимости для избежания циклических импортов
+            from ...tools.definitions import (
+                FileSystemToolDefinitions,
+                TerminalToolDefinitions,
+            )
+            from ...tools.executors.filesystem_executor import FileSystemToolExecutor
+            from ...tools.executors.terminal_executor import TerminalToolExecutor
+            from ...tools.integrations.client_rpc_bridge import ClientRPCBridge
+            from ...tools.integrations.permission_checker import PermissionChecker
+
+            bridge = ClientRPCBridge(client_rpc_service)
+            checker = PermissionChecker(permission_manager)
+
+            # Создать executors для встроенных инструментов
+            fs_executor = FileSystemToolExecutor(bridge, checker)
+            terminal_executor = TerminalToolExecutor(bridge, checker)
+
+            # Зарегистрировать встроенные инструменты
+            FileSystemToolDefinitions.register_all(tool_registry, fs_executor)
+            TerminalToolDefinitions.register_all(tool_registry, terminal_executor)
+
+            logger.debug(
+                "PromptOrchestrator initialized with tool executors",
+                tools_registered=len(tool_registry.list_tools()),
+            )
+        else:
+            logger.debug(
+                "PromptOrchestrator initialized without tool executors (client_rpc_service is None)"
+            )
 
     async def handle_prompt(
         self,
@@ -132,6 +173,7 @@ class PromptOrchestrator:
 
         # Шаг 5: Обработать через агента и получить ответ
         agent_response_text = ""
+        agent_response = None
         try:
             # Agent Orchestrator теперь возвращает AgentResponse, не SessionState
             agent_response = await agent_orchestrator.process_prompt(
@@ -173,6 +215,15 @@ class PromptOrchestrator:
                 agent_response_text,
             )
             notifications.append(final_notification)
+
+        # Шаг 6.5: Обработать tool_calls из AgentResponse
+        if agent_response and agent_response.tool_calls:
+            await self._process_tool_calls(
+                session,
+                session_id,
+                agent_response.tool_calls,
+                notifications,
+            )
 
         # Шаг 7: Отправить session info update
         summary = self.state_manager.get_session_summary(session)
@@ -333,6 +384,235 @@ class PromptOrchestrator:
         )
 
         return ProtocolOutcome(response=None, notifications=notifications)
+
+    async def _process_tool_calls(
+        self,
+        session: SessionState,
+        session_id: str,
+        tool_calls: list[Any],
+        notifications: list[ACPMessage],
+    ) -> None:
+        """Обработать tool_calls из AgentResponse.
+
+        Для каждого tool call:
+        1. Создать tool call через tool_call_handler
+        2. Отправить notification о создании tool_call
+        3. Проверить режим (ask/auto) и разрешения
+        4. Выполнить tool через tool_registry
+        5. Обновить статус и отправить notification
+
+        Args:
+            session: Состояние сессии
+            session_id: ID сессии
+            tool_calls: Список tool_calls из agent_response
+            notifications: Список уведомлений для отправки клиенту
+        """
+        for tool_call in tool_calls:
+            # Получить информацию о tool call
+            tool_name = getattr(tool_call, "name", None)
+            tool_arguments = getattr(tool_call, "arguments", {})
+            tool_id = getattr(tool_call, "id", None)
+
+            if not tool_name:
+                logger.warning(
+                    "tool_call has no name",
+                    session_id=session_id,
+                )
+                continue
+
+            # Создать tool call в сессии
+            tool_call_id = self.tool_call_handler.create_tool_call(
+                session,
+                tool_id,
+                tool_name,
+                tool_name,
+                "auto",
+            )
+
+            # Отправить notification о создании tool_call
+            notifications.append(
+                ACPMessage.notification(
+                    "session/update",
+                    {
+                        "sessionId": session_id,
+                        "update": {
+                            "sessionUpdate": "tool_call",
+                            "toolCallId": tool_call_id,
+                            "title": tool_name,
+                            "kind": "other",
+                            "status": "pending",
+                        },
+                    },
+                )
+            )
+
+            # Проверить режим выполнения
+            mode = session.config_values.get("mode", "ask")
+
+            # Проверить разрешения если режим ask
+            should_request_permission = False
+            if mode == "ask":
+                # Определить kind из tool name (например fs/read -> read)
+                tool_kind = "other"
+                if tool_name.startswith("fs/"):
+                    tool_kind = "read" if "read" in tool_name else "edit"
+                elif tool_name.startswith("terminal/"):
+                    tool_kind = "execute"
+
+                # Проверить запомненное разрешение
+                remembered = self.permission_manager.get_remembered_permission(
+                    session,
+                    tool_kind,
+                )
+
+                if remembered not in ("allow", "reject"):
+                    # Нужно запросить разрешение
+                    should_request_permission = True
+                    # Отправить notification о необходимости разрешения
+                    logger.debug(
+                        "permission required for tool",
+                        session_id=session_id,
+                        tool_name=tool_name,
+                    )
+                elif remembered == "reject":
+                    # Отменить tool call
+                    self.tool_call_handler.update_tool_call_status(
+                        session,
+                        tool_call_id,
+                        "cancelled",
+                    )
+                    notifications.append(
+                        ACPMessage.notification(
+                            "session/update",
+                            {
+                                "sessionId": session_id,
+                                "update": {
+                                    "sessionUpdate": "tool_call_update",
+                                    "toolCallId": tool_call_id,
+                                    "status": "cancelled",
+                                },
+                            },
+                        )
+                    )
+                    continue
+
+            # Выполнить tool если не нужно запрашивать разрешение
+            if not should_request_permission:
+                try:
+                    # Отправить notification о начале выполнения
+                    self.tool_call_handler.update_tool_call_status(
+                        session,
+                        tool_call_id,
+                        "in_progress",
+                    )
+                    notifications.append(
+                        ACPMessage.notification(
+                            "session/update",
+                            {
+                                "sessionId": session_id,
+                                "update": {
+                                    "sessionUpdate": "tool_call_update",
+                                    "toolCallId": tool_call_id,
+                                    "status": "in_progress",
+                                },
+                            },
+                        )
+                    )
+
+                    # Выполнить tool
+                    result = await self.tool_registry.execute_tool(
+                        session_id,
+                        tool_name,
+                        tool_arguments,
+                    )
+
+                    # Обновить статус tool call
+                    if result.success:
+                        self.tool_call_handler.update_tool_call_status(
+                            session,
+                            tool_call_id,
+                            "completed",
+                            content=[
+                                {
+                                    "type": "content",
+                                    "content": {
+                                        "type": "text",
+                                        "text": result.output or "Tool executed successfully",
+                                    },
+                                }
+                            ],
+                        )
+                        status = "completed"
+                    else:
+                        self.tool_call_handler.update_tool_call_status(
+                            session,
+                            tool_call_id,
+                            "failed",
+                        )
+                        status = "failed"
+
+                    # Отправить notification об окончании выполнения
+                    update_params: dict[str, Any] = {
+                        "sessionId": session_id,
+                        "update": {
+                            "sessionUpdate": "tool_call_update",
+                            "toolCallId": tool_call_id,
+                            "status": status,
+                        },
+                    }
+
+                    if result.success and result.output:
+                        update_params["update"]["content"] = [
+                            {
+                                "type": "content",
+                                "content": {
+                                    "type": "text",
+                                    "text": result.output,
+                                },
+                            }
+                        ]
+
+                    notifications.append(
+                        ACPMessage.notification(
+                            "session/update",
+                            update_params,
+                        )
+                    )
+
+                    logger.debug(
+                        "tool executed successfully",
+                        session_id=session_id,
+                        tool_name=tool_name,
+                        status=status,
+                    )
+
+                except Exception as e:
+                    # Обработать ошибку выполнения
+                    logger.error(
+                        "tool execution failed",
+                        session_id=session_id,
+                        tool_name=tool_name,
+                        error=str(e),
+                    )
+
+                    self.tool_call_handler.update_tool_call_status(
+                        session,
+                        tool_call_id,
+                        "failed",
+                    )
+                    notifications.append(
+                        ACPMessage.notification(
+                            "session/update",
+                            {
+                                "sessionId": session_id,
+                                "update": {
+                                    "sessionUpdate": "tool_call_update",
+                                    "toolCallId": tool_call_id,
+                                    "status": "failed",
+                                },
+                            },
+                        )
+                    )
 
     def handle_permission_response(
         self,
