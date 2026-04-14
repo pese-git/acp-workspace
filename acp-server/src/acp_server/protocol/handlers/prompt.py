@@ -413,7 +413,8 @@ async def session_prompt(
         # tool_registry и client_rpc_service опциональны для совместимости
         if tool_registry is None or client_rpc_service is None:
             logger.warning(
-                "tool_registry or client_rpc_service not provided, tool execution will not be available",
+                "tool_registry or client_rpc_service not provided, "
+                "tool execution will not be available",
                 session_id=session_id,
             )
 
