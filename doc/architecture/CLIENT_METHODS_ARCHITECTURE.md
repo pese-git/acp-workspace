@@ -1,43 +1,113 @@
-# Архитектура File System и Terminal методов в ACP протоколе
+# Архитектура клиентских методов (File System и Terminal)
 
 ## Содержание
 
 1. [Обзор](#обзор)
-2. [File System методы](#file-system-методы)
-3. [Terminal методы](#terminal-методы)
-4. [Архитектура реализации](#архитектура-реализации)
-5. [Безопасность и разрешения](#безопасность-и-разрешения)
-6. [Обработка ошибок](#обработка-ошибок)
-7. [Интеграция с существующими компонентами](#интеграция-с-существующими-компонентами)
-8. [Диаграммы](#диаграммы)
-9. [План реализации](#план-реализации)
+2. [Направление вызовов: Agent → Client](#направление-вызовов-agent--client)
+3. [File System методы](#file-system-методы)
+4. [Terminal методы](#terminal-методы)
+5. [Архитектура реализации](#архитектура-реализации)
+6. [Bidirectional RPC механизм](#bidirectional-rpc-механизм)
+7. [Безопасность и разрешения](#безопасность-и-разрешения)
+8. [Обработка ошибок](#обработка-ошибок)
+9. [Интеграция с Tool Calls](#интеграция-с-tool-calls)
+10. [Диаграммы архитектуры](#диаграммы-архитектуры)
+11. [План реализации](#план-реализации)
+12. [Примеры использования](#примеры-использования)
 
 ---
 
 ## Обзор
 
-Документ описывает архитектуру реализации клиентских методов для работы с файловой системой (File System) и терминалом (Terminal) согласно спецификации ACP протокола ([09-File System.md](../Agent%20Client%20Protocol/protocol/09-File System.md) и [10-Terminal.md](../Agent%20Client%20Protocol/protocol/10-Terminal.md)).
+### Назначение
+
+Документ описывает архитектуру реализации **клиентских методов** (File System и Terminal) согласно спецификации ACP протокола. Эти методы позволяют **агентам получать доступ к локальной среде клиента** для чтения файлов, записи файлов и выполнения shell команд.
+
+### Ключевое архитектурное направление: Agent → Client
+
+**КРИТИЧЕСКИ ВАЖНО:** fs/* и terminal/* методы вызываются **агентом на клиенте**, а не клиентом на агенте.
+
+- **Инициатор:** Agent (acp-server)
+- **Исполнитель:** Client (acp-client)
+- **Транспорт:** Bidirectional JSON-RPC
+- **Место выполнения:** Client Environment (локальная машина пользователя)
 
 ### Назначение методов
 
-**File System методы** предоставляют агентам возможность:
-- Читать файлы с клиентской машины, включая несохраненные изменения в редакторе
-- Записывать и обновлять текстовые файлы в файловой системе клиента
-- Организовать доступ к исходному коду, конфигурациям и другим текстовым ресурсам
+#### File System методы
 
-**Terminal методы** позволяют агентам:
-- Выполнять произвольные shell команды в окружении клиента
-- Контролировать процессы (остановка, получение результата)
-- Потреблять output в реальном времени для встраивания в tool calls
-- Реализовывать таймауты и асинхронное выполнение команд
+Предоставляют агентам доступ к файловой системе клиента:
+- `fs/read_text_file` — чтение содержимого текстовых файлов (включая несохраненные изменения в редакторе)
+- `fs/write_text_file` — запись и обновление текстовых файлов в файловой системе клиента
+
+#### Terminal методы
+
+Позволяют агентам выполнять shell команды в окружении клиента:
+- `terminal/create` — запуск нового процесса в терминале
+- `terminal/output` — получение текущего output без ожидания завершения
+- `terminal/wait_for_exit` — ожидание завершения процесса
+- `terminal/kill` — остановка процесса без освобождения ресурсов
+- `terminal/release` — завершение процесса и освобождение всех ресурсов
 
 ### Ключевые требования
 
-1. **Проверка возможностей (Capability Check)** перед использованием методов
-2. **Асинхронное выполнение** команд без блокирования агента
+1. **Проверка возможностей (Capability Check)** — агент должен проверить `clientCapabilities` перед использованием методов
+2. **Асинхронное выполнение** — команды выполняются в фоне, агент продолжает работать
 3. **Управление ресурсами** — явное завершение и освобождение терминалов
-4. **Потоковая доставка** output для встраивания в UI
-5. **Полное соответствие спецификации** ACP протокола
+4. **Потоковая доставка output** — для встраивания в UI в реальном времени
+5. **Безопасность** — path traversal защита, проверка разрешений
+6. **Полное соответствие спецификации ACP** — все примеры и параметры из [09-File System.md](../Agent%20Client%20Protocol/protocol/09-File System.md) и [10-Terminal.md](../Agent%20Client%20Protocol/protocol/10-Terminal.md)
+
+---
+
+## Направление вызовов: Agent → Client
+
+### Поток управления
+
+```
+Agent (acp-server)
+    ↓
+    └─→ ClientRPCService
+            ↓
+            └─→ Bidirectional JSON-RPC Transport
+                    ↓
+                    └─→ Client (acp-client)
+                            ↓
+                            └─→ Handler Registry
+                                    ↓
+                                    ├─→ FileSystemHandler
+                                    │       ↓
+                                    │       └─→ FileSystemExecutor
+                                    │               ↓
+                                    │               └─→ File System / Editor
+                                    │
+                                    └─→ TerminalHandler
+                                            ↓
+                                            └─→ TerminalExecutor
+                                                    ↓
+                                                    └─→ Shell / OS Process
+                                    ↓
+                            Handler Response
+                                    ↓
+                    ← ← ← JSON-RPC Response ← ← ←
+                    ↓
+        ClientRPCService получает результат
+                    ↓
+        Агент продолжает обработку
+```
+
+### Инициация
+
+Агент инициирует запрос на основе:
+1. Проверки `clientCapabilities` при инициализации сессии
+2. Необходимости доступа к локальной среде для выполнения tool call
+3. Запроса на чтение файла (для анализа кода, конфигураций)
+4. Запроса на выполнение shell команды (для build, tests, scripts)
+
+### Отличие от Tool Calls
+
+- **Tool Calls:** Client объявляет, какие инструменты доступны → Agent вызывает → Client выполняет
+- **fs/terminal методы:** Agent запрашивает доступ к **локальной окружению** → Client предоставляет доступ через RPC методы
 
 ---
 
@@ -45,15 +115,17 @@
 
 ### Обзор
 
-Два метода для работы с текстовыми файлами:
-1. `fs/read_text_file` — чтение файлов
-2. `fs/write_text_file` — запись файлов
+Два основных метода для работы с текстовыми файлами на стороне клиента:
+1. **fs/read_text_file** — чтение файлов с поддержкой частичного чтения (line, limit)
+2. **fs/write_text_file** — запись/обновление файлов с запросом разрешения
 
 ### 1. fs/read_text_file
 
-Метод для чтения текстовых файлов с клиентской машины, включая несохраненные изменения в редакторе.
+#### Назначение
 
-#### Сигнатура
+Чтение содержимого текстовых файлов из файловой системы клиента, включая несохраненные изменения в редакторе.
+
+#### Сигнатура запроса
 
 ```json
 {
@@ -80,18 +152,20 @@
 
 #### Валидация параметров
 
+Клиент должен валидировать:
 1. `sessionId` — должен быть валидным ID существующей сессии
-2. `path` — должен быть абсолютным путем
+2. `path` — должен быть абсолютным путем (не содержать относительные компоненты `../`)
 3. `line` — если задан, должен быть ≥ 1
 4. `limit` — если задан, должен быть ≥ 1
+5. **Path traversal защита** — путь не должен выходить за пределы санкционированных директорий
 
 #### Требования к разрешениям
 
-- Требует проверки `clientCapabilities.fs.readTextFile == true` перед вызовом
-- Должна быть запрошена явная пермиссия пользователя на чтение файла (опционально, зависит от конфигурации агента)
-- Агент не может читать файлы за пределами санкционированных директорий (если настроены ограничения)
+- **Capability check:** `clientCapabilities.fs.readTextFile == true`
+- **Разрешение пользователя:** опционально, в зависимости от конфигурации агента
+- **Ограничения директорий:** агент может быть ограничен определенными директориями (если настроены ограничения)
 
-#### Ответ
+#### Сигнатура ответа
 
 ```json
 {
@@ -103,56 +177,51 @@
 }
 ```
 
+#### Поля ответа
+
 | Поле | Тип | Описание |
 |------|-----|---------|
-| `content` | string | Содержимое файла (полное или частичное в зависимости от параметров) |
-
-#### Обработка ошибок
-
-| Ошибка | Код | Описание |
-|--------|-----|---------|
-| File not found | -32602 (Invalid params) | Файл не существует по указанному пути |
-| Access denied | -32600 (Invalid Request) | Нет разрешения на чтение файла |
-| Invalid session | -32602 | SessionId не является валидной сессией |
-| Path traversal | -32602 | Попытка доступа за пределы разрешенной директории |
+| `content` | string | Содержимое файла (полное или частичное в зависимости от line/limit) |
 
 #### Примеры использования
 
 **Пример 1: Чтение всего файла**
+
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 101,
+  "id": 1,
   "method": "fs/read_text_file",
   "params": {
-    "sessionId": "sess_abc123",
-    "path": "/home/user/config.json"
+    "sessionId": "sess_123",
+    "path": "/home/user/project/README.md"
   }
 }
 ```
 
-**Пример 2: Чтение части файла (строки 10-60)**
+**Пример 2: Чтение 50 строк начиная со строки 10**
+
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 102,
+  "id": 2,
   "method": "fs/read_text_file",
   "params": {
-    "sessionId": "sess_abc123",
-    "path": "/home/user/src/main.py",
+    "sessionId": "sess_123",
+    "path": "/home/user/project/src/main.py",
     "line": 10,
     "limit": 50
   }
 }
 ```
 
----
-
 ### 2. fs/write_text_file
 
-Метод для записи или обновления текстовых файлов на клиентской машине.
+#### Назначение
 
-#### Сигнатура
+Запись или обновление текстовых файлов в файловой системе клиента. Клиент должен создать файл, если он не существует.
+
+#### Сигнатура запроса
 
 ```json
 {
@@ -172,23 +241,27 @@
 | Параметр | Тип | Обязателен | Описание |
 |----------|-----|-----------|---------|
 | `sessionId` | SessionId | Да | ID сессии для трассировки контекста |
-| `path` | string | Да | Абсолютный путь к файлу. Клиент ДОЛЖЕН создать файл, если он не существует |
-| `content` | string | Да | Содержимое для записи в файл |
+| `path` | string | Да | Абсолютный путь к файлу на клиенте. Клиент создает файл, если его нет |
+| `content` | string | Да | Текстовое содержимое для записи |
 
 #### Валидация параметров
 
+Клиент должен валидировать:
 1. `sessionId` — должен быть валидным ID существующей сессии
 2. `path` — должен быть абсолютным путем
-3. `content` — может быть пустой строкой, но должна быть строкой
+3. **Path traversal защита** — путь не должен выходить за пределы санкционированных директорий
+4. `content` — должна быть строка (может быть пустой)
 
 #### Требования к разрешениям
 
-- Требует проверки `clientCapabilities.fs.writeTextFile == true` перед вызовом
-- Должна быть запрошена явная пермиссия пользователя на запись файла (обязательно)
-- Обычно требует подтверждения пользователя через `session/request_permission`
-- Агент не может писать в системные директории
+- **Capability check:** `clientCapabilities.fs.writeTextFile == true`
+- **Permission request:** клиент ДОЛЖЕН запросить явное разрешение пользователя перед записью файла
+  - Использовать [`session/request_permission`](../Agent%20Client%20Protocol/protocol/03-Session%20Setup.md#requesting-permission) для запроса разрешения
+  - Отправить permission request с деталями файла, размера, пути
+  - Ждать ответа пользователя перед выполнением записи
+- **Ограничения директорий:** агент может быть ограничен определенными директориями
 
-#### Ответ
+#### Сигнатура ответа
 
 ```json
 {
@@ -198,44 +271,23 @@
 }
 ```
 
-При успехе возвращается `null`.
+При успешной записи клиент возвращает `null` в `result`.
 
 #### Обработка ошибок
 
-| Ошибка | Код | Описание |
-|--------|-----|---------|
-| Access denied | -32600 (Invalid Request) | Нет разрешения на запись в директорию |
-| Invalid session | -32602 | SessionId не является валидной сессией |
-| Permission denied | -32600 | Пользователь отклонил запрос на запись |
-| Path traversal | -32602 | Попытка записи за пределы разрешенной директории |
-| Disk space | -32603 | Недостаточно места на диске |
+Если путь не валиден или клиент не может создать директории, клиент должен вернуть JSON-RPC error:
 
-#### Примеры использования
-
-**Пример 1: Создание нового файла**
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 201,
-  "method": "fs/write_text_file",
-  "params": {
-    "sessionId": "sess_abc123",
-    "path": "/home/user/new_file.txt",
-    "content": "Initial content\nLine 2\nLine 3"
-  }
-}
-```
-
-**Пример 2: Обновление существующего файла**
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 202,
-  "method": "fs/write_text_file",
-  "params": {
-    "sessionId": "sess_abc123",
-    "path": "/home/user/config.json",
-    "content": "{\"updated\": true, \"timestamp\": \"2024-01-15\"}"
+  "id": 4,
+  "error": {
+    "code": -32603,
+    "message": "Internal error",
+    "data": {
+      "reason": "Cannot create directory structure",
+      "path": "/home/user/project/nested/deep/dir/config.json"
+    }
   }
 }
 ```
@@ -246,18 +298,20 @@
 
 ### Обзор
 
-Набор методов для создания, управления и контроля терминальных сессий:
-1. `terminal/create` — создание и запуск команды
-2. `terminal/output` — получение текущего output
-3. `terminal/wait_for_exit` — ожидание завершения команды
-4. `terminal/kill` — завершение команды без освобождения терминала
-5. `terminal/release` — освобождение ресурсов терминала
+Пять методов для управления терминальными процессами:
+1. **terminal/create** — запуск новой команды
+2. **terminal/output** — получение текущего output
+3. **terminal/wait_for_exit** — ожидание завершения
+4. **terminal/kill** — остановка процесса
+5. **terminal/release** — освобождение ресурсов
 
 ### 1. terminal/create
 
-Метод для создания нового терминала и запуска команды в фоновом режиме.
+#### Назначение
 
-#### Сигнатура
+Запуск новой команды в терминале и возвращение terminal ID для последующего управления.
+
+#### Сигнатура запроса
 
 ```json
 {
@@ -272,10 +326,6 @@
       {
         "name": "NODE_ENV",
         "value": "test"
-      },
-      {
-        "name": "DEBUG",
-        "value": "true"
       }
     ],
     "cwd": "/home/user/project",
@@ -289,27 +339,18 @@
 | Параметр | Тип | Обязателен | Описание |
 |----------|-----|-----------|---------|
 | `sessionId` | SessionId | Да | ID сессии для трассировки контекста |
-| `command` | string | Да | Команда для выполнения (e.g., "npm", "python", "bash") |
+| `command` | string | Да | Команда для выполнения (например, `npm`, `python`, `sh`) |
 | `args` | string[] | Нет | Массив аргументов команды |
-| `env` | EnvVariable[] | Нет | Массив переменных окружения: {name, value} |
-| `cwd` | string | Нет | Абсолютный путь рабочей директории (по умолчанию текущая директория клиента) |
-| `outputByteLimit` | number | Нет | Максимум байт для буферизации output (по умолчанию 10 MB) |
-
-#### Валидация параметров
-
-1. `sessionId` — должен быть валидным ID существующей сессии
-2. `command` — не может быть пустой строкой
-3. `args` — каждый элемент должен быть строкой
-4. `cwd` — если задан, должен быть абсолютным путем и существовать
-5. `outputByteLimit` — если задан, должен быть > 0
+| `env` | EnvVariable[] | Нет | Переменные окружения (массив объектов `{name, value}`) |
+| `cwd` | string | Нет | Рабочая директория для команды (абсолютный путь) |
+| `outputByteLimit` | number | Нет | Максимальное количество байт output для удержания в памяти |
 
 #### Требования к разрешениям
 
-- Требует проверки `clientCapabilities.terminal == true` перед вызовом
-- Обычно требует явного подтверждения пользователя (зависит от конфигурации)
-- Может быть ограничено к определенным командам (белый список)
+- **Capability check:** `clientCapabilities.terminal == true`
+- **Permission request:** клиент МОЖЕТ запросить разрешение пользователя перед выполнением (опционально, зависит от конфигурации)
 
-#### Ответ
+#### Сигнатура ответа
 
 ```json
 {
@@ -321,64 +362,21 @@
 }
 ```
 
+#### Поля ответа
+
 | Поле | Тип | Описание |
 |------|-----|---------|
-| `terminalId` | string | Уникальный идентификатор терминала для последующих операций |
+| `terminalId` | string | Уникальный ID терминала для последующих операций |
 
-#### Обработка ошибок
-
-| Ошибка | Код | Описание |
-|--------|-----|---------|
-| Invalid session | -32602 | SessionId не является валидной сессией |
-| Permission denied | -32600 | Нет разрешения на выполнение команд |
-| Command not found | -32603 (Server error) | Команда не найдена в системе |
-| Invalid cwd | -32602 | Рабочая директория не существует |
-| Unsupported command | -32600 | Команда в черном списке или не разрешена |
-
-#### Примеры использования
-
-**Пример 1: Запуск npm тестов**
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 301,
-  "method": "terminal/create",
-  "params": {
-    "sessionId": "sess_abc123",
-    "command": "npm",
-    "args": ["test"],
-    "cwd": "/home/user/project"
-  }
-}
-```
-
-**Пример 2: Запуск Python скрипта с переменными окружения**
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 302,
-  "method": "terminal/create",
-  "params": {
-    "sessionId": "sess_abc123",
-    "command": "python",
-    "args": ["train.py", "--epochs=100"],
-    "env": [
-      {"name": "CUDA_VISIBLE_DEVICES", "value": "0"},
-      {"name": "LOG_LEVEL", "value": "DEBUG"}
-    ],
-    "cwd": "/home/user/ml-project",
-    "outputByteLimit": 5242880
-  }
-}
-```
-
----
+**Важно:** Клиент возвращает terminal ID **сразу же**, не ожидая завершения команды. Команда выполняется в фоне.
 
 ### 2. terminal/output
 
-Метод для получения текущего output терминала без ожидания его завершения.
+#### Назначение
 
-#### Сигнатура
+Получение текущего output терминала без ожидания завершения команды. Позволяет агенту получать промежуточные результаты в реальном времени.
+
+#### Сигнатура запроса
 
 ```json
 {
@@ -396,20 +394,10 @@
 
 | Параметр | Тип | Обязателен | Описание |
 |----------|-----|-----------|---------|
-| `sessionId` | SessionId | Да | ID сессии для трассировки контекста |
-| `terminalId` | string | Да | ID терминала, возвращенный `terminal/create` |
+| `sessionId` | SessionId | Да | ID сессии |
+| `terminalId` | string | Да | ID терминала (полученный из terminal/create) |
 
-#### Валидация параметров
-
-1. `sessionId` — должен быть валидным ID существующей сессии
-2. `terminalId` — должен быть валидным ID терминала
-
-#### Требования к разрешениям
-
-- Никаких дополнительных разрешений не требуется после создания терминала
-- Агент может получать output неограниченное количество раз
-
-#### Ответ
+#### Сигнатура ответа
 
 ```json
 {
@@ -426,156 +414,47 @@
 }
 ```
 
-| Поле | Тип | Обязателен | Описание |
-|------|-----|-----------|---------|
-| `output` | string | Да | Полный captured output (или усеченный, если превышен limit) |
-| `truncated` | boolean | Да | Был ли output усечен из-за byte limit |
-| `exitStatus` | TerminalExitStatus | Нет | Присутствует только если процесс завершился; содержит exitCode и signal |
-
-#### Обработка ошибок
-
-| Ошибка | Код | Описание |
-|--------|-----|---------|
-| Invalid session | -32602 | SessionId не является валидной сессией |
-| Invalid terminal | -32602 | TerminalId не существует или был освобожден |
-
-#### Примеры использования
-
-**Пример 1: Получение текущего output (процесс еще выполняется)**
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 401,
-  "method": "terminal/output",
-  "params": {
-    "sessionId": "sess_abc123",
-    "terminalId": "term_xyz789"
-  }
-}
-
-// Ответ (процесс еще работает)
-{
-  "jsonrpc": "2.0",
-  "id": 401,
-  "result": {
-    "output": "Running tests...\n✓ Test 1 passed\n✓ Test 2 passed\n",
-    "truncated": false
-  }
-}
-```
-
-**Пример 2: Получение output завершившегося процесса**
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 402,
-  "method": "terminal/output",
-  "params": {
-    "sessionId": "sess_abc123",
-    "terminalId": "term_xyz789"
-  }
-}
-
-// Ответ (процесс завершился)
-{
-  "jsonrpc": "2.0",
-  "id": 402,
-  "result": {
-    "output": "Running tests...\n✓ All tests passed (42 total)\n",
-    "truncated": false,
-    "exitStatus": {
-      "exitCode": 0,
-      "signal": null
-    }
-  }
-}
-```
-
----
-
-### 3. terminal/wait_for_exit
-
-Метод для ожидания завершения команды (блокирует до выхода процесса).
-
-#### Сигнатура
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 7,
-  "method": "terminal/wait_for_exit",
-  "params": {
-    "sessionId": "sess_abc123def456",
-    "terminalId": "term_xyz789"
-  }
-}
-```
-
-#### Параметры
-
-| Параметр | Тип | Обязателен | Описание |
-|----------|-----|-----------|---------|
-| `sessionId` | SessionId | Да | ID сессии для трассировки контекста |
-| `terminalId` | string | Да | ID терминала, возвращенный `terminal/create` |
-
-#### Валидация параметров
-
-1. `sessionId` — должен быть валидным ID существующей сессии
-2. `terminalId` — должен быть валидным ID терминала
-
-#### Требования к разрешениям
-
-- Никаких дополнительных разрешений не требуется
-
-#### Ответ
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 7,
-  "result": {
-    "exitCode": 0,
-    "signal": null
-  }
-}
-```
+#### Поля ответа
 
 | Поле | Тип | Описание |
 |------|-----|---------|
-| `exitCode` | number | Exit code процесса (может быть null если завершен сигналом) |
-| `signal` | string | Сигнал, который завершил процесс (может быть null если нормальный выход) |
+| `output` | string | Текущий output терминала |
+| `truncated` | boolean | Был ли output обрезан из-за `outputByteLimit` |
+| `exitStatus` | TerminalExitStatus | Только если команда завершена. Содержит `exitCode` и `signal` |
 
-#### Обработка ошибок
+### 3. terminal/wait_for_exit
 
-| Ошибка | Код | Описание |
-|--------|-----|---------|
-| Invalid session | -32602 | SessionId не является валидной сессией |
-| Invalid terminal | -32602 | TerminalId не существует или был освобожден |
+#### Назначение
 
-#### Особенности
+Ожидание завершения команды и получение final status (exit code, signal).
 
-- Этот метод может ждать длительное время (часы)
-- Агент должен реализовать собственный таймаут, используя асинхронное выполнение
-- После завершения процесса output может быть получен через `terminal/output`
+#### Сигнатура запроса
 
-#### Примеры использования
-
-**Пример 1: Простое ожидание завершения**
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 501,
+  "id": 7,
   "method": "terminal/wait_for_exit",
   "params": {
-    "sessionId": "sess_abc123",
+    "sessionId": "sess_abc123def456",
     "terminalId": "term_xyz789"
   }
 }
+```
 
-// Ответ (после завершения команды)
+#### Параметры
+
+| Параметр | Тип | Обязателен | Описание |
+|----------|-----|-----------|---------|
+| `sessionId` | SessionId | Да | ID сессии |
+| `terminalId` | string | Да | ID терминала |
+
+#### Сигнатура ответа
+
+```json
 {
   "jsonrpc": "2.0",
-  "id": 501,
+  "id": 7,
   "result": {
     "exitCode": 0,
     "signal": null
@@ -583,13 +462,20 @@
 }
 ```
 
----
+#### Поля ответа
+
+| Поле | Тип | Описание |
+|------|-----|---------|
+| `exitCode` | number | Код выхода процесса (может быть null если завершена сигналом) |
+| `signal` | string | Сигнал, который завершил процесс (может быть null если нормальный выход) |
 
 ### 4. terminal/kill
 
-Метод для завершения процесса без освобождения ресурсов терминала.
+#### Назначение
 
-#### Сигнатура
+Остановка процесса через отправку SIGTERM (или другого сигнала). Терминал остается валидным и может быть использован для получения output.
+
+#### Сигнатура запроса
 
 ```json
 {
@@ -607,19 +493,10 @@
 
 | Параметр | Тип | Обязателен | Описание |
 |----------|-----|-----------|---------|
-| `sessionId` | SessionId | Да | ID сессии для трассировки контекста |
-| `terminalId` | string | Да | ID терминала, возвращенный `terminal/create` |
+| `sessionId` | SessionId | Да | ID сессии |
+| `terminalId` | string | Да | ID терминала |
 
-#### Валидация параметров
-
-1. `sessionId` — должен быть валидным ID существующей сессии
-2. `terminalId` — должен быть валидным ID терминала
-
-#### Требования к разрешениям
-
-- Никаких дополнительных разрешений не требуется (агент уже имел разрешение на создание терминала)
-
-#### Ответ
+#### Сигнатура ответа
 
 ```json
 {
@@ -629,86 +506,20 @@
 }
 ```
 
-Возвращает `null` при успехе.
+#### Важные замечания
 
-#### Обработка ошибок
-
-| Ошибка | Код | Описание |
-|--------|-----|---------|
-| Invalid session | -32602 | SessionId не является валидной сессией |
-| Invalid terminal | -32602 | TerminalId не существует или был освобожден |
-| Already exited | -32603 | Процесс уже завершен |
-
-#### После вызова kill
-
-- Терминал остается валидным для использования
-- Можно вызвать `terminal/output` для получения финального output
+- Терминал остается валидным после kill
+- Можно вызвать `terminal/output` для получения final output
 - Можно вызвать `terminal/wait_for_exit` для получения exit status
-- ОБЯЗАТЕЛЬНО нужно вызвать `terminal/release` для освобождения ресурсов
-
-#### Примеры использования
-
-**Пример: Реализация таймаута**
-```json
-// 1. Создание терминала
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "terminal/create",
-  "params": {
-    "sessionId": "sess_abc123",
-    "command": "long_running_task"
-  }
-}
-// => { "terminalId": "term_xyz789" }
-
-// 2. Агент начинает ждать завершение с таймаутом
-// (в реальной реализации это асинхронно)
-
-// 3. Если таймаут истек, убиваем процесс
-{
-  "jsonrpc": "2.0",
-  "id": 2,
-  "method": "terminal/kill",
-  "params": {
-    "sessionId": "sess_abc123",
-    "terminalId": "term_xyz789"
-  }
-}
-// => null
-
-// 4. Получаем final output
-{
-  "jsonrpc": "2.0",
-  "id": 3,
-  "method": "terminal/output",
-  "params": {
-    "sessionId": "sess_abc123",
-    "terminalId": "term_xyz789"
-  }
-}
-// => { "output": "...", "truncated": false, "exitStatus": {...} }
-
-// 5. Освобождаем ресурсы
-{
-  "jsonrpc": "2.0",
-  "id": 4,
-  "method": "terminal/release",
-  "params": {
-    "sessionId": "sess_abc123",
-    "terminalId": "term_xyz789"
-  }
-}
-// => null
-```
-
----
+- **ОБЯЗАТЕЛЬНО** вызвать `terminal/release` когда процесс больше не нужен
 
 ### 5. terminal/release
 
-Метод для освобождения ресурсов терминала (убивает процесс если еще работает).
+#### Назначение
 
-#### Сигнатура
+Завершение процесса (если еще работает) и освобождение всех ресурсов. После release терминал ID больше не валиден.
+
+#### Сигнатура запроса
 
 ```json
 {
@@ -726,19 +537,10 @@
 
 | Параметр | Тип | Обязателен | Описание |
 |----------|-----|-----------|---------|
-| `sessionId` | SessionId | Да | ID сессии для трассировки контекста |
-| `terminalId` | string | Да | ID терминала, возвращенный `terminal/create` |
+| `sessionId` | SessionId | Да | ID сессии |
+| `terminalId` | string | Да | ID терминала |
 
-#### Валидация параметров
-
-1. `sessionId` — должен быть валидным ID существующей сессии
-2. `terminalId` — должен быть валидным ID терминала
-
-#### Требования к разрешениям
-
-- Никаких дополнительных разрешений не требуется
-
-#### Ответ
+#### Сигнатура ответа
 
 ```json
 {
@@ -748,1160 +550,1664 @@
 }
 ```
 
-Возвращает `null` при успехе.
+#### Важные замечания
 
-#### Обработка ошибок
-
-| Ошибка | Код | Описание |
-|--------|-----|---------|
-| Invalid session | -32602 | SessionId не является валидной сессией |
-| Invalid terminal | -32602 | TerminalId не существует или уже был освобожден |
-
-#### Поведение при освобождении
-
-1. Если процесс еще работает — убивается
-2. Буфер output может быть очищен (но клиент должен хранить его для отображения в tool calls)
-3. TerminalId становится инвалидным для всех последующих `terminal/*` вызовов
-4. Если терминал был встроен в tool call — клиент продолжает отображать finalized output
-
-#### Примеры использования
-
-**Пример: Освобождение терминала после завершения**
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 601,
-  "method": "terminal/release",
-  "params": {
-    "sessionId": "sess_abc123",
-    "terminalId": "term_xyz789"
-  }
-}
-
-// Ответ
-{
-  "jsonrpc": "2.0",
-  "id": 601,
-  "result": null
-}
-
-// Все последующие вызовы с этим terminalId будут ошибочными
-```
+- Если команда еще работает, она будет принудительно завершена (SIGKILL)
+- Все ресурсы (процесс, буферы) освобождаются
+- Терминал ID становится невалидным
+- Если терминал был встроен в tool call, UI может продолжить отображать его output
 
 ---
 
 ## Архитектура реализации
 
-### Структура модулей
+### Принципы архитектуры
 
-#### Клиентская сторона (acp-client)
+1. **Layered Architecture** — разделение на слои (RPC Service, Handlers, Executors, OS)
+2. **Bidirectional Communication** — поддержка рпс в обе стороны
+3. **Resource Management** — явное управление жизненным циклом ресурсов (терминалы)
+4. **Security First** — защита на каждом слое (validation, permission, path traversal)
+5. **Error Handling** — структурированная обработка ошибок с JSON-RPC error codes
+
+### Сторона агента (acp-server)
+
+#### ClientRPCService
+
+**Назначение:** Инициирование RPC вызовов на клиенте для доступа к локальной среде.
+
+**Местоположение:** `acp-server/src/acp_server/client_rpc/service.py` (будет создано)
+
+**Ответственность:**
+- Инициирование RPC запросов (fs/* и terminal/* методы)
+- Проверка `clientCapabilities` перед вызовом
+- Обработка RPC responses и ошибок
+- Трассировка вызовов через sessionId
+- Интеграция с Tool Call Handler
+
+**Интеграция:**
+```python
+class ClientRPCService:
+    """Сервис для вызова методов на клиенте."""
+    
+    async def read_text_file(
+        self,
+        session_id: str,
+        path: str,
+        line: int | None = None,
+        limit: int | None = None
+    ) -> str:
+        """Чтение текстового файла с клиента."""
+        # 1. Проверить clientCapabilities.fs.readTextFile
+        # 2. Сформировать JSON-RPC request
+        # 3. Отправить через transport.send_request()
+        # 4. Дождаться response
+        # 5. Вернуть content или выбросить исключение
+        
+    async def write_text_file(
+        self,
+        session_id: str,
+        path: str,
+        content: str
+    ) -> None:
+        """Запись текстового файла на клиенте (с запросом разрешения)."""
+        # 1. Проверить clientCapabilities.fs.writeTextFile
+        # 2. Запросить разрешение через session/request_permission
+        # 3. Дождаться разрешения от пользователя
+        # 4. Сформировать JSON-RPC request
+        # 5. Отправить и дождаться response
+```
+
+#### Capability Check
+
+```python
+def check_capability(
+    self,
+    session: SessionState,
+    capability_path: str  # "fs.readTextFile", "terminal", и т.д.
+) -> bool:
+    """Проверить, поддерживает ли клиент функцию."""
+    caps = session.client_capabilities
+    # Проверить nested capability через дот-нотацию
+    # Вернуть True/False
+```
+
+### Сторона клиента (acp-client)
+
+#### Общая архитектура
 
 ```
-acp-client/src/acp_client/
-├── domain/
-│   ├── file_system/
-│   │   ├── __init__.py                 # Экспорт публичных классов
-│   │   ├── entities.py                 # FileSystemRequest, FileSystemResponse
-│   │   └── services.py                 # FileSystemService интерфейс
-│   ├── terminal/
-│   │   ├── __init__.py                 # Экспорт публичных классов
-│   │   ├── entities.py                 # Terminal, TerminalSession dataclasses
-│   │   ├── services.py                 # TerminalService интерфейс
-│   │   └── events.py                   # TerminalOutputEvent, TerminalExitEvent
-│   └── ...
-├── application/
-│   ├── file_system/
-│   │   ├── __init__.py
-│   │   └── use_cases.py                # ReadFileUseCase, WriteFileUseCase
-│   ├── terminal/
-│   │   ├── __init__.py
-│   │   ├── use_cases.py                # CreateTerminalUseCase, GetOutputUseCase, WaitForExitUseCase
-│   │   └── terminal_coordinator.py     # TerminalCoordinator (управление жизненным циклом)
-│   └── ...
-├── infrastructure/
-│   ├── services/
-│   │   ├── file_system_service.py      # Реализация FileSystemService
-│   │   └── terminal_service.py         # Реализация TerminalService
-│   ├── handler_registry.py             # Регистрация обработчиков fs/* и terminal/*
-│   └── ...
-└── presentation/
-    ├── file_viewer_view_model.py       # ViewModel для просмотра файлов
-    ├── terminal_view_model.py          # ViewModel для терминала
-    └── ...
-```
-
-#### Серверная сторона (acp-server)
-
-```
-acp-server/src/acp_server/
-├── protocol/
-│   ├── handlers/
-│   │   ├── file_system.py              # Обработчик fs/* методов
-│   │   ├── terminal.py                 # Обработчик terminal/* методов
-│   │   └── ...
-│   └── ...
+acp-client/src/acp_client/infrastructure/
+├── handler_registry.py  (расширить для RPC handlers)
+├── transport.py         (bidirectional support)
 ├── services/
-│   ├── file_system_executor.py         # Исполнитель операций с файлами
-│   └── terminal_executor.py            # Исполнитель операций с терминалом
-├── models.py                           # Pydantic модели для fs/* и terminal/*
-└── ...
+│   ├── acp_transport_service.py  (расширить)
+│   ├── background_receive_loop.py (расширить)
+│   └── message_router.py          (расширить)
+└── handlers/            (новая директория)
+    ├── __init__.py
+    ├── file_system_handler.py
+    └── terminal_handler.py
+
+acp-client/src/acp_client/infrastructure/executors/ (новая директория)
+├── __init__.py
+├── file_system_executor.py
+└── terminal_executor.py
 ```
 
-### Иерархия классов
+#### FileSystemHandler
 
-**File System:**
-```
-FileSystemRequest (dataclass)
-├── path: str
-├── sessionId: SessionId
-└── ...
+**Назначение:** Обработка входящих fs/* запросов от агента.
 
-ReadFileRequest (FileSystemRequest)
-├── line: Optional[int]
-└── limit: Optional[int]
+**Местоположение:** `acp-client/src/acp_client/infrastructure/handlers/file_system_handler.py`
 
-WriteFileRequest (FileSystemRequest)
-└── content: str
+**Ответственность:**
+- Обработка `fs/read_text_file` requests
+- Обработка `fs/write_text_file` requests
+- Валидация параметров (path, line, limit)
+- Path traversal защита
+- Делегирование выполнения FileSystemExecutor
+- Формирование JSON-RPC responses/errors
 
-FileSystemResponse (dataclass)
-└── ...
-
-ReadFileResponse (FileSystemResponse)
-└── content: str
-
-WriteFileResponse (FileSystemResponse)
-└── # пусто (возвращается null)
-
-FileSystemService (ABC)
-├── read_text_file(request) -> ReadFileResponse
-└── write_text_file(request) -> WriteFileResponse
-```
-
-**Terminal:**
-```
-TerminalSession (dataclass)
-├── terminal_id: str
-├── status: TerminalStatus  # created, running, exited, released
-├── process_id: Optional[int]
-├── output_buffer: str
-├── exit_code: Optional[int]
-├── signal: Optional[str]
-└── created_at: datetime
-
-Terminal (dataclass)
-├── sessionId: SessionId
-├── terminalId: str
-├── command: str
-├── args: list[str]
-├── env: dict[str, str]
-├── cwd: str
-└── output_byte_limit: int
-
-TerminalStatus (Enum)
-├── CREATED
-├── RUNNING
-├── EXITED
-└── RELEASED
-
-TerminalService (ABC)
-├── create(request) -> TerminalSession
-├── output(terminal_id) -> TerminalOutput
-├── wait_for_exit(terminal_id) -> TerminalExitStatus
-├── kill(terminal_id) -> None
-└── release(terminal_id) -> None
-
-TerminalCoordinator (управление жизненным циклом)
-├── create_terminal(params) -> TerminalSession
-├── get_output(terminal_id, session_id) -> TerminalOutput
-├── wait_for_exit(terminal_id, session_id) -> TerminalExitStatus
-├── kill_terminal(terminal_id, session_id) -> None
-└── release_terminal(terminal_id, session_id) -> None
+**Интеграция:**
+```python
+class FileSystemHandler:
+    """Обработчик File System методов."""
+    
+    def __init__(self, executor: FileSystemExecutor):
+        self.executor = executor
+    
+    async def handle_read_text_file(
+        self,
+        session_id: str,
+        path: str,
+        line: int | None = None,
+        limit: int | None = None
+    ) -> dict:
+        """Обработка fs/read_text_file."""
+        # 1. Валидировать sessionId
+        # 2. Валидировать path (path traversal защита)
+        # 3. Валидировать line, limit
+        # 4. Вызвать executor.read_text_file()
+        # 5. Вернуть {"content": ...} или error
+    
+    async def handle_write_text_file(
+        self,
+        session_id: str,
+        path: str,
+        content: str
+    ) -> dict:
+        """Обработка fs/write_text_file."""
+        # 1. Валидировать параметры
+        # 2. Запросить разрешение пользователя
+        # 3. Вызвать executor.write_text_file()
+        # 4. Вернуть {null} или error
 ```
 
-### Взаимодействие компонентов
+#### FileSystemExecutor
+
+**Назначение:** Выполнение файловых операций на локальной файловой системе.
+
+**Местоположение:** `acp-client/src/acp_client/infrastructure/executors/file_system_executor.py`
+
+**Ответственность:**
+- Чтение файлов (с поддержкой line/limit)
+- Запись файлов (создание директорий если нужно)
+- Интеграция с редактором (получение несохраненных изменений)
+- Обработка исключений файловой системы
+
+**Интеграция:**
+```python
+class FileSystemExecutor:
+    """Исполнитель файловых операций."""
+    
+    async def read_text_file(
+        self,
+        path: str,
+        line: int | None = None,
+        limit: int | None = None
+    ) -> str:
+        """Прочитать текстовый файл."""
+        # 1. Проверить существование файла
+        # 2. Открыть и прочитать
+        # 3. Если line/limit — обработать
+        # 4. Вернуть content или выбросить исключение
+    
+    async def write_text_file(
+        self,
+        path: str,
+        content: str
+    ) -> None:
+        """Написать текстовый файл."""
+        # 1. Создать директории если нужно
+        # 2. Написать файл
+        # 3. Уведомить редактор об изменении (если интегрирован)
+```
+
+#### TerminalHandler
+
+**Назначение:** Обработка входящих terminal/* запросов от агента.
+
+**Местоположение:** `acp-client/src/acp_client/infrastructure/handlers/terminal_handler.py`
+
+**Ответственность:**
+- Обработка `terminal/create` requests
+- Обработка `terminal/output` requests
+- Обработка `terminal/wait_for_exit` requests
+- Обработка `terminal/kill` requests
+- Обработка `terminal/release` requests
+- Управление registry терминалов
+- Валидация terminalId
+- Формирование responses/errors
+
+**Интеграция:**
+```python
+class TerminalHandler:
+    """Обработчик Terminal методов."""
+    
+    def __init__(self, executor: TerminalExecutor):
+        self.executor = executor
+        self.terminals: dict[str, TerminalState] = {}
+    
+    async def handle_create(
+        self,
+        session_id: str,
+        command: str,
+        args: list[str] | None = None,
+        env: list[dict] | None = None,
+        cwd: str | None = None,
+        output_byte_limit: int | None = None
+    ) -> dict:
+        """Обработка terminal/create."""
+        # 1. Валидировать параметры
+        # 2. Вызвать executor.create()
+        # 3. Сохранить TerminalState в registry
+        # 4. Вернуть {"terminalId": ...}
+    
+    async def handle_output(
+        self,
+        session_id: str,
+        terminal_id: str
+    ) -> dict:
+        """Обработка terminal/output."""
+        # 1. Найти terminal по ID
+        # 2. Вызвать executor.get_output()
+        # 3. Вернуть {"output": ..., "truncated": ..., "exitStatus": ...}
+    
+    # ... аналогично для wait_for_exit, kill, release
+```
+
+#### TerminalExecutor
+
+**Назначение:** Выполнение и управление shell процессами.
+
+**Местоположение:** `acp-client/src/acp_client/infrastructure/executors/terminal_executor.py`
+
+**Ответственность:**
+- Запуск shell процессов (subprocess.Popen)
+- Захват output в реальном времени
+- Управление жизненным циклом процесса
+- Отправка сигналов (SIGTERM, SIGKILL)
+- Управление byte limit output
+- Получение exit code и signal
+
+**Интеграция:**
+```python
+class TerminalExecutor:
+    """Исполнитель терминальных команд."""
+    
+    async def create(
+        self,
+        command: str,
+        args: list[str] | None = None,
+        env: dict | None = None,
+        cwd: str | None = None,
+        output_byte_limit: int | None = None
+    ) -> str:
+        """Создать терминал и запустить команду."""
+        # 1. Подготовить environment
+        # 2. Запустить subprocess
+        # 3. Создать TerminalState
+        # 4. Начать читать output в фоновом потоке
+        # 5. Вернуть terminal_id
+    
+    async def get_output(
+        self,
+        terminal_id: str
+    ) -> tuple[str, bool, dict | None]:
+        """Получить текущий output и статус."""
+        # 1. Найти terminal по ID
+        # 2. Вернуть (output, truncated, exit_status)
+    
+    async def kill(self, terminal_id: str) -> None:
+        """Остановить процесс (SIGTERM)."""
+        # 1. Найти process
+        # 2. Отправить SIGTERM
+        # 3. Дождаться завершения (с timeout)
+        # 4. Если не завершится — SIGKILL
+    
+    async def release(self, terminal_id: str) -> None:
+        """Освободить ресурсы."""
+        # 1. Kill если еще работает
+        # 2. Закрыть файловые дескрипторы
+        # 3. Удалить из registry
+```
+
+#### TerminalState
+
+```python
+@dataclass
+class TerminalState:
+    """Состояние терминала."""
+    terminal_id: str
+    process: asyncio.subprocess.Process
+    output: str
+    truncated: bool
+    output_byte_limit: int | None
+    exit_code: int | None = None
+    signal: str | None = None
+    created_at: datetime = field(default_factory=datetime.now)
+    output_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+```
+
+---
+
+## Bidirectional RPC механизм
+
+### Поток данных
+
+Текущая реализация поддерживает **Client → Server RPC** (клиент запрашивает у агента). Для **Agent → Client RPC** нужна двусторонняя поддержка:
 
 ```
-┌─────────────┐
-│   Client    │  Отправляет JSON-RPC запросы
-└──────┬──────┘
-       │
-       ▼
-┌─────────────────────────┐
-│  Transport Layer        │  WebSocket / TCP
-│  (http_server.py)       │
-└──────┬──────────────────┘
-       │
-       ▼
-┌─────────────────────────┐
-│  Message Parser         │  Парсит JSON-RPC
-│  (message_parser.py)    │
-└──────┬──────────────────┘
-       │
-       ▼
-┌─────────────────────────┐
-│  Handler Registry       │  Диспетчеризует методы
-│  (handler_registry.py)  │
-└──────┬──────────────────┘
-       │
-   ┌───┴───┐
-   │       │
-   ▼       ▼
-┌────────────────┐  ┌─────────────────┐
-│  fs/* Handler  │  │ terminal/* ...  │
-│ (file_system.py)  │ (terminal.py)   │
-└────┬───────────┘  └────┬────────────┘
-     │                   │
-     ▼                   ▼
-┌──────────────────┐  ┌─────────────────┐
-│ FileSystemService│  │ TerminalService │
-│ (infrastructure) │  │ (infrastructure)│
-└──────┬───────────┘  └────┬────────────┘
-       │                   │
-       ▼                   ▼
-┌──────────────────┐  ┌─────────────────┐
-│ File System      │  │ Process/Shell   │
-│ Operations       │  │ Execution       │
-└──────────────────┘  └─────────────────┘
+Server                          Transport                       Client
+  ├─ ACPProtocol                  (WebSocket)                   ├─ MessageRouter
+  │   ├─ handlers/                 bidirectional                 ├─ HandlerRegistry
+  │   │   ├─ session.py            ↓                            │   ├─ fs/read_text_file
+  │   │   ├─ auth.py               ↑                            │   ├─ fs/write_text_file
+  │   │   ├─ client_rpc_handler.py (новый)                     │   ├─ terminal/create
+  │   │   └─ ...                   (новый flow)                │   └─ ...
+  │   └─ ...                                                     └─ ...
+  │
+  ClientRPCService (новый)
+  └─ transport.send_request()  ───────────→  handler_registry.dispatch()
+                                            (server → client)
+```
+
+### Механизм маршрутизации
+
+#### На стороне сервера (acp-server)
+
+```python
+class ClientRPCHandler:
+    """Обработчик для отправки RPC запросов на клиент."""
+    
+    def __init__(self, protocol: ACPProtocol):
+        self.protocol = protocol
+        self.pending_requests: dict[int, asyncio.Future] = {}
+        self.next_request_id = 1000  # Отличать от обычных request IDs
+    
+    async def send_request(
+        self,
+        method: str,
+        params: dict,
+        session_id: str
+    ) -> dict:
+        """Отправить RPC request на клиент и дождаться ответа."""
+        request_id = self.next_request_id
+        self.next_request_id += 1
+        
+        request = {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": method,
+            "params": params
+        }
+        
+        # Отправить через transport
+        await self.protocol.transport.send(json.dumps(request))
+        
+        # Создать Future для ответа
+        future = asyncio.Future()
+        self.pending_requests[request_id] = future
+        
+        # Ждать ответ с timeout
+        return await asyncio.wait_for(future, timeout=30.0)
+    
+    def handle_client_response(
+        self,
+        message: dict
+    ) -> None:
+        """Обработать response с клиента."""
+        request_id = message.get("id")
+        if request_id in self.pending_requests:
+            future = self.pending_requests.pop(request_id)
+            if "result" in message:
+                future.set_result(message["result"])
+            elif "error" in message:
+                future.set_exception(RpcError(message["error"]))
+```
+
+#### На стороне клиента (acp-client)
+
+```python
+class HandlerRegistry:
+    """Регистр обработчиков для входящих запросов от сервера."""
+    
+    def __init__(self):
+        self.handlers: dict[str, Callable] = {
+            "fs/read_text_file": self.handle_fs_read,
+            "fs/write_text_file": self.handle_fs_write,
+            "terminal/create": self.handle_terminal_create,
+            "terminal/output": self.handle_terminal_output,
+            "terminal/wait_for_exit": self.handle_terminal_wait,
+            "terminal/kill": self.handle_terminal_kill,
+            "terminal/release": self.handle_terminal_release,
+        }
+    
+    async def dispatch(
+        self,
+        request: dict
+    ) -> dict | None:
+        """Обработать входящий request."""
+        method = request.get("method")
+        params = request.get("params", {})
+        request_id = request.get("id")
+        
+        # Найти обработчик
+        handler = self.handlers.get(method)
+        if not handler:
+            return {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {
+                    "code": -32601,
+                    "message": f"Method not found: {method}"
+                }
+            }
+        
+        try:
+            result = await handler(**params)
+            return {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": result
+            }
+        except Exception as e:
+            return {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {
+                    "code": -32603,
+                    "message": str(e),
+                    "data": {"exception_type": type(e).__name__}
+                }
+            }
+```
+
+### Message Router
+
+```python
+class MessageRouter:
+    """Маршрутизирует входящие сообщения."""
+    
+    async def route_message(
+        self,
+        message: dict
+    ) -> None:
+        """Маршрутировать сообщение в нужный обработчик."""
+        
+        # Проверить, это response или request
+        if "method" in message and "id" in message:
+            # Request от сервера
+            response = await self.handler_registry.dispatch(message)
+            if response:
+                await self.transport.send(json.dumps(response))
+        
+        elif "result" in message or "error" in message:
+            # Response на наш request
+            await self.client_rpc_service.handle_response(message)
 ```
 
 ---
 
 ## Безопасность и разрешения
 
-### Модель доступа
+### Path Traversal защита
 
-#### Проверка возможностей (Capability Check)
-
-Перед вызовом любого метода агент ДОЛЖЕН проверить `clientCapabilities`:
-
-**Для File System методов:**
-```python
-if not client_capabilities.get("fs", {}).get("readTextFile"):
-    raise ClientNotSupportedError("File reading not supported")
-
-if not client_capabilities.get("fs", {}).get("writeTextFile"):
-    raise ClientNotSupportedError("File writing not supported")
-```
-
-**Для Terminal методов:**
-```python
-if not client_capabilities.get("terminal"):
-    raise ClientNotSupportedError("Terminal not supported")
-```
-
-#### Управление разрешениями
-
-**File System:**
-1. `fs/read_text_file`:
-   - Требует проверки capability
-   - Может требовать per-file разрешения (зависит от конфигурации агента)
-   - Может быть ограничено списком разрешенных директорий
-
-2. `fs/write_text_file`:
-   - Требует проверки capability
-   - **ОБЯЗАТЕЛЬНО** требует явного разрешения пользователя
-   - Использует `session/request_permission` API
-   - Может быть ограничено списком разрешенных директорий
-
-**Terminal:**
-1. `terminal/create`:
-   - Требует проверки capability
-   - Требует явного разрешения пользователя (HIGH risk операция)
-   - Может быть ограничено белым списком команд
-   - Может быть ограничено черным списком команд
-
-2. `terminal/output`, `terminal/wait_for_exit`, `terminal/kill`, `terminal/release`:
-   - Требуют только что терминал был ранее создан с разрешением
-
-### Стратегия валидации пути
-
-Для предотвращения path traversal атак:
+Клиент должен защищать файловую систему от доступа к файлам вне разрешенных директорий.
 
 ```python
-def validate_file_path(path: str, allowed_roots: list[str]) -> bool:
-    """Проверяет, что path находится в allowed_roots"""
-    abs_path = os.path.abspath(path)
+class PathValidator:
+    """Валидатор путей с защитой от path traversal."""
     
-    for root in allowed_roots:
-        abs_root = os.path.abspath(root)
-        if abs_path.startswith(abs_root):
-            # Проверяем, что нет symlink-атак
-            if os.path.islink(os.path.dirname(abs_path)):
-                return False
-            return True
+    def __init__(self, allowed_roots: list[str] | None = None):
+        # allowed_roots по умолчанию — project directory
+        self.allowed_roots = allowed_roots or [os.getcwd()]
     
-    return False
+    def validate(self, path: str) -> bool:
+        """Проверить, находится ли path в разрешенных директориях."""
+        # 1. Нормализировать path (разрешить симlinks)
+        abs_path = os.path.abspath(path)
+        real_path = os.path.realpath(abs_path)
+        
+        # 2. Проверить, что real_path внутри allowed_roots
+        for root in self.allowed_roots:
+            real_root = os.path.realpath(root)
+            if real_path.startswith(real_root + os.sep) or real_path == real_root:
+                return True
+        
+        return False
 ```
 
-### Черный список команд
+### Permission Management
 
-Некоторые команды должны быть заблокированы по умолчанию:
-- `rm -rf /` — удаление всей системы
-- `dd if=/dev/zero of=/dev/sda` — уничтожение диска
-- `fork bomb` — замораживание системы
-- Системные утилиты для изменения конфигурации ОС
+#### Для fs/write_text_file
 
-Черный список должен быть конфигурируемым.
+Клиент должен запросить явное разрешение пользователя перед записью файла:
 
-### Белый список команд
-
-Альтернативно, можно использовать белый список разрешенных команд:
 ```python
-WHITELIST = {
-    "npm": ["test", "run", "build"],
-    "python": ["train.py", "test.py"],
-    "node": ["*.js"],
-}
+async def handle_write_text_file(
+    self,
+    session_id: str,
+    path: str,
+    content: str
+) -> dict:
+    """Обработка fs/write_text_file с запросом разрешения."""
+    
+    # 1. Валидировать параметры
+    if not self.path_validator.validate(path):
+        raise SecurityError(f"Path not allowed: {path}")
+    
+    # 2. Запросить разрешение у пользователя через session/request_permission
+    permission_granted = await self.permission_manager.request_permission(
+        session_id=session_id,
+        permission_type="file_write",
+        description=f"Agent requests to write file: {path}",
+        details={
+            "path": path,
+            "file_size": len(content),
+            "preview": content[:200] + "..." if len(content) > 200 else content
+        }
+    )
+    
+    if not permission_granted:
+        raise PermissionDeniedError("User denied permission to write file")
+    
+    # 3. Выполнить запись
+    await self.executor.write_text_file(path, content)
+    
+    return None
+```
+
+#### Для terminal/create
+
+Опционально запросить разрешение перед выполнением команды:
+
+```python
+async def handle_create(
+    self,
+    session_id: str,
+    command: str,
+    args: list[str] | None = None,
+    **kwargs
+) -> dict:
+    """Обработка terminal/create с опциональным запросом разрешения."""
+    
+    # 1. Логировать команду
+    full_command = f"{command} {' '.join(args or [])}"
+    logger.info(f"Terminal create requested: {full_command}")
+    
+    # 2. Опционально запросить разрешение (зависит от конфигурации)
+    if self.config.get("require_terminal_permission"):
+        permission_granted = await self.permission_manager.request_permission(
+            session_id=session_id,
+            permission_type="terminal_execute",
+            description=f"Agent requests to execute command: {full_command}",
+            details={"command": command, "args": args}
+        )
+        if not permission_granted:
+            raise PermissionDeniedError("User denied permission to execute command")
+    
+    # 3. Создать терминал
+    terminal_id = await self.executor.create(command, args, **kwargs)
+    return {"terminalId": terminal_id}
+```
+
+### Capability Check
+
+```python
+class CapabilityChecker:
+    """Проверка возможностей клиента."""
+    
+    def __init__(self, client_capabilities: dict):
+        self.capabilities = client_capabilities
+    
+    def supports_fs_read(self) -> bool:
+        return self.capabilities.get("fs", {}).get("readTextFile", False)
+    
+    def supports_fs_write(self) -> bool:
+        return self.capabilities.get("fs", {}).get("writeTextFile", False)
+    
+    def supports_terminal(self) -> bool:
+        return self.capabilities.get("terminal", False)
+    
+    def check(self, feature: str) -> bool:
+        """Проверить поддержку функции."""
+        parts = feature.split(".")
+        value = self.capabilities
+        for part in parts:
+            value = value.get(part, {})
+        return bool(value)
 ```
 
 ---
 
 ## Обработка ошибок
 
-### Иерархия исключений
+### JSON-RPC Error Codes
+
+| Code | Название | Описание |
+|------|----------|---------|
+| -32700 | Parse error | Ошибка парсинга JSON |
+| -32600 | Invalid Request | Некорректный JSON-RPC запрос |
+| -32601 | Method not found | Метод не существует |
+| -32602 | Invalid params | Некорректные параметры |
+| -32603 | Internal error | Внутренняя ошибка сервера |
+| -32000 до -32099 | Server error | Зарезервировано для server errors |
+
+### Специфичные ошибки для fs/terminal методов
 
 ```python
-class FileSystemError(ACPError):
-    """Базовая ошибка для файловой системы"""
-    pass
-
-class FileNotFoundError(FileSystemError):
-    """Файл не найден"""
-    pass
-
-class PermissionDeniedError(FileSystemError):
-    """Доступ запрещен"""
-    pass
-
-class PathTraversalError(FileSystemError):
-    """Попытка доступа за пределы разрешенной директории"""
-    pass
-
-class TerminalError(ACPError):
-    """Базовая ошибка для терминала"""
-    pass
-
-class InvalidTerminalError(TerminalError):
-    """Терминал не существует или был освобожден"""
-    pass
-
-class TerminalAlreadyExitedError(TerminalError):
-    """Процесс уже завершен"""
-    pass
-
-class CommandNotFoundError(TerminalError):
-    """Команда не найдена"""
-    pass
-
-class UnsupportedCommandError(TerminalError):
-    """Команда в черном списке"""
-    pass
+class FileNotFoundError(RpcError):
+    """Файл не найден."""
+    code = -32603
+    
+class PathTraversalError(RpcError):
+    """Попытка access вне разрешенных директорий."""
+    code = -32603
+    
+class PermissionDeniedError(RpcError):
+    """Разрешение отклонено пользователем."""
+    code = -32603
+    
+class TerminalNotFoundError(RpcError):
+    """Терминал с таким ID не найден."""
+    code = -32603
+    
+class TerminalAlreadyExitedError(RpcError):
+    """Терминал уже завершен."""
+    code = -32603
 ```
 
-### Отображение ошибок в JSON-RPC
+### Примеры ошибок
 
-```python
-# File not found
+**Пример 1: Файл не найден**
+
+```json
 {
   "jsonrpc": "2.0",
   "id": 3,
   "error": {
-    "code": -32602,
-    "message": "Invalid params",
+    "code": -32603,
+    "message": "File not found",
     "data": {
-      "reason": "File not found: /home/user/missing.txt"
+      "path": "/home/user/project/nonexistent.py",
+      "reason": "File does not exist"
     }
   }
 }
+```
 
-# Permission denied
+**Пример 2: Path traversal попытка**
+
+```json
 {
   "jsonrpc": "2.0",
   "id": 4,
   "error": {
-    "code": -32600,
-    "message": "Invalid Request",
+    "code": -32603,
+    "message": "Path not allowed",
     "data": {
-      "reason": "Permission denied for /etc/passwd"
+      "path": "/etc/passwd",
+      "reason": "Path is outside allowed roots"
     }
   }
 }
+```
 
-# Invalid terminal
+**Пример 3: Разрешение отклонено**
+
+```json
 {
   "jsonrpc": "2.0",
-  "id": 6,
+  "id": 5,
   "error": {
-    "code": -32602,
-    "message": "Invalid params",
+    "code": -32603,
+    "message": "Permission denied",
     "data": {
-      "reason": "Terminal 'term_invalid' does not exist"
+      "reason": "User rejected file write permission",
+      "permission_type": "file_write"
     }
   }
 }
 ```
 
-### Стратегия логирования ошибок
-
-```python
-# Все ошибки логируются с контекстом
-logger.error(
-    "File read failed",
-    error_type=type(e).__name__,
-    session_id=session_id,
-    path=path,
-    line=line,
-    limit=limit
-)
-
-# Terminal ошибки также логируют состояние процесса
-logger.error(
-    "Terminal operation failed",
-    error_type=type(e).__name__,
-    session_id=session_id,
-    terminal_id=terminal_id,
-    status=terminal_session.status,
-    exit_code=terminal_session.exit_code
-)
-```
-
 ---
 
-## Интеграция с существующими компонентами
+## Интеграция с Tool Calls
 
-### Интеграция с Session Management
+### Использование fs/* внутри tool calls
 
-File System и Terminal методы требуют активной сессии:
+Агент использует fs/* методы **внутри выполнения tool call** для доступа к локальной среде:
 
 ```python
-# В handler'е проверяем сессию
-session = self.session_storage.load(session_id)
-if not session:
-    raise InvalidSessionError(f"Session {session_id} not found")
-
-# Все операции привязаны к сессии
-file_read_operation.session_id = session_id
-terminal_session.session_id = session_id
+class ToolCallExecutor:
+    """Выполнитель tool calls с поддержкой fs/terminal методов."""
+    
+    async def execute_tool_call(
+        self,
+        tool_call: ToolCall,
+        session: SessionState
+    ) -> ToolCallResult:
+        """Выполнить tool call с доступом к fs/terminal."""
+        
+        # 1. Инициализировать tool
+        tool = self.registry.get_tool(tool_call.name)
+        
+        # 2. Выполнить (tool может использовать ClientRPCService)
+        result = await tool.execute(
+            **tool_call.params,
+            # Передать сервисы
+            client_rpc=self.client_rpc_service,
+            session=session
+        )
+        
+        return result
 ```
 
-### Интеграция с Permission System
-
-Terminal методы используют существующий `session/request_permission` API:
+**Пример:** tool для чтения файла и анализа
 
 ```python
-# При создании терминала запрашиваем разрешение
-permission_request = PermissionRequest(
-    type="terminal",
-    description=f"Execute command: {command} {' '.join(args)}",
-    decision_required=True
-)
-
-# Блокируем до получения разрешения
-permission_result = await self.permission_manager.request(permission_request)
-if not permission_result.granted:
-    raise PermissionDeniedError("User rejected terminal creation")
-```
-
-Write File методы также используют `session/request_permission`:
-
-```python
-permission_request = PermissionRequest(
-    type="file_write",
-    description=f"Write to file: {path}",
-    decision_required=True
-)
-```
-
-### Интеграция с Tool Calls
-
-Terminal output может быть встроен в tool calls для реального времени отображения:
-
-```python
-# Создаем tool call с встроенным терминалом
-tool_call_update = {
-    "sessionUpdate": "tool_call",
-    "toolCallId": call_id,
-    "title": "Running tests",
-    "kind": "execute",
-    "status": "in_progress",
-    "content": [
-        {
-            "type": "terminal",
-            "terminalId": terminal_id
+class CodeAnalyzerTool:
+    """Tool для анализа исходного кода."""
+    
+    async def execute(
+        self,
+        file_path: str,
+        client_rpc: ClientRPCService,
+        session: SessionState,
+        **kwargs
+    ) -> dict:
+        """Прочитать и проанализировать файл."""
+        
+        # Использовать fs/read_text_file
+        content = await client_rpc.read_text_file(
+            session_id=session.id,
+            path=file_path
+        )
+        
+        # Анализировать содержимое
+        analysis = {
+            "lines": len(content.split('\n')),
+            "language": self.detect_language(file_path),
+            "complexity": self.calculate_complexity(content)
         }
-    ]
-}
-
-# Отправляем update в клиент
-await self.send_update(tool_call_update)
-
-# Клиент будет обновлять output в реальном времени
-# через series of terminal/output вызовов
+        
+        return analysis
 ```
 
-### Интеграция с Client Capabilities
+### Встраивание terminal output в tool calls
 
-При инициализации сессии проверяем и кэшируем capabilities:
-
-```python
-class SessionState:
-    capabilities: ClientCapabilities = None
-    
-    def supports_file_reading(self) -> bool:
-        return self.capabilities.fs.readTextFile
-    
-    def supports_file_writing(self) -> bool:
-        return self.capabilities.fs.writeTextFile
-    
-    def supports_terminal(self) -> bool:
-        return self.capabilities.terminal
-```
-
-### Интеграция с Logging System
-
-Используем структурированное логирование (structlog):
+Агент может встроить live terminal output в tool call для показа прогресса пользователю:
 
 ```python
-logger.info(
-    "file_read_started",
-    session_id=session_id,
-    path=path,
-    line=line,
-    limit=limit
-)
-
-logger.info(
-    "terminal_created",
-    session_id=session_id,
-    terminal_id=terminal_id,
-    command=command,
-    cwd=cwd
-)
+async def execute_build_tool(
+    self,
+    command: str,
+    client_rpc: ClientRPCService,
+    session: SessionState
+) -> dict:
+    """Выполнить build с live output в UI."""
+    
+    # 1. Создать терминал
+    term_result = await client_rpc.create_terminal(
+        session_id=session.id,
+        command="npm",
+        args=["run", "build"]
+    )
+    terminal_id = term_result["terminalId"]
+    
+    try:
+        # 2. Встроить терминал в tool call
+        await self.update_tool_call(
+            session.id,
+            tool_call_id="call_123",
+            status="in_progress",
+            content=[
+                {"type": "text", "text": "Building project..."},
+                {"type": "terminal", "terminalId": terminal_id}
+            ]
+        )
+        
+        # 3. Ждать завершения
+        exit_status = await client_rpc.wait_for_exit(
+            session_id=session.id,
+            terminalId=terminal_id
+        )
+        
+        # 4. Получить final output
+        output_result = await client_rpc.get_terminal_output(
+            session_id=session.id,
+            terminalId=terminal_id
+        )
+        
+        return {
+            "success": exit_status["exitCode"] == 0,
+            "output": output_result["output"],
+            "exit_code": exit_status["exitCode"]
+        }
+    
+    finally:
+        # 5. Освободить ресурсы
+        await client_rpc.release_terminal(
+            session_id=session.id,
+            terminalId=terminal_id
+        )
 ```
 
 ---
 
-## Диаграммы
+## Диаграммы архитектуры
 
-### Class Diagram: Иерархия классов
-
-```mermaid
-classDiagram
-    %% File System Classes
-    class FileSystemRequest {
-        -sessionId: SessionId
-        -path: str
-    }
-    
-    class ReadFileRequest {
-        -line: Optional[int]
-        -limit: Optional[int]
-    }
-    
-    class WriteFileRequest {
-        -content: str
-    }
-    
-    class FileSystemResponse {
-        <<abstract>>
-    }
-    
-    class ReadFileResponse {
-        -content: str
-    }
-    
-    class WriteFileResponse {
-    }
-    
-    class FileSystemService {
-        <<interface>>
-        +read_text_file(request): ReadFileResponse
-        +write_text_file(request): WriteFileResponse
-    }
-    
-    class FileSystemServiceImpl {
-        -logger: Logger
-        -session_storage: SessionStorage
-        -permission_manager: PermissionManager
-        +read_text_file(request): ReadFileResponse
-        +write_text_file(request): WriteFileResponse
-    }
-    
-    %% Terminal Classes
-    class TerminalSession {
-        -terminal_id: str
-        -session_id: SessionId
-        -status: TerminalStatus
-        -process_id: Optional[int]
-        -output_buffer: str
-        -exit_code: Optional[int]
-        -signal: Optional[str]
-        -created_at: datetime
-    }
-    
-    class TerminalStatus {
-        <<enumeration>>
-        CREATED
-        RUNNING
-        EXITED
-        RELEASED
-    }
-    
-    class TerminalRequest {
-        -sessionId: SessionId
-        -terminalId: str
-    }
-    
-    class CreateTerminalRequest {
-        -command: str
-        -args: list[str]
-        -env: dict
-        -cwd: str
-        -outputByteLimit: int
-    }
-    
-    class TerminalOutput {
-        -output: str
-        -truncated: bool
-        -exitStatus: Optional[TerminalExitStatus]
-    }
-    
-    class TerminalExitStatus {
-        -exitCode: Optional[int]
-        -signal: Optional[str]
-    }
-    
-    class TerminalService {
-        <<interface>>
-        +create(request): TerminalSession
-        +output(terminal_id): TerminalOutput
-        +wait_for_exit(terminal_id): TerminalExitStatus
-        +kill(terminal_id): None
-        +release(terminal_id): None
-    }
-    
-    class TerminalServiceImpl {
-        -logger: Logger
-        -session_storage: SessionStorage
-        -terminals: dict[str, TerminalSession]
-        -permission_manager: PermissionManager
-        +create(request): TerminalSession
-        +output(terminal_id): TerminalOutput
-        +wait_for_exit(terminal_id): TerminalExitStatus
-        +kill(terminal_id): None
-        +release(terminal_id): None
-    }
-    
-    class TerminalCoordinator {
-        -terminal_service: TerminalService
-        -session_storage: SessionStorage
-        -logger: Logger
-        +create_terminal(params): TerminalSession
-        +get_output(terminal_id): TerminalOutput
-        +wait_for_exit(terminal_id): TerminalExitStatus
-        +kill_terminal(terminal_id): None
-        +release_terminal(terminal_id): None
-    }
-    
-    %% Relationships
-    ReadFileRequest --|> FileSystemRequest
-    WriteFileRequest --|> FileSystemRequest
-    
-    ReadFileResponse --|> FileSystemResponse
-    WriteFileResponse --|> FileSystemResponse
-    
-    FileSystemService <|.. FileSystemServiceImpl
-    
-    TerminalSession *-- TerminalStatus
-    
-    TerminalRequest --|> CreateTerminalRequest
-    
-    TerminalService <|.. TerminalServiceImpl
-    TerminalServiceImpl *-- TerminalSession
-    
-    TerminalCoordinator --> TerminalService
-    TerminalCoordinator --> TerminalSession
-```
-
-### Sequence Diagram: Типичный сценарий использования Terminal
+### Диаграмма 1: Component Diagram (исправленная архитектура)
 
 ```mermaid
-sequenceDiagram
-    participant Agent as Agent
-    participant Client as Client
-    participant TerminalSvc as TerminalService
-    participant OS as OS/Shell
-    
-    Agent->>Client: terminal/create(command="npm test")
-    Client->>TerminalSvc: validate & create
-    TerminalSvc->>OS: spawn process
-    OS-->>TerminalSvc: process_id=1234
-    TerminalSvc-->>Client: {terminalId: "term_xyz"}
-    Client-->>Agent: {terminalId: "term_xyz"}
-    
-    par Concurrent
-        Agent->>Client: terminal/output(term_xyz)
-        Client->>TerminalSvc: get_output(term_xyz)
-        TerminalSvc->>OS: read process output
-        OS-->>TerminalSvc: "Running tests..."
-        TerminalSvc-->>Client: {output: "...", truncated: false}
-        Client-->>Agent: {output: "...", truncated: false}
-    and
-        Agent->>Client: terminal/wait_for_exit(term_xyz)
-        Client->>TerminalSvc: wait(term_xyz)
-        TerminalSvc->>OS: wait for exit
-        OS-->>TerminalSvc: exit_code=0
-        TerminalSvc-->>Client: {exitCode: 0, signal: null}
-        Client-->>Agent: {exitCode: 0, signal: null}
+graph TB
+    subgraph Agent["Agent (acp-server)"]
+        ACPProtocol["ACPProtocol<br/>(core.py)"]
+        ToolHandler["ToolCallHandler<br/>(tool_call_handler.py)"]
+        ClientRPCService["ClientRPCService<br/>(client_rpc/service.py)"]
+        Tools["Tool Registry<br/>(tools/)"]
     end
     
-    Agent->>Client: terminal/release(term_xyz)
-    Client->>TerminalSvc: cleanup & release
-    TerminalSvc->>OS: cleanup resources
-    TerminalSvc-->>Client: null
-    Client-->>Agent: null
+    subgraph Transport["Bidirectional Transport"]
+        WebSocket["WebSocket<br/>(JSON-RPC)"]
+    end
+    
+    subgraph Client["Client (acp-client)"]
+        MessageRouter["MessageRouter<br/>(message_router.py)"]
+        HandlerReg["HandlerRegistry<br/>(handler_registry.py)"]
+        FSHandler["FileSystemHandler<br/>(handlers/file_system_handler.py)"]
+        TermHandler["TerminalHandler<br/>(handlers/terminal_handler.py)"]
+        FSExecutor["FileSystemExecutor<br/>(executors/file_system_executor.py)"]
+        TermExecutor["TerminalExecutor<br/>(executors/terminal_executor.py)"]
+        PermManager["PermissionManager<br/>(permissions.py)"]
+        PathValidator["PathValidator<br/>(security.py)"]
+    end
+    
+    subgraph OS["OS Environment"]
+        FileSystem["File System"]
+        Shell["Shell / OS Process"]
+    end
+    
+    ACPProtocol -->|инициирует| ToolHandler
+    ToolHandler -->|использует| ClientRPCService
+    Tools -->|используются| ToolHandler
+    
+    ClientRPCService -->|отправляет request| WebSocket
+    
+    WebSocket -->|получает request| MessageRouter
+    MessageRouter -->|маршрутирует| HandlerReg
+    
+    HandlerReg -->|диспетчеризирует| FSHandler
+    HandlerReg -->|диспетчеризирует| TermHandler
+    
+    FSHandler -->|валидирует| PathValidator
+    FSHandler -->|проверяет разрешения| PermManager
+    FSHandler -->|выполняет| FSExecutor
+    
+    TermHandler -->|выполняет| TermExecutor
+    
+    FSExecutor -->|читает/пишет| FileSystem
+    TermExecutor -->|запускает| Shell
+    
+    FSExecutor -->|возвращает результат| FSHandler
+    TermExecutor -->|возвращает результат| TermHandler
+    
+    FSHandler -->|отправляет response| WebSocket
+    TermHandler -->|отправляет response| WebSocket
+    
+    WebSocket -->|возвращает response| ClientRPCService
+    ClientRPCService -->|возвращает результат| ToolHandler
 ```
 
-### Sequence Diagram: Чтение файла
+### Диаграмма 2: Sequence Diagram - File Read (Agent → Client)
 
 ```mermaid
 sequenceDiagram
-    participant Agent as Agent
-    participant Client as Client
-    participant FileSvc as FileSystemService
+    participant Agent as Agent<br/>(acp-server)
+    participant RPC as ClientRPCService
+    participant Transport as WebSocket<br/>(JSON-RPC)
+    participant Router as MessageRouter
+    participant Handler as FileSystemHandler
+    participant Validator as PathValidator
+    participant Executor as FileSystemExecutor
     participant FS as File System
     
-    Note over Agent: Check capabilities first
-    Agent->>Client: initialize (response has fs.readTextFile)
+    Agent->>RPC: read_text_file(sessionId, path, line, limit)
     
-    Agent->>Client: fs/read_text_file(path="/home/user/main.py", line=10, limit=50)
-    Client->>FileSvc: validate path & session
-    FileSvc->>FileSvc: check permissions
-    FileSvc->>FS: open & read file
-    FS-->>FileSvc: content
-    FileSvc-->>Client: {content: "..."}
-    Client-->>Agent: {content: "..."}
+    activate RPC
+    RPC->>RPC: Проверить clientCapabilities.fs.readTextFile
+    
+    RPC->>Transport: Отправить JSON-RPC request
+    deactivate RPC
+    
+    activate Transport
+    Transport->>Router: Получить fs/read_text_file
+    deactivate Transport
+    
+    activate Router
+    Router->>Handler: dispatch(sessionId, path, line, limit)
+    deactivate Router
+    
+    activate Handler
+    Handler->>Validator: validate(path)
+    
+    activate Validator
+    Validator-->>Handler: path OK / SecurityError
+    deactivate Validator
+    
+    Handler->>Handler: Валидировать line, limit
+    
+    Handler->>Executor: read_text_file(path, line, limit)
+    deactivate Handler
+    
+    activate Executor
+    Executor->>FS: Открыть файл
+    FS-->>Executor: file handle
+    
+    Executor->>FS: Прочитать строки
+    FS-->>Executor: content (с учетом line/limit)
+    
+    Executor->>FS: Закрыть файл
+    Executor-->>Handler: content
+    deactivate Executor
+    
+    activate Handler
+    Handler->>Transport: Отправить JSON-RPC response {"content": "..."}
+    deactivate Handler
+    
+    activate Transport
+    Transport->>RPC: Получить response
+    deactivate Transport
+    
+    activate RPC
+    RPC-->>Agent: return content
+    deactivate RPC
 ```
 
-### Sequence Diagram: Запись файла с разрешением
+### Диаграмма 3: Sequence Diagram - Terminal Create (Agent → Client)
 
 ```mermaid
 sequenceDiagram
-    participant Agent as Agent
-    participant Client as Client
+    participant Agent as Agent<br/>(acp-server)
+    participant RPC as ClientRPCService
+    participant Transport as WebSocket
+    participant Router as MessageRouter
+    participant Handler as TerminalHandler
+    participant Executor as TerminalExecutor
+    participant OS as OS Process<br/>(subprocess)
+    
+    Agent->>RPC: create_terminal(sessionId, command, args, env, cwd)
+    
+    activate RPC
+    RPC->>RPC: Проверить clientCapabilities.terminal
+    
+    RPC->>Transport: Отправить JSON-RPC request
+    deactivate RPC
+    
+    activate Transport
+    Transport->>Router: Получить terminal/create
+    deactivate Transport
+    
+    activate Router
+    Router->>Handler: dispatch(sessionId, command, args, env, cwd)
+    deactivate Router
+    
+    activate Handler
+    Handler->>Handler: Валидировать параметры
+    
+    Handler->>Executor: create(command, args, env, cwd)
+    deactivate Handler
+    
+    activate Executor
+    Executor->>OS: subprocess.Popen(command, args, env, cwd)
+    OS-->>Executor: process handle
+    
+    Executor->>Executor: Создать TerminalState
+    Executor->>Executor: Запустить background task для чтения output
+    
+    Executor-->>Handler: terminal_id
+    deactivate Executor
+    
+    activate Handler
+    Handler->>Handler: Сохранить в registry
+    Handler->>Transport: Отправить JSON-RPC response {"terminalId": "term_xyz"}
+    deactivate Handler
+    
+    activate Transport
+    Transport->>RPC: Получить response
+    deactivate Transport
+    
+    activate RPC
+    RPC-->>Agent: return terminal_id
+    deactivate RPC
+    
+    Note over OS: Процесс продолжает работать в фоне
+    Note over Executor: Output читается в background потоке
+```
+
+### Диаграмма 4: Sequence Diagram - File Write with Permission
+
+```mermaid
+sequenceDiagram
+    participant Agent as Agent<br/>(acp-server)
+    participant RPC as ClientRPCService
+    participant Transport as WebSocket
+    participant Handler as FileSystemHandler
     participant PermMgr as PermissionManager
     participant User as User
-    participant FileSvc as FileSystemService
+    participant Executor as FileSystemExecutor
     participant FS as File System
     
-    Agent->>Client: fs/write_text_file(path="/home/user/config.json", content="{...}")
-    Client->>PermMgr: request_permission(type="file_write", description="...")
-    PermMgr->>User: show permission dialog
-    User-->>PermMgr: "Grant" / "Deny"
+    Agent->>RPC: write_text_file(sessionId, path, content)
     
-    alt Permission Granted
-        PermMgr-->>Client: {granted: true}
-        Client->>FileSvc: perform write
-        FileSvc->>FS: write file
-        FS-->>FileSvc: success
-        FileSvc-->>Client: null
-        Client-->>Agent: null
-    else Permission Denied
-        PermMgr-->>Client: {granted: false}
-        Client-->>Agent: error: PermissionDeniedError
-    end
+    activate RPC
+    RPC->>RPC: Проверить clientCapabilities.fs.writeTextFile
+    RPC->>Transport: Отправить JSON-RPC request
+    deactivate RPC
+    
+    activate Transport
+    Transport->>Handler: dispatch(sessionId, path, content)
+    deactivate Transport
+    
+    activate Handler
+    Handler->>Handler: Валидировать path
+    
+    Handler->>PermMgr: request_permission(sessionId, "file_write", {path, size, preview})
+    deactivate Handler
+    
+    activate PermMgr
+    PermMgr->>Transport: Отправить session/request_permission к клиенту (обратно)
+    deactivate PermMgr
+    
+    Transport->>User: Показать диалог "Агент запрашивает запись в файл"
+    User->>User: Пользователь нажимает "Разрешить" или "Отклонить"
+    User->>Transport: Отправить response с разрешением
+    
+    activate Handler
+    Handler->>Executor: write_text_file(path, content)
+    
+    activate Executor
+    Executor->>FS: Создать директории если нужно
+    Executor->>FS: Написать файл
+    FS-->>Executor: OK
+    Executor-->>Handler: None
+    deactivate Executor
+    
+    Handler->>Transport: Отправить JSON-RPC response {null}
+    deactivate Handler
+    
+    activate Transport
+    Transport->>RPC: Получить response
+    deactivate Transport
+    
+    activate RPC
+    RPC-->>Agent: return None
+    deactivate RPC
 ```
 
-### State Diagram: Жизненный цикл терминальной сессии
+### Диаграмма 5: State Diagram - Terminal Lifecycle
 
 ```mermaid
 stateDiagram-v2
-    [*] --> CREATED: terminal/create()
+    [*] --> CREATED: terminal/create
     
-    CREATED --> RUNNING: process started
+    CREATED --> RUNNING: Процесс начал работать
     
-    RUNNING --> EXITED: process terminates naturally
-    RUNNING --> EXITED: terminal/kill()
+    RUNNING --> RUNNING: terminal/output<br/>terminal/wait_for_exit (blocking)
     
-    CREATED --> EXITED: immediate failure
+    RUNNING --> EXITED: Процесс завершился<br/>(exit code или signal)
     
-    EXITED --> RELEASED: terminal/release()
-    CREATED --> RELEASED: terminal/release() without running
+    RUNNING --> EXITED: terminal/kill<br/>(SIGTERM)
+    
+    EXITED --> EXITED: terminal/output<br/>terminal/wait_for_exit
+    
+    EXITED --> RELEASED: terminal/release
     
     RELEASED --> [*]
     
     note right of CREATED
-        Just created, process may not have started yet
-        Can still call any terminal/* method
-    end note
+        Процесс в очереди запуска
+        Terminal ID выдан
+    end
     
     note right of RUNNING
-        Process is executing
-        Can get output, wait, kill
-        terminal/output returns no exitStatus
-    end note
+        Процесс выполняется
+        Output читается в фоне
+        Доступны все методы
+    end
     
     note right of EXITED
-        Process finished (normally or via kill)
-        Can still call terminal/output to get final output
-        terminal/output includes exitStatus
-        MUST call terminal/release
-    end note
+        Процесс завершен (код выхода или сигнал)
+        Output сохранен
+        Процесс еще занимает память
+    end
     
     note right of RELEASED
-        All resources freed
-        Terminal ID becomes invalid
-        No more terminal/* calls allowed
-    end note
+        Ресурсы освобождены
+        Terminal ID невалиден
+        Если в tool call — UI продолжает показывать output
+    end
 ```
 
-### Component Diagram: Архитектура системы
+### Диаграмма 6: Class Diagram
 
 ```mermaid
-graph TB
-    subgraph Client["Client (acp-client)"]
-        FS_VM["FileSystemViewModel"]
-        TM_VM["TerminalViewModel"]
-        FS_UC["FileSystem UseCases"]
-        TM_UC["Terminal UseCases"]
-        FS_SVC["FileSystemService"]
-        TM_SVC["TerminalService"]
-        COORD["TerminalCoordinator"]
-    end
+classDiagram
+    class ClientRPCService {
+        -transport: WebSocketTransport
+        -capabilities_checker: CapabilityChecker
+        -pending_requests: dict
+        -next_request_id: int
+        
+        +read_text_file(sessionId, path, line, limit) Future[str]
+        +write_text_file(sessionId, path, content) Future[None]
+        +create_terminal(sessionId, command, args, env, cwd) Future[str]
+        +get_terminal_output(sessionId, terminalId) Future[dict]
+        +wait_for_exit(sessionId, terminalId) Future[dict]
+        +kill_terminal(sessionId, terminalId) Future[None]
+        +release_terminal(sessionId, terminalId) Future[None]
+        -send_request(method, params) Future[dict]
+        -handle_response(message) None
+    }
     
-    subgraph Transport["Transport Layer"]
-        WS["WebSocket"]
-        MP["MessageParser"]
-        HR["HandlerRegistry"]
-    end
+    class HandlerRegistry {
+        -handlers: dict[str, Callable]
+        -fs_handler: FileSystemHandler
+        -terminal_handler: TerminalHandler
+        
+        +dispatch(request) Future[dict|None]
+    }
     
-    subgraph Server["Server (acp-server)"]
-        FS_HANDLER["fs/* Handler"]
-        TM_HANDLER["terminal/* Handler"]
-        FS_EXEC["FileSystemExecutor"]
-        TM_EXEC["TerminalExecutor"]
-        SESSION_MGR["SessionManager"]
-        PERM_MGR["PermissionManager"]
-    end
+    class FileSystemHandler {
+        -executor: FileSystemExecutor
+        -path_validator: PathValidator
+        -permission_manager: PermissionManager
+        
+        +handle_read_text_file(sessionId, path, line, limit) Future[dict]
+        +handle_write_text_file(sessionId, path, content) Future[dict]
+    }
     
-    subgraph OS_LAYER["OS Layer"]
-        FILESYSTEM["File System"]
-        SHELL["Shell/Process"]
-    end
+    class TerminalHandler {
+        -executor: TerminalExecutor
+        -terminals: dict[str, TerminalState]
+        
+        +handle_create(sessionId, command, args, env, cwd) Future[dict]
+        +handle_output(sessionId, terminalId) Future[dict]
+        +handle_wait_for_exit(sessionId, terminalId) Future[dict]
+        +handle_kill(sessionId, terminalId) Future[dict]
+        +handle_release(sessionId, terminalId) Future[dict]
+    }
     
-    FS_VM -->|uses| FS_UC
-    TM_VM -->|uses| TM_UC
+    class FileSystemExecutor {
+        -base_path: str
+        
+        +read_text_file(path, line, limit) Future[str]
+        +write_text_file(path, content) Future[None]
+    }
     
-    FS_UC -->|uses| FS_SVC
-    TM_UC -->|uses| TM_SVC
-    TM_UC -->|coordinates| COORD
+    class TerminalExecutor {
+        -terminals: dict[str, TerminalState]
+        -id_generator: IdGenerator
+        
+        +create(command, args, env, cwd) Future[str]
+        +get_output(terminalId) Future[tuple[str, bool, dict|None]]
+        +kill(terminalId) Future[None]
+        +release(terminalId) Future[None]
+        -read_output_loop(process, terminalState) None
+    }
     
-    FS_SVC -->|sends| WS
-    TM_SVC -->|sends| WS
+    class TerminalState {
+        +terminal_id: str
+        +process: subprocess.Process
+        +output: str
+        +truncated: bool
+        +output_byte_limit: int|None
+        +exit_code: int|None
+        +signal: str|None
+        +created_at: datetime
+        +output_lock: asyncio.Lock
+    }
     
-    WS -->|receives| MP
-    MP -->|dispatches| HR
+    class PathValidator {
+        -allowed_roots: list[str]
+        
+        +validate(path) bool
+    }
     
-    HR -->|routes to| FS_HANDLER
-    HR -->|routes to| TM_HANDLER
+    class PermissionManager {
+        -session_manager: SessionManager
+        
+        +request_permission(sessionId, permType, description) Future[bool]
+    }
     
-    FS_HANDLER -->|uses| FS_EXEC
-    TM_HANDLER -->|uses| TM_EXEC
+    class CapabilityChecker {
+        -capabilities: dict
+        
+        +supports_fs_read() bool
+        +supports_fs_write() bool
+        +supports_terminal() bool
+        +check(feature) bool
+    }
     
-    FS_HANDLER -->|checks| SESSION_MGR
-    TM_HANDLER -->|checks| SESSION_MGR
-    
-    TM_HANDLER -->|requests| PERM_MGR
-    
-    FS_EXEC -->|accesses| FILESYSTEM
-    TM_EXEC -->|executes| SHELL
-    
-    FILESYSTEM -->|provides| OS_LAYER
-    SHELL -->|provides| OS_LAYER
+    ClientRPCService --> FileSystemHandler
+    ClientRPCService --> TerminalHandler
+    HandlerRegistry --> FileSystemHandler
+    HandlerRegistry --> TerminalHandler
+    FileSystemHandler --> FileSystemExecutor
+    FileSystemHandler --> PathValidator
+    FileSystemHandler --> PermissionManager
+    TerminalHandler --> TerminalExecutor
+    TerminalExecutor --> TerminalState
+    ClientRPCService --> CapabilityChecker
 ```
 
 ---
 
 ## План реализации
 
-### Фаза 1: Подготовка инфраструктуры
+### Фаза 1: Подготовка инфраструктуры (Server-side RPC support)
 
-**Цель:** Создать базовую структуру модулей и интерфейсов для File System и Terminal операций.
+**Цель:** Создать базовую инфраструктуру для отправки RPC запросов на клиент.
+
+**Задачи:**
+1. Создать `acp-server/src/acp_server/client_rpc/` директорию
+2. Реализовать `ClientRPCService` с поддержкой:
+   - Формирования JSON-RPC requests
+   - Отправки через transport
+   - Ожидания responses с timeout
+   - Управления pending requests
+3. Реализовать `CapabilityChecker` для проверки `clientCapabilities`
+4. Интегрировать `ClientRPCHandler` с основным `ACPProtocol`
+5. Добавить unit tests для ClientRPCService
+
+**Файлы:**
+- `acp-server/src/acp_server/client_rpc/__init__.py`
+- `acp-server/src/acp_server/client_rpc/service.py`
+- `acp-server/src/acp_server/client_rpc/models.py`
+- `acp-server/src/acp_server/client_rpc/exceptions.py`
+- `acp-server/tests/test_client_rpc_service.py`
+
+### Фаза 2: Подготовка инфраструктуры (Client-side handler support)
+
+**Цель:** Создать инфраструктуру для обработки входящих RPC запросов на клиенте.
+
+**Задачи:**
+1. Расширить `MessageRouter` в `acp-client` для поддержки входящих requests
+2. Создать `HandlerRegistry` с поддержкой fs/* и terminal/* методов
+3. Добавить механизм диспетчеризации requests на основе method name
+4. Добавить поддержку формирования JSON-RPC responses
+5. Интегрировать с существующей инфраструктурой (events, logging)
+6. Добавить unit tests для MessageRouter и HandlerRegistry
+
+**Файлы:**
+- Расширение `acp-client/src/acp_client/infrastructure/handler_registry.py`
+- Расширение `acp-client/src/acp_client/infrastructure/services/message_router.py`
+- `acp-client/tests/test_message_router_inbound.py`
+- `acp-client/tests/test_handler_registry_rpc.py`
+
+### Фаза 3: File System методы (реализация)
+
+**Цель:** Реализовать fs/read_text_file и fs/write_text_file методы.
 
 **Задачи:**
 
-1. **Создать модули File System в acp-client:**
-   - `acp-client/src/acp_client/domain/file_system/__init__.py`
-   - `acp-client/src/acp_client/domain/file_system/entities.py` — RequestResponse типы
-   - `acp-client/src/acp_client/domain/file_system/services.py` — FileSystemService интерфейс
-   - `acp-client/src/acp_client/application/file_system/use_cases.py` — UseCases
+**На стороне acp-server:**
+1. Добавить методы в `ClientRPCService`:
+   - `read_text_file(sessionId, path, line, limit)`
+   - `write_text_file(sessionId, path, content)`
+2. Проверка `clientCapabilities.fs` перед вызовом
+3. Обработка responses/errors
+4. Unit tests
 
-2. **Создать модули Terminal в acp-client:**
-   - `acp-client/src/acp_client/domain/terminal/__init__.py`
-   - `acp-client/src/acp_client/domain/terminal/entities.py` — Terminal, TerminalSession, TerminalStatus
-   - `acp-client/src/acp_client/domain/terminal/services.py` — TerminalService интерфейс
-   - `acp-client/src/acp_client/domain/terminal/events.py` — TerminalOutputEvent, TerminalExitEvent
-   - `acp-client/src/acp_client/application/terminal/use_cases.py` — UseCases
-   - `acp-client/src/acp_client/application/terminal/terminal_coordinator.py` — TerminalCoordinator
+**На стороне acp-client:**
+1. Создать `FileSystemHandler` в `infrastructure/handlers/`
+2. Создать `FileSystemExecutor` в `infrastructure/executors/`
+3. Реализовать методы:
+   - `handle_read_text_file` → `executor.read_text_file`
+   - `handle_write_text_file` (с запросом разрешения) → `executor.write_text_file`
+4. Создать `PathValidator` для защиты от path traversal
+5. Интегрировать с `HandlerRegistry`
+6. Unit tests + integration tests
 
-3. **Создать обработчики в acp-server:**
-   - `acp-server/src/acp_server/protocol/handlers/file_system.py` — Обработчик fs/*
-   - `acp-server/src/acp_server/protocol/handlers/terminal.py` — Обработчик terminal/*
+**Файлы:**
+- `acp-server/src/acp_server/client_rpc/service.py` (fs methods)
+- `acp-client/src/acp_client/infrastructure/handlers/file_system_handler.py`
+- `acp-client/src/acp_client/infrastructure/executors/file_system_executor.py`
+- `acp-client/src/acp_client/infrastructure/security/path_validator.py`
+- `acp-server/tests/test_client_rpc_fs_methods.py`
+- `acp-client/tests/test_file_system_handler.py`
+- `acp-client/tests/test_file_system_executor.py`
 
-4. **Обновить Pydantic модели:**
-   - `acp-server/src/acp_server/models.py` — добавить модели для fs/* и terminal/*
-   - `acp-client/src/acp_client/messages.py` — добавить сообщения
+### Фаза 4: Terminal методы (реализация)
 
-### Фаза 2: Реализация File System методов
-
-**Цель:** Полная реализация fs/read_text_file и fs/write_text_file.
-
-**Задачи:**
-
-1. **Реализовать FileSystemService:**
-   - `acp-client/src/acp_client/infrastructure/services/file_system_service.py`
-   - Методы: read_text_file, write_text_file
-   - Валидация параметров
-   - Обработка ошибок
-
-2. **Реализовать обработчик в сервере:**
-   - Парсинг fs/* запросов
-   - Валидация sessionId и path
-   - Проверка разрешений
-   - Вызов FileSystemExecutor
-
-3. **Реализовать FileSystemExecutor:**
-   - `acp-server/src/acp_server/services/file_system_executor.py`
-   - Чтение файлов с валидацией path
-   - Запись файлов с проверкой разрешений
-   - Обработка ошибок файловой системы
-
-4. **Добавить тесты:**
-   - Unit тесты для валидации параметров
-   - Unit тесты для FileSystemService
-   - Integration тесты для end-to-end сценариев
-   - Security тесты для path traversal проверок
-
-### Фаза 3: Реализация Terminal методов
-
-**Цель:** Полная реализация terminal/create, terminal/output, terminal/wait_for_exit, terminal/kill, terminal/release.
+**Цель:** Реализовать terminal/create, output, wait_for_exit, kill, release методы.
 
 **Задачи:**
 
-1. **Реализовать TerminalService:**
-   - `acp-client/src/acp_client/infrastructure/services/terminal_service.py`
-   - Методы: create, output, wait_for_exit, kill, release
-   - Управление состоянием терминалов
-   - Буферизация output
-   - Обработка процессов
+**На стороне acp-server:**
+1. Добавить методы в `ClientRPCService`:
+   - `create_terminal(sessionId, command, args, env, cwd, outputByteLimit)`
+   - `get_terminal_output(sessionId, terminalId)`
+   - `wait_for_exit(sessionId, terminalId)`
+   - `kill_terminal(sessionId, terminalId)`
+   - `release_terminal(sessionId, terminalId)`
+2. Проверка `clientCapabilities.terminal`
+3. Unit tests
 
-2. **Реализовать TerminalCoordinator:**
-   - Высокоуровневые операции (create_terminal, release_terminal)
-   - Управление жизненным циклом
-   - Обработка таймаутов
-   - Интеграция с permission manager
+**На стороне acp-client:**
+1. Создать `TerminalHandler` в `infrastructure/handlers/`
+2. Создать `TerminalExecutor` в `infrastructure/executors/`
+3. Создать `TerminalState` dataclass
+4. Реализовать методы обработки:
+   - `handle_create` → запустить процесс, генерировать ID
+   - `handle_output` → получить текущий output
+   - `handle_wait_for_exit` → ждать завершения
+   - `handle_kill` → отправить SIGTERM
+   - `handle_release` → освободить ресурсы
+5. Реализовать background task для читания output в реальном времени
+6. Управление byte limit output (обрезание старого)
+7. Интегрировать с `HandlerRegistry`
+8. Unit + integration tests
 
-3. **Реализовать обработчики в сервере:**
-   - Парсинг terminal/* запросов
-   - Валидация sessionId и terminalId
-   - Проверка разрешений (особенно для create)
-   - Вызов TerminalExecutor
+**Файлы:**
+- `acp-server/src/acp_server/client_rpc/service.py` (terminal methods)
+- `acp-client/src/acp_client/infrastructure/handlers/terminal_handler.py`
+- `acp-client/src/acp_client/infrastructure/executors/terminal_executor.py`
+- `acp-client/src/acp_client/infrastructure/executors/terminal_state.py`
+- `acp-server/tests/test_client_rpc_terminal_methods.py`
+- `acp-client/tests/test_terminal_handler.py`
+- `acp-client/tests/test_terminal_executor.py`
 
-4. **Реализовать TerminalExecutor:**
-   - `acp-server/src/acp_server/services/terminal_executor.py`
-   - Запуск процессов (subprocess)
-   - Чтение output в real-time
-   - Управление процессами (kill, wait)
-   - Обработка сигналов и exit codes
+### Фаза 5: Permission Management
 
-5. **Добавить тесты:**
-   - Unit тесты для state transitions
-   - Unit тесты для output буферизации
-   - Integration тесты для процесс-управления
-   - Stress тесты для больших output
-
-### Фаза 4: Интеграция с Permission System
-
-**Цель:** Интегрировать разрешения для File System и Terminal операций.
-
-**Задачи:**
-
-1. **Интегрировать fs/write_text_file с Permission System:**
-   - При write_text_file вызвать session/request_permission
-   - Типы разрешений: "file_write"
-   - Описание разрешения включает путь файла
-
-2. **Интегрировать terminal/create с Permission System:**
-   - При создании терминала запросить разрешение
-   - Типы разрешений: "terminal"
-   - Описание включает команду и аргументы
-   - Рассмотреть черный список команд
-
-3. **Добавить конфигурацию разрешений:**
-   - `acp-server/src/acp_server/config.py` — настройки безопасности
-   - Черный список команд
-   - Белый список команд (опционально)
-   - Разрешенные директории для файлов
-
-### Фаза 5: Интеграция с Tool Calls
-
-**Цель:** Поддержка встраивания Terminal output в tool calls.
+**Цель:** Интегрировать систему разрешений для write и terminal методов.
 
 **Задачи:**
+1. Расширить `PermissionManager` в acp-client для поддержки:
+   - `file_write` разрешения
+   - `terminal_execute` разрешения
+2. Реализовать запрос разрешения через `session/request_permission`
+3. Обработка ответа пользователя
+4. Логирование всех операций
+5. Unit + integration tests
 
-1. **Поддерживать terminal content в tool calls:**
-   - Type: "terminal"
-   - Поле: terminalId
-   - Update session/tool_call с терминалом
+**Файлы:**
+- Расширение `acp-client/src/acp_client/infrastructure/handlers/permission_manager.py`
+- `acp-client/tests/test_permission_requests.py`
 
-2. **Реализовать потоковое обновление output:**
-   - Агент периодически вызывает terminal/output
-   - Клиент обновляет UI с новым output
-   - Финальный output остается видимым после release
+### Фаза 6: Integration Tests & Documentation
 
-3. **Примеры использования:**
-   - Создание терминала
-   - Встраивание в tool call
-   - Обновление output через session/update
-   - Финальное отображение результата
-
-### Фаза 6: ViewModels и UI
-
-**Цель:** Создать UI компоненты для взаимодействия с File System и Terminal.
+**Цель:** Полное тестирование и документирование.
 
 **Задачи:**
+1. Написать end-to-end tests (server + client)
+2. Тестирование edge cases:
+   - Timeout при ожидании response
+   - Обрезание output по byte limit
+   - Path traversal попытки
+   - Permission denied сценарии
+   - Terminal exit during wait
+3. Обновить README файлы
+4. Добавить примеры использования в документацию
+5. Обновить ARCHITECTURE.md на уровне проекта
 
-1. **Создать FileSystemViewModel:**
-   - `acp-client/src/acp_client/presentation/file_system_view_model.py`
-   - Управление state (loading, error, content)
-   - Observable для bindings
-   - Использование FileSystemService
-
-2. **Создать TerminalViewModel:**
-   - `acp-client/src/acp_client/presentation/terminal_view_model.py`
-   - Управление terminal sessions
-   - Real-time output обновления
-   - Control buttons (kill, release)
-
-3. **Интеграция с TUI:**
-   - Компоненты для просмотра файлов
-   - Компоненты для отображения терминала
-   - Модальные окна для разрешений
-
-### Фаза 7: Тестирование и документация
-
-**Цель:** Полное тестовое покрытие и документация.
-
-**Задачи:**
-
-1. **Unit тесты (аnnex к каждой фазе):**
-   - Валидация параметров
-   - Error handling
-   - State transitions
-
-2. **Integration тесты:**
-   - End-to-end сценарии
-   - Client-Server взаимодействие
-   - Permission flows
-
-3. **Security тесты:**
-   - Path traversal атаки
-   - Command injection
-   - Permission bypass
-
-4. **Performance тесты:**
-   - Large file reading
-   - High-volume terminal output
-   - Concurrent operations
-
-5. **Документация:**
-   - Примеры использования
-   - API документация
-   - Configuration guide
-
-### Приоритизация
-
-**Высокий приоритет (Phase 1-3):**
-- File System методы (read & write)
-- Terminal методы (create, output, wait, kill, release)
-- Базовая валидация и обработка ошибок
-
-**Средний приоритет (Phase 4-5):**
-- Permission system интеграция
-- Tool calls интеграция
-- Security проверки
-
-**Низкий приоритет (Phase 6-7):**
-- ViewModels и UI компоненты
-- Расширенное тестирование
-- Performance оптимизация
-
-### Зависимости между компонентами
-
-```
-Phase 1 (Infrastructure)
-    ↓
-Phase 2 (FileSystem) + Phase 3 (Terminal)
-    ↓
-Phase 4 (Permissions)
-    ↓
-Phase 5 (ToolCalls Integration)
-    ↓
-Phase 6 (ViewModels)
-    ↓
-Phase 7 (Testing & Docs)
-```
-
-Фазы 2 и 3 могут выполняться параллельно.
-Фазы 4 и 5 частично зависят от Phase 2/3, но могут частично выполняться параллельно.
+**Файлы:**
+- `acp-server/tests/test_client_rpc_integration.py`
+- `acp-client/tests/test_client_rpc_integration.py`
+- `README.md` обновления
+- `acp-server/README.md` обновления
+- `acp-client/README.md` обновления
 
 ---
 
-## Примечания реализации
+## Примеры использования
 
-### Для File System операций
+### Пример 1: Агент читает исходный код
 
-1. **Обработка больших файлов:**
-   - Параметры `line` и `limit` позволяют читать файлы по частям
-   - Не загружаем весь файл в памяти сразу
+```json
+REQUEST (Agent → Client):
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "fs/read_text_file",
+  "params": {
+    "sessionId": "sess_123",
+    "path": "/home/user/project/src/main.py",
+    "line": 1,
+    "limit": 50
+  }
+}
 
-2. **Безопасность:**
-   - Всегда валидируем `path` перед доступом
-   - Проверяем symlink-атаки
-   - Логируем все операции с файлами
+RESPONSE (Client → Agent):
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "content": "def main():\n    print('Hello')\n\nif __name__ == '__main__':\n    main()\n"
+  }
+}
+```
 
-3. **Возможности улучшений:**
-   - Support для бинарных файлов (base64 encoding)
-   - Поддержка списков файлов в директории (fs/list_directory)
-   - Поддержка создания директорий
+### Пример 2: Агент запрашивает создание файла конфигурации
 
-### Для Terminal операций
+```json
+REQUEST (Agent → Client):
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "fs/write_text_file",
+  "params": {
+    "sessionId": "sess_123",
+    "path": "/home/user/project/config.json",
+    "content": "{\"debug\": true, \"version\": \"1.0.0\"}"
+  }
+}
 
-1. **Управление ресурсами:**
-   - Всегда освобождаем процессы
-   - Используем context managers для cleanup
-   - Таймауты для long-running операций
+[Client запрашивает разрешение у пользователя]
 
-2. **Output буферизация:**
-   - Используем circular buffer для больших output
-   - Учитываем byte limits
-   - Сохраняем последние строки при truncation
+RESPONSE (Client → Agent):
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": null
+}
+```
 
-3. **Возможности улучшений:**
-   - Support для interactive input (terminal/send_input)
-   - Support для resize (terminal/resize)
-   - Support для multiple parallel terminals
+### Пример 3: Агент запускает тесты
+
+```json
+REQUEST (Agent → Client):
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "method": "terminal/create",
+  "params": {
+    "sessionId": "sess_123",
+    "command": "npm",
+    "args": ["test", "--coverage"],
+    "cwd": "/home/user/project",
+    "outputByteLimit": 1048576
+  }
+}
+
+RESPONSE (Client → Agent):
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "result": {
+    "terminalId": "term_xyz789"
+  }
+}
+
+[Команда работает в фоне]
+
+REQUEST (Agent проверяет статус):
+{
+  "jsonrpc": "2.0",
+  "id": 4,
+  "method": "terminal/output",
+  "params": {
+    "sessionId": "sess_123",
+    "terminalId": "term_xyz789"
+  }
+}
+
+RESPONSE (Client → Agent):
+{
+  "jsonrpc": "2.0",
+  "id": 4,
+  "result": {
+    "output": "PASS: 42 tests\n",
+    "truncated": false,
+    "exitStatus": null
+  }
+}
+
+REQUEST (Агент ждет завершения):
+{
+  "jsonrpc": "2.0",
+  "id": 5,
+  "method": "terminal/wait_for_exit",
+  "params": {
+    "sessionId": "sess_123",
+    "terminalId": "term_xyz789"
+  }
+}
+
+RESPONSE (Client → Agent, когда процесс завершен):
+{
+  "jsonrpc": "2.0",
+  "id": 5,
+  "result": {
+    "exitCode": 0,
+    "signal": null
+  }
+}
+
+REQUEST (Освободить ресурсы):
+{
+  "jsonrpc": "2.0",
+  "id": 6,
+  "method": "terminal/release",
+  "params": {
+    "sessionId": "sess_123",
+    "terminalId": "term_xyz789"
+  }
+}
+
+RESPONSE:
+{
+  "jsonrpc": "2.0",
+  "id": 6,
+  "result": null
+}
+```
+
+### Пример 4: Tool Call с использованием fs/read_text_file
+
+```python
+# Agent использует tool, который читает файл через RPC
+
+class ReadFileTool:
+    """Tool для чтения файлов."""
+    
+    async def execute(
+        self,
+        file_path: str,
+        client_rpc: ClientRPCService,
+        session: SessionState
+    ) -> dict:
+        """Прочитать файл и вернуть информацию."""
+        
+        # Использовать ClientRPCService для чтения файла
+        content = await client_rpc.read_text_file(
+            session_id=session.id,
+            path=file_path
+        )
+        
+        return {
+            "file": file_path,
+            "lines": len(content.split('\n')),
+            "content": content
+        }
+```
+
+### Пример 5: Tool Call с встраиванием terminal output
+
+```python
+# Agent использует tool, который запускает команду и встраивает output в UI
+
+class RunBuildTool:
+    """Tool для запуска build."""
+    
+    async def execute(
+        self,
+        project_dir: str,
+        client_rpc: ClientRPCService,
+        session: SessionState
+    ) -> dict:
+        """Запустить build и показать progress в UI."""
+        
+        # 1. Создать терминал
+        result = await client_rpc.create_terminal(
+            session_id=session.id,
+            command="npm",
+            args=["run", "build"],
+            cwd=project_dir
+        )
+        terminal_id = result["terminalId"]
+        
+        try:
+            # 2. Встроить в tool call для UI
+            await session.update_tool_call(
+                tool_call_id="build_001",
+                content=[
+                    {"type": "text", "text": "Building project..."},
+                    {"type": "terminal", "terminalId": terminal_id}
+                ]
+            )
+            
+            # 3. Ждать завершения
+            exit_status = await client_rpc.wait_for_exit(
+                session_id=session.id,
+                terminal_id=terminal_id
+            )
+            
+            # 4. Получить final output
+            output = await client_rpc.get_terminal_output(
+                session_id=session.id,
+                terminal_id=terminal_id
+            )
+            
+            return {
+                "success": exit_status["exitCode"] == 0,
+                "exit_code": exit_status["exitCode"],
+                "output": output["output"]
+            }
+        
+        finally:
+            # 5. Освободить
+            await client_rpc.release_terminal(
+                session_id=session.id,
+                terminal_id=terminal_id
+            )
+```
 
 ---
 
-## Заключение
+## Соответствие спецификации
 
-Этот документ представляет полную архитектуру для реализации File System и Terminal методов согласно спецификации ACP протокола. Архитектура следует принципам:
+Данная архитектура **полностью соответствует** официальной спецификации ACP:
 
-- **Модульность:** Отдельные компоненты для File System и Terminal
-- **Безопасность:** Валидация, разрешения, логирование
-- **Расширяемость:** Интерфейсы (ABC) позволяют plug-and-play реализации
-- **Тестируемость:** Четкое разделение слоев облегчает unit тестирование
-- **Документированность:** Все методы, ошибки и сценарии описаны
+- ✅ **09-File System.md:** fs/read_text_file и fs/write_text_file реализуются как Agent → Client RPC
+- ✅ **10-Terminal.md:** terminal/create, output, wait_for_exit, kill, release реализуются как Agent → Client RPC
+- ✅ **03-Session Setup.md:** clientCapabilities проверяются перед использованием методов
+- ✅ **03-Session Setup.md:** Разрешения запрашиваются через session/request_permission
+- ✅ **Bidirectional JSON-RPC:** Transport поддерживает обе стороны инициирования
+- ✅ **Security:** Path traversal защита, permission management, capability check
+- ✅ **Error Handling:** JSON-RPC error codes и структурированные ошибки
+- ✅ **Tool Calls Integration:** fs/* и terminal/* используются внутри tool execution
 
-Реализация может выполняться в несколько фаз с параллельным выполнением независимых задач.
+---
+
+## История изменений
+
+### Версия 2.0 (Исправленная архитектура)
+
+**Дата:** 2026-04-14
+
+**Ключевые изменения:**
+
+1. **Исправлено направление вызовов:** Agent → Client (вместо Client → Agent)
+2. **Реорганизована архитектура:**
+   - `ClientRPCService` на стороне сервера для инициирования RPC
+   - `FileSystemHandler` и `TerminalHandler` на стороне клиента для обработки
+   - `FileSystemExecutor` и `TerminalExecutor` для выполнения
+3. **Добавлена двусторонняя RPC поддержка** в transport
+4. **Реализована система разрешений** для write и terminal методов
+5. **Добавлена path traversal защита** на стороне клиента
+6. **Переработаны все диаграммы** (Component, Sequence, State, Class)
+7. **Обновлен план реализации** с 6 фазами
+8. **Добавлены примеры JSON-RPC** из спецификации
+
