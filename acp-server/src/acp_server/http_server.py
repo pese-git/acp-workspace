@@ -17,12 +17,36 @@ import uuid
 import structlog
 from aiohttp import WSMsgType, web
 
+from .agent.orchestrator import AgentOrchestrator
+from .agent.state import OrchestratorConfig
+from .config import AppConfig
+from .llm import LLMProvider, MockLLMProvider, OpenAIProvider
 from .messages import ACPMessage
 from .protocol import ACPProtocol, ProtocolOutcome
 from .storage import SessionStorage
+from .tools.registry import SimpleToolRegistry
 
 # Получаем структурированный logger
 logger = structlog.get_logger()
+
+# Константа: максимальное время ожидания для deferred prompt tasks (в секундах)
+# Если prompt не завершится за это время, его нужно отменить
+DEFERRED_PROMPT_TIMEOUT = 30.0
+
+
+def _truncate_payload(payload: str, max_length: int = 500) -> str:
+    """Обрезает payload для логирования, сохраняя значимую часть.
+    
+    Args:
+        payload: Строка payload для обрезки
+        max_length: Максимальная длина результата
+        
+    Returns:
+        Обрезанный payload или полный, если он короче max_length
+    """
+    if len(payload) > max_length:
+        return payload[:max_length]
+    return payload
 
 
 class ACPHttpServer:
@@ -44,6 +68,7 @@ class ACPHttpServer:
         require_auth: bool = False,
         auth_api_key: str | None = None,
         storage: SessionStorage | None = None,
+        config: AppConfig | None = None,
     ) -> None:
         """Создает транспортный сервер с адресом прослушивания.
 
@@ -53,6 +78,7 @@ class ACPHttpServer:
             require_auth: Требовать аутентификацию перед session/new и session/load.
             auth_api_key: API ключ для аутентификации.
             storage: Backend для хранения сессий (по умолчанию InMemoryStorage).
+            config: Глобальная конфигурация приложения (LLM, агент и т.д.).
 
         Пример использования:
             ACPHttpServer(host="0.0.0.0", port=8080)
@@ -63,13 +89,106 @@ class ACPHttpServer:
         self.require_auth = require_auth
         self.auth_api_key = auth_api_key
         self.storage = storage
+        self.config = config or AppConfig()
+        # Оркестратор агента инициализируется в методе run()
+        self._agent_orchestrator: AgentOrchestrator | None = None
+        
+        # Логируем инициализацию сервера
+        logger.debug(
+            "acp http server initialized",
+            host=host,
+            port=port,
+            require_auth=require_auth,
+            has_auth_key=bool(auth_api_key),
+        )
+
+    async def _initialize_llm_provider(self) -> LLMProvider | None:
+        """Инициализирует LLM провайдера на основе конфигурации.
+
+        Returns:
+            Инициализированный LLM провайдер или None если тип провайдера неизвестен.
+
+        Пример использования:
+            provider = await server._initialize_llm_provider()
+        """
+        logger.debug("initializing llm provider", provider_type=self.config.llm.provider)
+        llm_provider: LLMProvider | None = None
+
+        if self.config.llm.provider == "openai":
+            # Инициализируем OpenAI провайдера
+            logger.debug("configuring openai provider", model=self.config.llm.model)
+            openai_provider = OpenAIProvider()
+            config_dict = {
+                "api_key": self.config.llm.api_key,
+                "model": self.config.llm.model,
+                "temperature": self.config.llm.temperature,
+                "max_tokens": self.config.llm.max_tokens,
+            }
+            if self.config.llm.base_url:
+                config_dict["base_url"] = self.config.llm.base_url
+
+            await openai_provider.initialize(config_dict)
+            logger.debug("openai provider initialized", model=self.config.llm.model)
+            llm_provider = openai_provider
+            logger.info(
+                "openai llm provider initialized",
+                model=self.config.llm.model,
+            )
+        elif self.config.llm.provider == "mock":
+            # Используем mock провайдера для разработки
+            llm_provider = MockLLMProvider()
+            logger.info("mock llm provider initialized")
+        else:
+            # Неизвестный тип провайдера, логируем ошибку
+            logger.warning(
+                "unknown llm provider type, using mock",
+                provider=self.config.llm.provider,
+            )
+            llm_provider = MockLLMProvider()
+
+        return llm_provider
 
     async def run(self) -> None:
         """Запускает WS endpoint и держит процесс живым.
 
+        Инициализирует LLM провайдера и AgentOrchestrator на основе конфигурации.
+
         Пример использования:
             await ACPHttpServer().run()
         """
+        # Инициализируем LLM провайдера на основе конфигурации
+        llm_provider = await self._initialize_llm_provider()
+        
+        # Создаем AgentOrchestrator если есть провайдер
+        agent_orchestrator: AgentOrchestrator | None = None
+        if llm_provider is not None:
+            # Создаем реестр инструментов (пока пустой, можно расширить в будущем)
+            tool_registry = SimpleToolRegistry()
+            
+            # Создаем конфигурацию оркестратора на основе глобального конфига
+            orchestrator_config = OrchestratorConfig(
+                enabled=True,
+                agent_class="naive",
+                model=self.config.llm.model,
+                temperature=self.config.llm.temperature,
+                max_tokens=self.config.llm.max_tokens,
+                llm_provider_class="openai" if self.config.llm.provider == "openai" else "mock",
+            )
+            
+            # Инициализируем оркестратор
+            agent_orchestrator = AgentOrchestrator(
+                config=orchestrator_config,
+                llm_provider=llm_provider,
+                tool_registry=tool_registry,
+            )
+            
+            logger.info(
+                "agent orchestrator initialized",
+                system_prompt_length=len(self.config.agent.system_prompt),
+            )
+        
+        # Сохраняем оркестратор для использования в обработчике
+        self._agent_orchestrator = agent_orchestrator
 
         app = web.Application()
         app.router.add_get("/acp/ws", self.handle_ws_request)
@@ -107,6 +226,13 @@ class ACPHttpServer:
         remote_addr = request.remote or "unknown"
         start_time = time.time()
         
+        # Логируем установку нового WebSocket подключения
+        logger.info(
+            "ws connection request received",
+            connection_id=connection_id,
+            remote_addr=remote_addr,
+        )
+        
         # Логируем подключение клиента
         logger.info(
             "ws connection established",
@@ -120,6 +246,7 @@ class ACPHttpServer:
             require_auth=self.require_auth,
             auth_api_key=self.auth_api_key,
             storage=self.storage,
+            agent_orchestrator=self._agent_orchestrator,
         )
         # Храним отложенные завершения prompt-turn по sessionId в рамках WS-соединения.
         deferred_prompt_tasks: dict[str, asyncio.Task[None]] = {}
@@ -139,6 +266,12 @@ class ACPHttpServer:
                         acp_request = ACPMessage.from_json(message.data)
                         method_name = acp_request.method
                         request_id = str(acp_request.id) if acp_request.id is not None else None
+                        
+                        # Логируем получение данных с payload
+                        conn_logger.debug(
+                            "message received",
+                            payload=_truncate_payload(message.data),
+                        )
                         
                         if method_name is None:
                             outcome = protocol.handle_client_response(acp_request)
@@ -219,28 +352,65 @@ class ACPHttpServer:
                             )
                         )
 
+                    # Отправляем уведомления
                     for notification in outcome.notifications:
-                        await ws.send_str(notification.to_json())
+                        notification_json = notification.to_json()
+                        await ws.send_str(notification_json)
+                        conn_logger.debug(
+                            "notification sent",
+                            method=notification.method,
+                            payload=_truncate_payload(notification_json),
+                        )
 
+                    # Отправляем основной ответ
                     if outcome.response is not None:
-                        await ws.send_str(outcome.response.to_json())
+                        response_json = outcome.response.to_json()
+                        await ws.send_str(response_json)
+                        conn_logger.debug(
+                            "response sent",
+                            request_id=request_id,
+                            has_error=outcome.response.error is not None,
+                            payload=_truncate_payload(response_json),
+                        )
+                    
+                    # Отправляем дополнительные ответы
                     for followup_response in outcome.followup_responses:
-                        await ws.send_str(followup_response.to_json())
+                        followup_json = followup_response.to_json()
+                        await ws.send_str(followup_json)
+                        conn_logger.debug(
+                            "followup response sent",
+                            request_id=followup_response.id,
+                            payload=_truncate_payload(followup_json),
+                        )
 
                     if method_name == "shutdown":
+                        conn_logger.info("shutdown requested")
                         await ws.close()
                         break
                 elif message.type in {WSMsgType.ERROR, WSMsgType.CLOSE, WSMsgType.CLOSING}:
                     break
         finally:
-            for task in deferred_prompt_tasks.values():
-                task.cancel()
+            # Очищаем все оставшиеся deferred prompt tasks с подробным логированием
+            if deferred_prompt_tasks:
+                conn_logger.info(
+                    "cleaning up deferred prompt tasks",
+                    pending_tasks_count=len(deferred_prompt_tasks),
+                )
+                for session_id_to_cancel, task_to_cancel in list(deferred_prompt_tasks.items()):
+                    if not task_to_cancel.done():
+                        task_to_cancel.cancel()
+                        conn_logger.debug(
+                            "deferred prompt task cancelled",
+                            session_id=session_id_to_cancel,
+                        )
+                    deferred_prompt_tasks.pop(session_id_to_cancel, None)
             
-            # Логируем закрытие соединения с продолжительностью
+            # Логируем закрытие соединения с продолжительностью и статусом
             duration = time.time() - start_time
             conn_logger.info(
                 "ws connection closed",
                 duration=round(duration, 3),
+                pending_deferred_tasks=len(deferred_prompt_tasks),
             )
 
         return ws
@@ -259,6 +429,12 @@ class ACPHttpServer:
         Метод нужен для demo-эмуляции in-flight turn, который можно отменить через
         `session/cancel` до отправки финального `stopReason`.
 
+        Включает механизмы:
+        - Timeout обработки (30 сек по умолчанию)
+        - Graceful обработка исключений
+        - Очистка состояния при любом исходе
+        - Детальное логирование жизненного цикла
+
         Пример использования:
             task = asyncio.create_task(server._complete_deferred_prompt(...))
         """
@@ -268,13 +444,56 @@ class ACPHttpServer:
         try:
             # Небольшая задержка оставляет окно для входящего `session/cancel`.
             await asyncio.sleep(0.05)
-            response = protocol.complete_active_turn(session_id, stop_reason="end_turn")
+            
+            # Выполняем завершение turn с timeout
+            try:
+                response = protocol.complete_active_turn(
+                    session_id, 
+                    stop_reason="end_turn"
+                )
+            except TimeoutError:
+                conn_logger.warning(
+                    "deferred prompt completion timeout",
+                    timeout_sec=DEFERRED_PROMPT_TIMEOUT,
+                )
+                response = None
+            except Exception as exc:
+                conn_logger.error(
+                    "deferred prompt completion error",
+                    error=str(exc),
+                    exc_info=True,
+                )
+                response = None
+            
+            # Отправляем response если он есть и соединение еще живо
             if response is not None and not ws.closed:
-                await ws.send_str(response.to_json())
-                conn_logger.info("deferred prompt completed")
+                try:
+                    await ws.send_str(response.to_json())
+                    conn_logger.info("deferred prompt completed successfully")
+                except Exception as exc:
+                    conn_logger.error(
+                        "deferred prompt send error",
+                        error=str(exc),
+                        exc_info=True,
+                    )
+            elif ws.closed:
+                conn_logger.debug("deferred prompt skipped (websocket closed)")
+            else:
+                conn_logger.debug("deferred prompt skipped (no response)")
+                
         except asyncio.CancelledError:
             # Нормальная ветка: отмена задачи при `session/cancel`.
-            conn_logger.info("deferred prompt cancelled")
+            conn_logger.info("deferred prompt cancelled by client")
             return
+        except Exception as exc:
+            # Неожиданное исключение - логируем, но не пробрасываем
+            conn_logger.error(
+                "deferred prompt unexpected error",
+                error=str(exc),
+                exc_info=True,
+            )
         finally:
-            deferred_prompt_tasks.pop(session_id, None)
+            # Гарантированная очистка из словаря
+            removed = deferred_prompt_tasks.pop(session_id, None)
+            if removed is not None:
+                conn_logger.debug("deferred prompt task removed from tracking")

@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
 class _TestApp(App):
     """Минимальный app для создания Textual контекста в тестах."""
+
     pass
 
 
@@ -25,13 +26,11 @@ async def test_sidebar_select_next_and_previous_wraps(
     app = _TestApp()
     async with app.run_test() as _:
         sidebar = Sidebar(mock_session_view_model)
-        sidebar.set_sessions(
-            [
-                SessionListItem(sessionId="sess_1", cwd="/tmp"),
-                SessionListItem(sessionId="sess_2", cwd="/tmp"),
-            ],
-            active_session_id="sess_1",
-        )
+        mock_session_view_model.sessions.value = [
+            SessionListItem(sessionId="sess_1", cwd="/tmp"),
+            SessionListItem(sessionId="sess_2", cwd="/tmp"),
+        ]
+        mock_session_view_model.selected_session_id.value = "sess_1"
 
         sidebar.select_next()
         assert sidebar.get_selected_session_id() == "sess_2"
@@ -41,6 +40,3 @@ async def test_sidebar_select_next_and_previous_wraps(
 
         sidebar.select_previous()
         assert sidebar.get_selected_session_id() == "sess_2"
-
-
-

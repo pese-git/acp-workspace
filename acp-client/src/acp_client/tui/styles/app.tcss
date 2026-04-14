@@ -156,3 +156,20 @@ Screen {
     border: round #6d7f9a;
     padding: 0 1;
 }
+
+#help-modal {
+    width: 78;
+    max-width: 90%;
+    height: auto;
+    border: round #2f4a75;
+    background: #f6f9ff;
+    padding: 1 2;
+}
+
+#help-title {
+    margin: 0 0 1 0;
+}
+
+#help-content {
+    margin: 0 0 1 0;
+}

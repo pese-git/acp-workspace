@@ -3,7 +3,7 @@
 Модуль предоставляет:
 - Transport протокол (интерфейс) для любых транспортов
 - WebSocketTransport реализация на основе aiohttp
-- Полная обратная совместимость со старым кодом
+- Единый асинхронный API для клиентского транспорта
 
 Пример использования:
     transport = WebSocketTransport(host="127.0.0.1", port=8765)
@@ -131,7 +131,7 @@ class WebSocketTransport:
                 except Exception as e:
                     self.logger.warning("error_closing_old_session", error=str(e))
                 self._http_session = None
-            
+
             # Если есть открытое WebSocket - закрываем его
             if self._ws is not None:
                 try:
@@ -140,7 +140,7 @@ class WebSocketTransport:
                 except Exception as e:
                     self.logger.warning("error_closing_old_websocket", error=str(e))
                 self._ws = None
-            
+
             # Создаем новую сессию и подключаемся
             self._http_session = ClientSession()
             self._ws = await self._http_session.ws_connect(url)
@@ -250,6 +250,6 @@ class WebSocketTransport:
             self.logger.debug(
                 "connection_check_failed",
                 ws_exists=self._ws is not None,
-                ws_closed=self._ws.closed if self._ws else None
+                ws_closed=self._ws.closed if self._ws else None,
             )
         return connected

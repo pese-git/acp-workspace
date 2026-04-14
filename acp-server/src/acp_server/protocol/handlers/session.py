@@ -9,10 +9,71 @@ import base64
 import json
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
+
+import structlog
 
 from ...messages import ACPMessage, JsonRpcId
+from ..session_factory import SessionFactory
 from ..state import ClientRuntimeCapabilities, ProtocolOutcome, SessionState
+
+# Используем structlog для структурированного логирования
+logger = structlog.get_logger()
+
+
+def _serialize_available_commands(
+    commands: list,
+) -> list[dict[str, Any]]:
+    """Сериализует список available_commands для JSON.
+
+    Преобразует Pydantic модели в dict для JSON сериализации.
+    """
+    result: list[dict[str, Any]] = []
+    for cmd in commands:
+        if isinstance(cmd, dict):
+            result.append(cmd)
+        elif hasattr(cmd, "model_dump"):
+            result.append(cmd.model_dump(exclude_none=False))
+        else:
+            result.append(cmd)
+    return result
+
+
+def _cleanup_session_state(session: SessionState) -> None:
+    """Очищает незавершенные операции при переключении сессии.
+
+    Выполняет следующие действия для безопасного переключения:
+    1. Отменяет active turn, если он активен
+    2. Отмечает все pending tool calls как cancelled
+    3. Добавляет permission request IDs в cancelled_permission_requests
+    4. Добавляет RPC request IDs в cancelled_client_rpc_requests
+
+    Аргументы:
+        session: SessionState для очистки.
+
+    Пример использования:
+        _cleanup_session_state(session)
+    """
+    # Завершить active turn
+    if session.active_turn is not None:
+        session.active_turn.cancel_requested = True
+        session.active_turn.phase = "cancelled"
+
+        # Если был permission request, отменить его
+        if session.active_turn.permission_request_id is not None:
+            session.cancelled_permission_requests.add(session.active_turn.permission_request_id)
+
+        # Если был pending client request, отменить его
+        if session.active_turn.pending_client_request is not None:
+            session.cancelled_client_rpc_requests.add(
+                session.active_turn.pending_client_request.request_id
+            )
+
+        session.active_turn = None
+
+    # Отметить все pending tool calls как cancelled
+    for _tool_call_id, tool_call in session.tool_calls.items():
+        if tool_call.status == "pending":
+            tool_call.status = "cancelled"
 
 
 def session_new(
@@ -60,15 +121,21 @@ def session_new(
             message="Invalid params: mcpServers must be an array",
         )
 
-    session_id = f"sess_{uuid4().hex[:12]}"
-    config_values = {
-        config_id: str(spec["default"]) for config_id, spec in config_specs.items()
-    }
+    # Создаем сессию через фабрику
+    config_values = {config_id: str(spec["default"]) for config_id, spec in config_specs.items()}
+
+    session_state = SessionFactory.create_session(
+        cwd=cwd,
+        mcp_servers=mcp_servers,
+        config_values=config_values,
+        available_commands=build_default_commands(),
+        runtime_capabilities=runtime_capabilities,
+    )
 
     return ACPMessage.response(
         request_id,
         {
-            "sessionId": session_id,
+            "sessionId": session_state.session_id,
             "configOptions": build_config_options(config_values, config_specs),
             "modes": build_modes_state(config_values, config_specs),
         },
@@ -151,42 +218,33 @@ def session_load(
             )
         )
 
+    # Очистить незавершенные операции перед переключением контекста.
+    # Это предотвращает race conditions и утечки памяти при переключении сессий.
+    _cleanup_session_state(session)
+
     # При загрузке фиксируем актуальный контекст клиента.
     session.cwd = cwd
     session.mcp_servers = [server for server in mcp_servers if isinstance(server, dict)]
 
     notifications: list[ACPMessage] = []
-    for entry in session.history:
-        role = entry.get("role") if isinstance(entry, dict) else None
-        content = entry.get("content") if isinstance(entry, dict) else None
-        if role == "user" and isinstance(content, list):
-            for block in content:
+
+    # Реплей из events_history - восстанавливаем полную историю session/update уведомлений
+    # согласно спецификации ACP (protocol/03-Session Setup.md, раздел 132)
+    # Агент MUST replay всю историю через session/update уведомления
+    for event in session.events_history:
+        event_type = event.get("type")
+
+        if event_type == "session_update":
+            # Восстанавливаем session/update уведомления из сохранённых событий
+            update_data = event.get("update", {})
+            if update_data:
                 notifications.append(
                     ACPMessage.notification(
-                        "session/update",
-                        {
-                            "sessionId": session_id,
-                            "update": {
-                                "sessionUpdate": "user_message_chunk",
-                                "content": block,
-                            },
-                        },
+                        "session/update", {"sessionId": session_id, "update": update_data}
                     )
                 )
-        if role == "agent" and isinstance(content, list):
-            for block in content:
-                notifications.append(
-                    ACPMessage.notification(
-                        "session/update",
-                        {
-                            "sessionId": session_id,
-                            "update": {
-                                "sessionUpdate": "agent_message_chunk",
-                                "content": block,
-                            },
-                        },
-                    )
-                )
+        # Пропускаем другие типы событий (permission requests и т.д.)
+        # при replay, так как они не требуют восстановления UI
 
     if session.latest_plan:
         notifications.append(
@@ -256,7 +314,7 @@ def session_load(
                 "sessionId": session_id,
                 "update": {
                     "sessionUpdate": "available_commands_update",
-                    "availableCommands": session.available_commands,
+                    "availableCommands": _serialize_available_commands(session.available_commands),
                 },
             },
         )
@@ -470,6 +528,7 @@ def build_default_commands() -> list[dict[str, Any]]:
     """
 
     # Базовый список slash-команд для демонстрации протокольного update.
+    # Возвращаем list[dict[str, Any]] которая совместима с list[AvailableCommand | dict[str, Any]]
     return [
         {
             "name": "status",
@@ -479,4 +538,4 @@ def build_default_commands() -> list[dict[str, Any]]:
             "name": "mode",
             "description": "Показать и изменить режим сессии",
         },
-    ]
+    ]  # type: ignore[return-value]

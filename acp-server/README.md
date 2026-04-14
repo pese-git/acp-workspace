@@ -50,7 +50,7 @@ uv run acp-server --host 127.0.0.1 --port 8080 --storage memory
 
 ```bash
 # Сохранять сессии в ~/.acp/sessions
-uv run acp-server --host 127.0.0.1 --port 8080 --storage json:~/.acp/sessions
+uv run acp-server --host 127.0.0.1 --port 8080 --storage json:~/.acp-server/sessions
 
 # Или с абсолютным путем
 uv run acp-server --host 127.0.0.1 --port 8080 --storage json:/var/lib/acp/sessions
@@ -194,6 +194,142 @@ uv run acp-server --log-level DEBUG --log-json
 - `ping`
 - `echo`
 - `shutdown`
+
+## Архитектура
+
+Сервер построен на модульной архитектуре с четкой разделением ответственности между компонентами.
+
+### Ядро протокола
+
+**Transport Layer** — WebSocket сервер (см. [`http_server.py`](src/acp_server/http_server.py)):
+- Обработка WebSocket соединений на `/acp/ws`
+- Парсинг JSON-RPC сообщений от клиентов
+- Обработка deferred responses для длительных операций
+- Отправка `session/update` событий для real-time обновлений
+
+**Protocol Layer** — логика протокола ACP (см. [`protocol/core.py`](src/acp_server/protocol/core.py)):
+- `ACPProtocol` — главная точка диспетчеризации методов
+- `ProtocolOutcome` — унифицированный результат обработки методов
+- Модульные handlers для разных категорий методов
+
+**Storage Layer** — подключаемые backend для хранения сессий:
+- `SessionStorage(ABC)` — абстрактный интерфейс
+- `InMemoryStorage` — для development и тестирования
+- `JsonFileStorage` — для production с persistence на диск
+
+### Компоненты рефакторинга Фазы 1
+
+Фаза 1 критического рефакторинга завершена (241/241 тестов ✓). Реализованы следующие компоненты:
+
+#### 1. Иерархия исключений ([`exceptions.py`](src/acp_server/exceptions.py))
+
+Специализированные классы исключений для различных типов ошибок:
+
+```python
+ACPError (базовое)
+├── ValidationError — ошибки валидации данных
+├── AuthenticationError — ошибки аутентификации
+├── AuthorizationError — ошибки авторизации
+│   └── PermissionDeniedError — отказ в разрешении
+├── StorageError — ошибки хранилища
+│   ├── SessionNotFoundError — сессия не найдена
+│   └── SessionAlreadyExistsError — дублирование ID
+├── AgentProcessingError — ошибки обработки агентом
+│   └── ToolExecutionError — ошибки выполнения tool
+└── ProtocolError — ошибки протокола
+    └── InvalidStateError — некорректное состояние
+```
+
+Использование специализированных исключений улучшает обработку ошибок и логирование.
+
+#### 2. Pydantic модели ([`models.py`](src/acp_server/models.py))
+
+Строго типизированные модели для замены `dict[str, Any]`:
+
+- **Сообщения:** `MessageContent`, `HistoryMessage`
+- **Команды:** `CommandParameter`, `AvailableCommand`
+- **Планы:** `PlanStep`, `AgentPlan`
+- **Tool calls:** `ToolCallParameter`, `ToolCall`
+- **Разрешения:** `Permission`
+
+Типизация обеспечивает:
+- Валидацию данных при создании
+- IDE автодополнение и type checking
+- Лучшую документацию структур данных
+
+#### 3. SessionFactory ([`protocol/session_factory.py`](src/acp_server/protocol/session_factory.py))
+
+Фабрика для централизованного создания новых сессий:
+
+```python
+class SessionFactory:
+    @staticmethod
+    def create_session(
+        cwd: str,
+        mcp_servers: list[dict[str, Any]] | None = None,
+        config_values: dict[str, str] | None = None,
+        available_commands: list[Any] | None = None,
+        runtime_capabilities: ClientRuntimeCapabilities | None = None,
+        session_id: str | None = None,
+    ) -> SessionState
+```
+
+Преимущества:
+- Устраняет дублирование логики создания сессий
+- Централизованная валидация параметров
+- Автогенерация ID сессии
+- Подготовка значений по умолчанию
+
+#### 4. Разложение session_prompt — Этап 1/7
+
+Начато разложение монолитной функции `session_prompt` (2151 строк) на специализированные обработчики (см. [`protocol/prompt_handlers/`](src/acp_server/protocol/prompt_handlers/)):
+
+**PromptValidator** ([`prompt_handlers/validator.py`](src/acp_server/protocol/prompt_handlers/validator.py)):
+- Валидация входных параметров prompt-turn
+- Проверка состояния сессии (наличие active_turn)
+- Валидация содержимого prompt (text, resource_link)
+- Возврат `SessionState` если валидно, `ProtocolOutcome` с ошибкой если некорректно
+
+**DirectiveResolver** ([`prompt_handlers/directive_resolver.py`](src/acp_server/protocol/prompt_handlers/directive_resolver.py)):
+- Парсинг slash-команд из текста (`/tool`, `/plan`, `/fs-read`, `/term-run`)
+- Разрешение directive overrides из `_meta.promptDirectives`
+- Нормализация tool kinds и stop reasons
+- Извлечение параметров из directives
+
+Эти компоненты обеспечивают:
+- Тестируемость отдельных функций без моков
+- Переиспользование логики валидации и парсинга
+- Четкое разделение ответственности
+- Основу для дальнейших 6 этапов разложения
+
+### Структура модулей
+
+```
+acp-server/src/acp_server/
+├── exceptions.py             # Иерархия исключений (ФАЗ 1 ✓)
+├── models.py                 # Pydantic модели типизации (ФАЗ 1 ✓)
+├── protocol/
+│   ├── core.py               # ACPProtocol класс
+│   ├── state.py              # SessionState dataclasses
+│   ├── session_factory.py    # SessionFactory (ФАЗ 1 ✓)
+│   ├── handlers/
+│   │   ├── auth.py           # authenticate, initialize
+│   │   ├── session.py        # session/new, load, list
+│   │   ├── prompt.py         # session/prompt, cancel (основная логика)
+│   │   ├── permissions.py    # session/request_permission
+│   │   ├── config.py         # session/set_config_option
+│   │   ├── legacy.py         # ping, echo, shutdown
+│   │   └── prompt_handlers/  # Разложение session_prompt (ФАЗ 1 ✓)
+│   │       ├── __init__.py
+│   │       ├── validator.py          # PromptValidator
+│   │       ├── directive_resolver.py # DirectiveResolver
+│   │       └── # 5 ещё компонентов в планах (ФАЗ 2-7)
+│   └── storage/
+│       ├── base.py           # SessionStorage интерфейс
+│       ├── memory.py         # InMemoryStorage
+│       └── json_file.py      # JsonFileStorage
+└── # Остальные модули...
+```
 
 ## Проверки
 

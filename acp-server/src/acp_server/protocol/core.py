@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..messages import ACPMessage, JsonRpcId
 from ..storage import SessionStorage
@@ -18,11 +18,15 @@ from .handlers import (
     prompt,
     session,
 )
+from .session_factory import SessionFactory
 from .state import (
     ClientRuntimeCapabilities,
     ProtocolOutcome,
     SessionState,
 )
+
+if TYPE_CHECKING:
+    from ..agent.orchestrator import AgentOrchestrator
 
 
 class ACPProtocol:
@@ -42,6 +46,7 @@ class ACPProtocol:
         require_auth: bool = False,
         auth_api_key: str | None = None,
         storage: SessionStorage | None = None,
+        agent_orchestrator: AgentOrchestrator | None = None,
     ) -> None:
         """Инициализирует протокол и хранилище сессий.
 
@@ -49,23 +54,30 @@ class ACPProtocol:
             require_auth: Требовать аутентификацию перед session setup.
             auth_api_key: API ключ для аутентификации.
             storage: Хранилище сессий (по умолчанию InMemoryStorage).
+            agent_orchestrator: Оркестратор LLM-агента для обработки prompts (опционально).
 
         Пример использования:
             protocol = ACPProtocol()
-            # или с кастомным хранилищем:
+            # или с кастомным хранилищем и агентом:
             from acp_server.storage import InMemoryStorage
+            from acp_server.agent.orchestrator import AgentOrchestrator
             storage = InMemoryStorage()
-            protocol = ACPProtocol(storage=storage)
+            agent = AgentOrchestrator(...)
+            protocol = ACPProtocol(storage=storage, agent_orchestrator=agent)
         """
 
         # Инициализировать хранилище (по умолчанию InMemoryStorage)
         if storage is None:
             from ..storage import InMemoryStorage
+
             storage = InMemoryStorage()
         self._storage = storage
         # Внутренний кэш сессий для совместимости с handlers
         self._sessions: dict[str, SessionState] = {}
-        
+
+        # Оркестратор LLM-агента для обработки prompt-turns через агента
+        self._agent_orchestrator = agent_orchestrator
+
         # Последние capabilities, согласованные через initialize.
         # Для in-memory demo-сервера это достаточно; по мере роста можно
         # расширить до connection-scoped хранилища.
@@ -190,76 +202,45 @@ class ACPProtocol:
             return ProtocolOutcome(response=response)
 
         if method == "session/new":
-            # Проверяем требования auth
-            if self._require_auth and not self._authenticated:
-                from .handlers.auth import auth_required_error
-                return ProtocolOutcome(
-                    response=auth_required_error(message.id, self._auth_methods)
-                )
-
-            # Валидируем параметры и создаем сессию
-            from pathlib import Path
-            from uuid import uuid4
-
-            cwd = params.get("cwd")
-            if not isinstance(cwd, str) or not Path(cwd).is_absolute():
-                return ProtocolOutcome(
-                    response=ACPMessage.error_response(
-                        message.id,
-                        code=-32602,
-                        message="Invalid params: cwd must be an absolute path",
-                    )
-                )
-
-            mcp_servers = params.get("mcpServers", [])
-            if not isinstance(mcp_servers, list):
-                return ProtocolOutcome(
-                    response=ACPMessage.error_response(
-                        message.id,
-                        code=-32602,
-                        message="Invalid params: mcpServers must be an array",
-                    )
-                )
-
-            # Создаем сессию
-            session_id = f"sess_{uuid4().hex[:12]}"
-            config_values = {
-                config_id: str(spec["default"]) 
-                for config_id, spec in self._config_specs.items()
-            }
-
-            session_state = SessionState(
-                session_id=session_id,
-                cwd=cwd,
-                mcp_servers=[srv for srv in mcp_servers if isinstance(srv, dict)],
-                config_values=config_values,
-                available_commands=session.build_default_commands(),
-                runtime_capabilities=self._runtime_capabilities,
+            # Используем обработчик из handlers для валидации и создания ответа
+            response_msg = session.session_new(
+                message.id,
+                params,
+                self._require_auth,
+                self._authenticated,
+                self._config_specs,
+                self._auth_methods,
+                self._runtime_capabilities,
             )
-            await self._storage.save_session(session_state)
-            # Обновляем внутренний кэш для синхронной работы handlers
-            self._sessions[session_id] = session_state
 
-            return ProtocolOutcome(
-                response=ACPMessage.response(
-                    message.id,
-                    {
-                        "sessionId": session_id,
-                        "configOptions": session.build_config_options(
-                            config_values, self._config_specs
-                        ),
-                        "modes": session.build_modes_state(
-                            config_values, self._config_specs
-                        ),
-                    },
-                )
-            )
+            # Если создание прошло успешно, сохраняем в storage и кэш
+            if response_msg.result is not None:
+                session_id = response_msg.result.get("sessionId")
+                if isinstance(session_id, str):
+                    # Создаем сессию через фабрику для сохранения
+                    config_values = {
+                        config_id: str(spec["default"])
+                        for config_id, spec in self._config_specs.items()
+                    }
+                    session_state = SessionFactory.create_session(
+                        cwd=params.get("cwd", ""),
+                        mcp_servers=params.get("mcpServers", []),
+                        config_values=config_values,
+                        available_commands=session.build_default_commands(),
+                        runtime_capabilities=self._runtime_capabilities,
+                        session_id=session_id,
+                    )
+                    await self._storage.save_session(session_state)
+                    # Обновляем внутренний кэш для синхронной работы handlers
+                    self._sessions[session_id] = session_state
+
+            return ProtocolOutcome(response=response_msg)
 
         if method == "session/load":
             # Обновляем runtime capabilities при загрузке сессии
             session_id = params.get("sessionId")
             if isinstance(session_id, str):
-                session_obj = self._sessions.get(session_id)
+                session_obj = await self._get_session_for_runtime(session_id)
                 if session_obj is not None:
                     session_obj.runtime_capabilities = self._runtime_capabilities
             return session.session_load(
@@ -273,6 +254,9 @@ class ACPProtocol:
             )
 
         if method == "session/list":
+            # Подтягиваем persisted-сессии в кэш, чтобы `session/list` после рестарта
+            # не зависел только от in-memory словаря текущего процесса.
+            await self._hydrate_session_cache_from_storage()
             return ProtocolOutcome(
                 response=session.session_list(
                     message.id,
@@ -283,11 +267,13 @@ class ACPProtocol:
             )
 
         if method == "session/prompt":
-            return prompt.session_prompt(
+            return await prompt.session_prompt(
                 message.id,
                 params,
                 self._sessions,
                 self._config_specs,
+                agent_orchestrator=self._agent_orchestrator,
+                storage=self._storage,
             )
 
         if method == "session/cancel":
@@ -454,3 +440,38 @@ class ACPProtocol:
             result=result,
             sessions=self._sessions,
         )
+
+    async def _get_session_for_runtime(self, session_id: str) -> SessionState | None:
+        """Возвращает сессию из кэша или подгружает её из storage по id.
+
+        Пример использования:
+            session = await protocol._get_session_for_runtime("sess_1")
+        """
+
+        cached_session = self._sessions.get(session_id)
+        if cached_session is not None:
+            return cached_session
+
+        loaded_session = await self._storage.load_session(session_id)
+        if loaded_session is not None:
+            self._sessions[session_id] = loaded_session
+        return loaded_session
+
+    async def _hydrate_session_cache_from_storage(self) -> None:
+        """Подгружает все страницы сессий из storage в in-memory кэш.
+
+        Пример использования:
+            await protocol._hydrate_session_cache_from_storage()
+        """
+
+        cursor: str | None = None
+        while True:
+            page, next_cursor = await self._storage.list_sessions(
+                cursor=cursor,
+                limit=self._session_list_page_size,
+            )
+            for session_state in page:
+                self._sessions[session_state.session_id] = session_state
+            if next_cursor is None:
+                break
+            cursor = next_cursor

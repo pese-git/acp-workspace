@@ -89,27 +89,15 @@ uv run --directory acp-client acp-client-tui --theme dark
 | `Ctrl+C` | Cancel текущей операции |
 | `Ctrl+Q` | Выход |
 
-### CLI клиент
+### CLI обертка
 
-Для простых запросов используйте CLI:
-
-```bash
-# Ping
-uv run --directory acp-client acp-client --host 127.0.0.1 --port 8080 --method ping
-
-# Echo
-uv run --directory acp-client acp-client --host 127.0.0.1 --port 8080 --method echo --params '{"message":"hello"}'
-
-# Создание сессии
-uv run --directory acp-client acp-client --host 127.0.0.1 --port 8080 --method session/new --params '{"cwd":"/tmp"}'
-
-# Загрузка сессии
-uv run --directory acp-client acp-client --host 127.0.0.1 --port 8080 --method session/load --params '{"sessionId":"sess_1","cwd":"/tmp","mcpServers":[]}'
-```
-
-Справка по командам:
+CLI entrypoint запускает TUI-клиент:
 
 ```bash
+# Запуск TUI
+uv run --directory acp-client acp-client --host 127.0.0.1 --port 8080
+
+# Справка по параметрам
 uv run --directory acp-client acp-client --help
 ```
 

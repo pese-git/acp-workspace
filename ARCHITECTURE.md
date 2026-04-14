@@ -18,49 +18,81 @@ ACP (Agent Client Protocol) — протокол взаимодействия м
 
 ```
 acp-server/src/acp_server/
-├── cli.py                   # CLI entry point
-├── http_server.py           # WebSocket транспорт
-├── logging.py               # Структурированное логирование
-├── messages.py              # Pydantic модели сообщений
-├── server.py                # TCP транспорт (legacy)
-├── protocol/                # Ядро протокола
-│   ├── __init__.py          # Экспорт публичных классов
-│   ├── core.py              # ACPProtocol класс
-│   ├── state.py             # Dataclasses состояния
-│   └── handlers/            # Обработчики методов
-│       ├── auth.py          # authenticate, initialize
-│       ├── session.py       # session/new, load, list
-│       ├── prompt.py        # session/prompt, cancel
-│       ├── permissions.py   # session/request_permission
-│       ├── config.py        # session/set_config_option
-│       └── legacy.py        # ping, echo, shutdown
-└── storage/                 # Хранилище сессий
-    ├── base.py              # SessionStorage(ABC)
-    ├── memory.py            # InMemoryStorage
-    └── json_file.py         # JsonFileStorage
+├── exceptions.py             # Иерархия специализированных исключений (ФАЗ 1 ✓)
+├── models.py                 # Pydantic модели типизации (ФАЗ 1 ✓)
+├── cli.py                    # CLI entry point
+├── http_server.py            # WebSocket транспорт
+├── logging.py                # Структурированное логирование
+├── messages.py               # Pydantic модели сообщений
+├── server.py                 # TCP транспорт (legacy)
+├── config.py                 # Конфигурация сервера
+├── protocol/                 # Ядро протокола
+│   ├── __init__.py           # Экспорт публичных классов
+│   ├── core.py               # ACPProtocol класс
+│   ├── state.py              # Dataclasses состояния
+│   ├── session_factory.py    # SessionFactory для создания сессий (ФАЗ 1 ✓)
+│   ├── handlers/             # Обработчики методов
+│   │   ├── auth.py           # authenticate, initialize
+│   │   ├── session.py        # session/new, load, list
+│   │   ├── prompt.py         # session/prompt, cancel (основная логика)
+│   │   ├── permissions.py    # session/request_permission
+│   │   ├── config.py         # session/set_config_option
+│   │   ├── legacy.py         # ping, echo, shutdown
+│   │   └── prompt_handlers/  # Разложение session_prompt (ФАЗ 1 ✓)
+│   │       ├── __init__.py
+│   │       ├── validator.py           # PromptValidator
+│   │       ├── directive_resolver.py  # DirectiveResolver
+│   │       └── # 5 ещё компонентов (ФАЗ 2-7)
+│   └── storage/              # Хранилище сессий
+│       ├── base.py           # SessionStorage(ABC)
+│       ├── memory.py         # InMemoryStorage
+│       └── json_file.py      # JsonFileStorage
+├── tools/                    # Управление инструментами
+│   ├── base.py               # BaseTool интерфейс
+│   └── registry.py           # ToolRegistry
+└── llm/                      # LLM провайдеры
+    ├── base.py               # BaseLLMProvider интерфейс
+    ├── mock_provider.py      # Mock провайдер для тестирования
+    └── openai_provider.py    # OpenAI провайдер
 ```
 
 #### Слои архитектуры
 
-1. **Transport Layer** (`http_server.py`)
+1. **Exception Handling Layer** (Фаза 1 ✓)
+   - **`exceptions.py`** — специализированная иерархия исключений (10 типов)
+   - Явная типизация разных видов ошибок: Validation, Authentication, Authorization, Storage, Protocol
+   - Возможность селективной обработки ошибок в handlers и транспорте
+   - Улучшенное логирование через специализированные исключения
+
+2. **Data Models Layer** (Фаза 1 ✓)
+   - **`models.py`** — Pydantic модели для типизации данных (10+ моделей)
+   - Замена `dict[str, Any]` на строго типизированные BaseModel
+   - Автоматическая валидация при создании объектов
+   - IDE автодополнение и type checking поддержка
+
+3. **Transport Layer** (`http_server.py`)
    - WebSocket endpoint `/acp/ws`
    - Обработка JSON-RPC сообщений
    - Update-поток для `session/update` событий
    - Асинхронная обработка запросов с deferred responses
 
-2. **Protocol Layer** (`protocol/`)
-   - Диспетчеризация методов через `ACPProtocol.handle()`
+4. **Protocol Layer** (`protocol/`)
+   - **`core.py`** — `ACPProtocol.handle()` для диспетчеризации методов
+   - **`session_factory.py`** (Фаза 1 ✓) — централизованная логика создания сессий
    - Валидация запросов согласно ACP спецификации
    - Управление состоянием сессий через SessionState
-   - Модульная архитектура handlers для разных категорий методов
+   - **`handlers/`** — модульная архитектура для разных категорий методов
+   - **`prompt_handlers/`** (Фаза 1 ✓) — разложение монолитной `session_prompt` на компоненты
+     - `PromptValidator` — валидация входных данных
+     - `DirectiveResolver` — парсинг slash-команд и разрешение directives
 
-3. **Storage Layer** (`storage/`)
+5. **Storage Layer** (`storage/`)
    - Абстракция `SessionStorage(ABC)` для plug-and-play архитектуры
    - `InMemoryStorage` — для development и тестирования
    - `JsonFileStorage` — для production с persistence на диск
    - Расширяемая архитектура для добавления новых backends
 
-4. **Logging Layer** (`logging.py`)
+6. **Logging Layer** (`logging.py`)
    - Структурированное логирование с structlog
    - JSON и консольный форматы с уровнями DEBUG, INFO, WARNING, ERROR
    - Интеграция с CLI флагом `--log-level`

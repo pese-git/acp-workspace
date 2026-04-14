@@ -5,6 +5,7 @@ from .file_tree import FileTree
 from .file_viewer import FileViewerModal
 from .footer import FooterBar
 from .header import HeaderBar
+from .help_modal import HelpModal
 from .permission_modal import PermissionModal
 from .plan_panel import PlanPanel
 from .prompt_input import PromptInput
@@ -21,6 +22,7 @@ __all__ = [
     "FileViewerModal",
     "PromptInput",
     "FooterBar",
+    "HelpModal",
     "PlanPanel",
     "TerminalLogModal",
     "TerminalOutputPanel",

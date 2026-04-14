@@ -4,6 +4,7 @@
 """
 
 from .core import ACPProtocol
+from .session_factory import SessionFactory
 from .state import (
     ActiveTurnState,
     ClientRuntimeCapabilities,
@@ -17,6 +18,7 @@ from .state import (
 
 __all__ = [
     "ACPProtocol",
+    "SessionFactory",
     "ProtocolOutcome",
     "SessionState",
     "ToolCallState",

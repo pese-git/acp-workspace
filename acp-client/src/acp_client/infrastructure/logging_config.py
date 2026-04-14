@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import logging.handlers
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 
 import structlog
 
@@ -67,13 +67,13 @@ def setup_logging(
     """
     # Создаем список обработчиков для логирования
     handlers_list: list[logging.Handler] = []
-    
+
     # Добавляем файловый логер если указан путь
     if log_file is not None:
         # Создаем директорию для логов если её нет
         log_path = Path(log_file)
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         # Файловый логер сротацией (максимум 5 файлов по 10MB каждый)
         file_handler = logging.handlers.RotatingFileHandler(
             filename=str(log_path),
@@ -82,7 +82,7 @@ def setup_logging(
         )
         file_handler.setFormatter(logging.Formatter("%(message)s"))
         handlers_list.append(file_handler)
-    
+
     # Стандартное логирование Python как fallback
     # Если нет файлового логера - логи сбрасываются в никуда
     logging.basicConfig(
@@ -190,7 +190,7 @@ class OperationTimer:
             )
 
 
-def get_logger(name: str) -> structlog.PrintLogger:
+def get_logger(name: str) -> Logger:
     """Возвращает настроенный структурированный логгер.
 
     Args:
@@ -203,4 +203,4 @@ def get_logger(name: str) -> structlog.PrintLogger:
         logger = get_logger(__name__)
         logger.info("operation_started")
     """
-    return structlog.get_logger(name)
+    return cast(Logger, structlog.get_logger(name))

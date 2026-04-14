@@ -1,5 +1,20 @@
 # Анализ проблемы с подключением WebSocket при создании новой сессии
 
+---
+**Статус:** ✅ РЕАЛИЗОВАНО (100%)  
+**Дата завершения:** 13 апреля 2026  
+**Связанные компоненты:**
+- [`acp-client/src/acp_client/infrastructure/services/acp_transport_service.py`](../../acp-client/src/acp_client/infrastructure/services/acp_transport_service.py)
+- [`acp-client/src/acp_client/infrastructure/services/background_receive_loop.py`](../../acp-client/src/acp_client/infrastructure/services/background_receive_loop.py)
+- [`acp-client/src/acp_client/application/use_cases.py`](../../acp-client/src/acp_client/application/use_cases.py)
+
+**Связанные тесты:**
+- [`acp-client/tests/test_infrastructure_transport.py`](../../acp-client/tests/test_infrastructure_transport.py)
+- [`acp-client/tests/test_application_state_machine.py`](../../acp-client/tests/test_application_state_machine.py)
+- [`acp-client/tests/test_concurrent_receive_calls.py`](../../acp-client/tests/test_concurrent_receive_calls.py)
+
+---
+
 ## Резюме проблемы
 
 При вызове Ctrl+N в TUI приложении (`action_new_session()`) не происходит корректного подключения к WebSocket серверу. Соединение либо не устанавливается, либо разрывается неожиданно.

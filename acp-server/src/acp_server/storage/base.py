@@ -136,17 +136,3 @@ class SessionStorage(ABC):
             ...     print("Session not found")
         """
         pass
-
-
-class StorageError(Exception):
-    """Базовое исключение для ошибок хранилища.
-
-    Используется для всех ошибок, связанных с операциями над хранилищем сессий.
-
-    Пример:
-        >>> try:
-        ...     await storage.load_session("invalid")
-        ... except StorageError as e:
-        ...     print(f"Storage error: {e}")
-    """
-    pass

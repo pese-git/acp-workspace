@@ -36,7 +36,7 @@ class TestSessionViewModel:
     def test_observable_properties(self, vm: SessionViewModel) -> None:
         """Проверить что свойства это Observable."""
         from acp_client.presentation.observable import Observable
-        
+
         assert isinstance(vm.sessions, Observable)
         assert isinstance(vm.selected_session_id, Observable)
         assert isinstance(vm.is_loading_sessions, Observable)
@@ -49,23 +49,23 @@ class TestSessionViewModel:
             MagicMock(id="session1"),
             MagicMock(id="session2"),
         ]
-        coordinator.load_sessions.return_value = mock_sessions
-        
+        coordinator.list_sessions.return_value = mock_sessions
+
         await vm.load_sessions_cmd.execute()
-        
+
         assert vm.sessions.value == mock_sessions
         assert vm.session_count.value == 2
         assert vm.is_loading_sessions.value is False
-        coordinator.load_sessions.assert_called_once()
+        coordinator.list_sessions.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_load_sessions_error(self, vm: SessionViewModel, coordinator: AsyncMock) -> None:
         """Проверить обработку ошибки при загрузке сессий."""
-        coordinator.load_sessions.side_effect = RuntimeError("Connection failed")
-        
+        coordinator.list_sessions.side_effect = RuntimeError("Connection failed")
+
         # _load_sessions ловит исключение и устанавливает error_message
         await vm.load_sessions_cmd.execute()
-        
+
         assert vm.is_loading_sessions.value is False
         assert vm.error_message.value is not None
         assert "Failed to load sessions" in vm.error_message.value
@@ -79,9 +79,9 @@ class TestSessionViewModel:
             "server_capabilities": {},
             "is_authenticated": False,
         }
-        
+
         await vm.create_session_cmd.execute("localhost", 8080)
-        
+
         assert len(vm.sessions.value) == 1
         assert vm.sessions.value[0].id == "new_session"
         assert vm.selected_session_id.value == "new_session"
@@ -94,15 +94,15 @@ class TestSessionViewModel:
         """Проверить что новая сессия добавляется к существующим."""
         existing = MagicMock(id="existing")
         vm.sessions.value = [existing]
-        
+
         coordinator.create_session.return_value = {
             "session_id": "new",
             "server_capabilities": {},
             "is_authenticated": False,
         }
-        
+
         await vm.create_session_cmd.execute("localhost", 8080)
-        
+
         assert len(vm.sessions.value) == 2
         assert vm.session_count.value == 2
 
@@ -112,9 +112,9 @@ class TestSessionViewModel:
         session1 = MagicMock(id="s1")
         session2 = MagicMock(id="s2")
         vm.sessions.value = [session1, session2]
-        
+
         await vm.switch_session_cmd.execute("s2")
-        
+
         assert vm.selected_session_id.value == "s2"
 
     @pytest.mark.asyncio
@@ -122,9 +122,9 @@ class TestSessionViewModel:
         """Проверить переключение на несуществующую сессию."""
         session1 = MagicMock(id="s1")
         vm.sessions.value = [session1]
-        
+
         await vm.switch_session_cmd.execute("nonexistent")
-        
+
         assert vm.error_message.value is not None
         assert "not found" in vm.error_message.value
 
@@ -135,9 +135,9 @@ class TestSessionViewModel:
         session2 = MagicMock(id="s2")
         vm.sessions.value = [session1, session2]
         vm.selected_session_id.value = "s2"
-        
+
         await vm.delete_session_cmd.execute("s1")
-        
+
         assert len(vm.sessions.value) == 1
         assert vm.sessions.value[0] == session2
         coordinator.delete_session.assert_called_once_with("s1")
@@ -151,23 +151,21 @@ class TestSessionViewModel:
         session2 = MagicMock(id="s2")
         vm.sessions.value = [session1, session2]
         vm.selected_session_id.value = "s1"
-        
+
         await vm.delete_session_cmd.execute("s1")
-        
+
         # Должна быть выбрана первая оставшаяся сессия
         assert vm.selected_session_id.value == "s2"
 
     @pytest.mark.asyncio
-    async def test_delete_last_session(
-        self, vm: SessionViewModel, coordinator: AsyncMock
-    ) -> None:
+    async def test_delete_last_session(self, vm: SessionViewModel, coordinator: AsyncMock) -> None:
         """Проверить удаление последней сессии."""
         session1 = MagicMock(id="s1")
         vm.sessions.value = [session1]
         vm.selected_session_id.value = "s1"
-        
+
         await vm.delete_session_cmd.execute("s1")
-        
+
         assert vm.sessions.value == []
         assert vm.selected_session_id.value is None
 
@@ -176,11 +174,11 @@ class TestSessionViewModel:
         session1 = MagicMock(id="s1")
         session2 = MagicMock(id="s2")
         vm.sessions.value = [session1, session2]
-        
+
         # Имитируем событие
         event = MagicMock(session_id="s1")
         vm._handle_session_closed(event)
-        
+
         # Сессия должна быть удалена из списка
         assert len(vm.sessions.value) == 1
         assert vm.sessions.value[0] == session2
@@ -189,20 +187,20 @@ class TestSessionViewModel:
         """Проверить подписку на флаг загрузки."""
         loading_states = []
         vm.is_loading_sessions.subscribe(lambda x: loading_states.append(x))
-        
+
         vm.is_loading_sessions.value = True
         vm.is_loading_sessions.value = False
-        
+
         assert loading_states == [True, False]
 
     def test_error_message_observable_subscription(self, vm: SessionViewModel) -> None:
         """Проверить подписку на сообщение об ошибке."""
         error_messages = []
         vm.error_message.subscribe(lambda x: error_messages.append(x))
-        
+
         vm.error_message.value = "Error 1"
         vm.error_message.value = "Error 2"
-        
+
         assert error_messages == ["Error 1", "Error 2"]
 
     @pytest.mark.asyncio
@@ -212,9 +210,9 @@ class TestSessionViewModel:
         """Проверить создание сессии с дополнительными параметрами."""
         new_session = MagicMock(id="new")
         coordinator.create_session.return_value = new_session
-        
+
         await vm.create_session_cmd.execute("localhost", 8080, custom="value")
-        
+
         # Проверяем что create_session вызван с нужными параметрами
         # Параметр cwd добавляется автоматически из текущей директории
         call_args = coordinator.create_session.call_args
