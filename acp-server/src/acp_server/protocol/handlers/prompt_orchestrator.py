@@ -451,6 +451,8 @@ class PromptOrchestrator:
 
             # Проверить разрешения если режим ask
             should_request_permission = False
+            permission_request_id: JsonRpcId | None = None
+            
             if mode == "ask":
                 # Определить kind из tool name (например fs/read -> read)
                 tool_kind = "other"
@@ -459,28 +461,81 @@ class PromptOrchestrator:
                 elif tool_name.startswith("terminal/"):
                     tool_kind = "execute"
 
-                # Проверить запомненное разрешение
-                remembered = self.permission_manager.get_remembered_permission(
-                    session,
-                    tool_kind,
-                )
+                # Получить текущий tool call из сессии для request_tool_permission
+                tool_call_state = session.tool_calls.get(tool_call_id)
+                if tool_call_state is None:
+                    logger.warning(
+                        "tool_call_state not found",
+                        session_id=session_id,
+                        tool_call_id=tool_call_id,
+                    )
+                    continue
 
-                if remembered not in ("allow", "reject"):
-                    # Нужно запросить разрешение
+                # Проверить, нужно ли запрашивать разрешение
+                if self.permission_manager.should_request_permission(session, tool_kind):
+                    # Запросить разрешение у пользователя
                     should_request_permission = True
-                    # Отправить notification о необходимости разрешения
+                    permission_request_id = self.permission_manager.request_tool_permission(
+                        session,
+                        tool_call_state,
+                        tool_kind,
+                        session_id,
+                    )
+                    
                     logger.debug(
-                        "permission required for tool",
+                        "permission request created for tool",
                         session_id=session_id,
                         tool_name=tool_name,
+                        permission_request_id=permission_request_id,
                     )
-                elif remembered == "reject":
-                    # Отменить tool call
+                else:
+                    # Есть запомненное разрешение
+                    remembered = self.permission_manager.get_remembered_permission(
+                        session,
+                        tool_kind,
+                    )
+                    
+                    if remembered == "reject":
+                        # Отменить tool call согласно policy
+                        self.tool_call_handler.update_tool_call_status(
+                            session,
+                            tool_call_id,
+                            "cancelled",
+                        )
+                        notifications.append(
+                            ACPMessage.notification(
+                                "session/update",
+                                {
+                                    "sessionId": session_id,
+                                    "update": {
+                                        "sessionUpdate": "tool_call_update",
+                                        "toolCallId": tool_call_id,
+                                        "status": "cancelled",
+                                    },
+                                },
+                            )
+                        )
+                        logger.debug(
+                            "tool cancelled by permission policy",
+                            session_id=session_id,
+                            tool_name=tool_name,
+                            tool_kind=tool_kind,
+                        )
+                        continue
+
+            # Если нужно запросить разрешение - отправить notification и установить статус
+            if should_request_permission and permission_request_id is not None:
+                # Получить tool call для отправки в notification
+                tool_call_state = session.tool_calls.get(tool_call_id)
+                if tool_call_state is not None:
+                    # Обновить статус на pending_permission
                     self.tool_call_handler.update_tool_call_status(
                         session,
                         tool_call_id,
-                        "cancelled",
+                        "pending_permission",
                     )
+                    
+                    # Отправить notification об обновлении статуса
                     notifications.append(
                         ACPMessage.notification(
                             "session/update",
@@ -489,13 +544,32 @@ class PromptOrchestrator:
                                 "update": {
                                     "sessionUpdate": "tool_call_update",
                                     "toolCallId": tool_call_id,
-                                    "status": "cancelled",
+                                    "status": "pending_permission",
                                 },
                             },
                         )
                     )
-                    continue
-
+                    
+                    # Отправить notification о permission request
+                    # (build_permission_request уже создана в request_tool_permission)
+                    # Нужно отправить клиенту session/request_permission
+                    permission_msg = self.permission_manager.build_permission_request(
+                        session,
+                        session_id,
+                        tool_call_id,
+                        tool_call_state.title,
+                        tool_call_state.kind,
+                    )
+                    notifications.append(permission_msg)
+                    
+                    logger.debug(
+                        "permission request sent to client",
+                        session_id=session_id,
+                        tool_call_id=tool_call_id,
+                        permission_request_id=permission_request_id,
+                    )
+                continue
+            
             # Выполнить tool если не нужно запрашивать разрешение
             if not should_request_permission:
                 try:

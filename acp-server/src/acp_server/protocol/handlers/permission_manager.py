@@ -306,3 +306,57 @@ class PermissionManager:
                 return session
 
         return None
+
+    def request_tool_permission(
+        self,
+        session: SessionState,
+        tool_call: Any,
+        tool_kind: str,
+        session_id: str,
+    ) -> JsonRpcId:
+        """Запросить разрешение для выполнения tool call.
+
+        Создает session/request_permission notification с информацией о tool call.
+        Сохраняет pending request в session состояние.
+
+        Логика:
+        1. Генерировать уникальный permission_request_id
+        2. Создать ACPMessage для session/request_permission с:
+           - toolCallId
+           - tool name и arguments
+           - options (allow_once, allow_always, reject_once, reject_always)
+        3. Вернуть permission_request_id для отслеживания
+
+        Args:
+            session: Состояние сессии
+            tool_call: Состояние tool call с информацией
+            tool_kind: Категория tool (execute, read, write и т.д.)
+            session_id: ID сессии для notification
+
+        Returns:
+            permission_request_id для отслеживания
+        """
+        # Генерируем уникальный ID для permission request
+        from uuid import uuid4
+
+        permission_request_id = str(uuid4())
+
+        # Извлекаем информацию из tool_call
+        tool_call_id = tool_call.tool_call_id
+        tool_title = tool_call.title
+
+        # Строим permission request message через build_permission_request
+        # (сохраняет ID в active_turn автоматически)
+        permission_msg = self.build_permission_request(
+            session,
+            session_id,
+            tool_call_id,
+            tool_title,
+            tool_kind,
+        )
+
+        # Используем ID из созданного сообщения (оно уже сгенерировано в build_permission_request)
+        if permission_msg.id is not None:
+            permission_request_id = permission_msg.id
+
+        return permission_request_id
