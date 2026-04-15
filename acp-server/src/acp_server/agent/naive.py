@@ -130,7 +130,14 @@ class NaiveAgent(LLMAgent):
                 )
 
             # Добавить assistant message с tool calls в историю
-            messages.append(LLMMessage(role="assistant", content=response.text))
+            # ВАЖНО: Для OpenAI API assistant message должен содержать tool_calls
+            messages.append(
+                LLMMessage(
+                    role="assistant",
+                    content=response.text,
+                    tool_calls=response.tool_calls,
+                )
+            )
 
             # Выполнить каждый tool
             for tool_call in response.tool_calls:
@@ -142,6 +149,7 @@ class NaiveAgent(LLMAgent):
                 )
 
                 # Добавить результат в историю как tool message
+                # ВАЖНО: Для OpenAI API tool message должен содержать tool_call_id
                 tool_result_text = result.output if result.success else result.error
                 if tool_result_text is None:
                     tool_result_text = "Инструмент выполнен без вывода"
@@ -150,6 +158,8 @@ class NaiveAgent(LLMAgent):
                     LLMMessage(
                         role="tool",
                         content=tool_result_text,
+                        tool_call_id=tool_call.id,
+                        name=tool_call.name,
                     )
                 )
 

@@ -94,7 +94,18 @@ class OpenAIProvider(LLMProvider):
         )
 
         # Преобразовать сообщения в формат OpenAI
-        openai_messages = [{"role": msg.role, "content": msg.content} for msg in messages]
+        openai_messages = self._convert_to_openai_format(messages)
+        
+        # Валидировать историю сообщений
+        try:
+            self._validate_message_history(openai_messages)
+        except ValueError as e:
+            logger.error(
+                "message history validation failed",
+                error=str(e),
+                num_messages=len(openai_messages),
+            )
+            raise
 
         # Подготовить параметры запроса
         request_params = {
@@ -170,7 +181,7 @@ class OpenAIProvider(LLMProvider):
         )
 
         # Преобразовать сообщения
-        openai_messages = [{"role": msg.role, "content": msg.content} for msg in messages]
+        openai_messages = self._convert_to_openai_format(messages)
 
         request_params = {
             "model": self._model,
@@ -274,3 +285,104 @@ class OpenAIProvider(LLMProvider):
             tool_calls=tool_calls,
             stop_reason=stop_reason,
         )
+
+    def _convert_to_openai_format(self, messages: list[LLMMessage]) -> list[dict[str, Any]]:
+        """Преобразовать LLMMessage в формат OpenAI API.
+        
+        Поддерживает:
+        - Обычные сообщения (system, user, assistant)
+        - Assistant messages с tool_calls
+        - Tool messages с tool_call_id
+        
+        Args:
+            messages: Список LLMMessage
+            
+        Returns:
+            Список словарей в формате OpenAI API
+        """
+        openai_messages: list[dict[str, Any]] = []
+        
+        for msg in messages:
+            openai_msg: dict[str, Any] = {"role": msg.role}
+            
+            # Добавить content если есть
+            if msg.content is not None:
+                openai_msg["content"] = msg.content
+            
+            # Для assistant messages с tool_calls
+            if msg.role == "assistant" and msg.tool_calls:
+                # Преобразовать LLMToolCall в формат OpenAI
+                openai_msg["tool_calls"] = [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.name,
+                            "arguments": json.dumps(tc.arguments),
+                        },
+                    }
+                    for tc in msg.tool_calls
+                ]
+            
+            # Для tool messages
+            if msg.role == "tool":
+                if msg.tool_call_id:
+                    openai_msg["tool_call_id"] = msg.tool_call_id
+                if msg.name:
+                    openai_msg["name"] = msg.name
+            
+            openai_messages.append(openai_msg)
+        
+        return openai_messages
+    
+    def _validate_message_history(self, messages: list[dict[str, Any]]) -> None:
+        """Валидация истории сообщений перед отправкой в OpenAI API.
+        
+        Проверяет, что:
+        - Tool messages следуют после assistant messages с tool_calls
+        - Tool messages имеют tool_call_id
+        
+        Args:
+            messages: Список сообщений в формате OpenAI
+            
+        Raises:
+            ValueError: Если история сообщений некорректна
+        """
+        last_assistant_tool_call_ids: set[str] = set()
+        
+        for i, msg in enumerate(messages):
+            role = msg.get("role")
+            
+            # Собрать tool_call_ids из assistant messages
+            if role == "assistant":
+                tool_calls = msg.get("tool_calls", [])
+                if tool_calls:
+                    last_assistant_tool_call_ids = {tc["id"] for tc in tool_calls}
+                else:
+                    # Assistant message без tool_calls - сбросить ожидаемые IDs
+                    last_assistant_tool_call_ids = set()
+            
+            # Проверить tool messages
+            elif role == "tool":
+                tool_call_id = msg.get("tool_call_id")
+                
+                if not tool_call_id:
+                    logger.error(
+                        "tool message without tool_call_id",
+                        message_index=i,
+                        message=msg,
+                    )
+                    raise ValueError(
+                        f"Tool message at index {i} missing tool_call_id"
+                    )
+                
+                if not last_assistant_tool_call_ids:
+                    logger.error(
+                        "tool message without preceding assistant tool_calls",
+                        message_index=i,
+                        tool_call_id=tool_call_id,
+                    )
+                    raise ValueError(
+                        f"Tool message at index {i} (tool_call_id={tool_call_id}) "
+                        "must follow an assistant message with tool_calls"
+                    )
