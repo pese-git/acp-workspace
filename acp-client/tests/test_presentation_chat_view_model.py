@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -11,7 +12,24 @@ from acp_client.presentation.chat_view_model import ChatViewModel
 
 
 @pytest.fixture
-def chat_view_model(tmp_path) -> ChatViewModel:
+def mock_fs_handler():
+    """Создает mock FileSystemHandler для тестов."""
+    handler = AsyncMock()
+    handler.handle_read_text_file = AsyncMock(return_value={"content": "test content"})
+    handler.handle_write_text_file = AsyncMock(return_value={"success": True})
+    return handler
+
+
+@pytest.fixture
+def mock_terminal_handler():
+    """Создает mock TerminalHandler для тестов."""
+    handler = AsyncMock()
+    handler.handle_execute = AsyncMock(return_value={"success": True, "output": "test output"})
+    return handler
+
+
+@pytest.fixture
+def chat_view_model(tmp_path, mock_fs_handler, mock_terminal_handler) -> ChatViewModel:
     """Создает ChatViewModel для тестов."""
 
     return ChatViewModel(
@@ -19,6 +37,8 @@ def chat_view_model(tmp_path) -> ChatViewModel:
         event_bus=EventBus(),
         logger=None,
         history_dir=tmp_path / "history",
+        fs_handler=mock_fs_handler,
+        terminal_handler=mock_terminal_handler,
     )
 
 
@@ -336,3 +356,146 @@ def test_streaming_flag_resets_after_background_session_completion(
     chat_view_model._set_streaming_state("sess_background", is_streaming=False, clear_text=True)
 
     assert chat_view_model.is_streaming.value is False
+
+
+# Тесты для callbacks файловой системы и терминала
+def test_handle_fs_read_success(chat_view_model: ChatViewModel, mock_fs_handler) -> None:
+    """Тест успешного чтения файла через callback."""
+    chat_view_model.set_active_session("test-session")
+
+    content = chat_view_model._handle_fs_read("test.txt")
+
+    assert content == "test content"
+    mock_fs_handler.handle_read_text_file.assert_called_once()
+
+
+
+def test_handle_fs_read_no_active_session(
+    chat_view_model: ChatViewModel, mock_fs_handler
+) -> None:
+    """Тест чтения файла без активной сессии."""
+    chat_view_model.set_active_session(None)
+
+    content = chat_view_model._handle_fs_read("test.txt")
+
+    assert content == ""
+    mock_fs_handler.handle_read_text_file.assert_not_called()
+
+
+
+def test_handle_fs_read_error(
+    chat_view_model: ChatViewModel, mock_fs_handler
+) -> None:
+    """Тест обработки ошибки при чтении файла."""
+    chat_view_model.set_active_session("test-session")
+    mock_fs_handler.handle_read_text_file.side_effect = Exception("Read error")
+
+    content = chat_view_model._handle_fs_read("test.txt")
+
+    assert content == ""
+
+
+
+def test_handle_fs_write_success(
+    chat_view_model: ChatViewModel, mock_fs_handler
+) -> None:
+    """Тест успешной записи файла через callback."""
+    chat_view_model.set_active_session("test-session")
+
+    success = chat_view_model._handle_fs_write("test.txt", "content")
+
+    assert success is True
+    mock_fs_handler.handle_write_text_file.assert_called_once_with({
+        "sessionId": "test-session",
+        "path": "test.txt",
+        "content": "content"
+    })
+
+
+
+def test_handle_fs_write_no_active_session(
+    chat_view_model: ChatViewModel, mock_fs_handler
+) -> None:
+    """Тест записи файла без активной сессии."""
+    chat_view_model.set_active_session(None)
+
+    success = chat_view_model._handle_fs_write("test.txt", "content")
+
+    assert success is False
+    mock_fs_handler.handle_write_text_file.assert_not_called()
+
+
+
+def test_handle_fs_write_error(
+    chat_view_model: ChatViewModel, mock_fs_handler
+) -> None:
+    """Тест обработки ошибки при записи файла."""
+    chat_view_model.set_active_session("test-session")
+    mock_fs_handler.handle_write_text_file.side_effect = Exception("Write error")
+
+    success = chat_view_model._handle_fs_write("test.txt", "content")
+
+    assert success is False
+
+
+
+def test_handle_terminal_execute_success(
+    chat_view_model: ChatViewModel, mock_terminal_handler
+) -> None:
+    """Тест успешного выполнения команды в терминале."""
+    chat_view_model.set_active_session("test-session")
+
+    result = chat_view_model._handle_terminal_execute("ls -la")
+
+    assert result["success"] is True
+    assert result["output"] == "test output"
+    mock_terminal_handler.handle_execute.assert_called_once_with({
+        "sessionId": "test-session",
+        "command": "ls -la",
+        "cwd": None
+    })
+
+
+
+def test_handle_terminal_execute_with_cwd(
+    chat_view_model: ChatViewModel, mock_terminal_handler
+) -> None:
+    """Тест выполнения команды с рабочей директорией."""
+    chat_view_model.set_active_session("test-session")
+
+    result = chat_view_model._handle_terminal_execute("pwd", cwd="/tmp")
+
+    assert result["success"] is True
+    mock_terminal_handler.handle_execute.assert_called_once_with({
+        "sessionId": "test-session",
+        "command": "pwd",
+        "cwd": "/tmp"
+    })
+
+
+
+def test_handle_terminal_execute_no_active_session(
+    chat_view_model: ChatViewModel, mock_terminal_handler
+) -> None:
+    """Тест выполнения команды без активной сессии."""
+    chat_view_model.set_active_session(None)
+
+    result = chat_view_model._handle_terminal_execute("ls -la")
+
+    assert result["success"] is False
+    assert "No active session" in result.get("error", "")
+    mock_terminal_handler.handle_execute.assert_not_called()
+
+
+
+def test_handle_terminal_execute_error(
+    chat_view_model: ChatViewModel, mock_terminal_handler
+) -> None:
+    """Тест обработки ошибки при выполнении команды."""
+    chat_view_model.set_active_session("test-session")
+    mock_terminal_handler.handle_execute.side_effect = Exception("Execution error")
+
+    result = chat_view_model._handle_terminal_execute("ls -la")
+
+    assert result["success"] is False
+    assert "Execution error" in result.get("error", "")

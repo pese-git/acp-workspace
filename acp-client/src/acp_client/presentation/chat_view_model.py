@@ -73,6 +73,8 @@ class ChatViewModel(BaseViewModel):
         event_bus: Any | None = None,
         logger: Any | None = None,
         history_dir: Path | str | None = None,
+        fs_handler: Any | None = None,  # FileSystemHandler
+        terminal_handler: Any | None = None,  # TerminalHandler
     ) -> None:
         """Инициализировать ChatViewModel.
 
@@ -82,9 +84,13 @@ class ChatViewModel(BaseViewModel):
             logger: Logger для логирования
             history_dir: Директория локального persistence истории
                 (по умолчанию ~/.acp-client/history)
+            fs_handler: FileSystemHandler для обработки fs/* callbacks
+            terminal_handler: TerminalHandler для обработки terminal/* callbacks
         """
         super().__init__(event_bus, logger)
         self.coordinator = coordinator
+        self._fs_handler = fs_handler
+        self._terminal_handler = terminal_handler
 
         # Локальный storage истории нужен для восстановления UI без network roundtrip.
         resolved_history_dir = (
@@ -162,7 +168,13 @@ class ChatViewModel(BaseViewModel):
             # Отправить prompt через coordinator с callback для обработки обновлений
             # SessionCoordinator должен обработать updates и опубликовать события
             await self.coordinator.send_prompt(
-                session_id, prompt_text, on_update=self._handle_session_update, **kwargs
+                session_id,
+                prompt_text,
+                on_update=self._handle_session_update,
+                on_fs_read=self._handle_fs_read,
+                on_fs_write=self._handle_fs_write,
+                on_terminal_execute=self._handle_terminal_execute,
+                **kwargs
             )
 
             # Гарантированное добавление streaming текста в историю после завершения
@@ -371,6 +383,144 @@ class ChatViewModel(BaseViewModel):
         self.last_stop_reason.value = None
         self._persist_active_state()
         self.logger.info("Chat cleared")
+
+    def _handle_fs_read(self, path: str) -> str:
+        """Обработать fs/read_text_file от агента.
+
+        Синхронный callback, вызывается когда агент запрашивает чтение файла.
+        Запускает асинхронный handler в event loop.
+
+        Args:
+            path: Путь к файлу для чтения
+
+        Returns:
+            Содержимое файла или пустая строка в случае ошибки
+        """
+        try:
+            import asyncio
+
+            session_id = self._active_session_id
+            if not session_id:
+                self.logger.warning("fs_read_no_active_session", path=path)
+                return ""
+
+            # Проверяем наличие handler'а перед использованием
+            if self._fs_handler is None:
+                self.logger.warning("fs_handler_not_initialized", path=path)
+                return ""
+
+            # Запускаем асинхронный метод в текущем event loop
+            loop = asyncio.get_event_loop()
+            result = loop.run_until_complete(
+                self._fs_handler.handle_read_text_file({
+                    "sessionId": session_id,
+                    "path": path
+                })
+            )
+            content = result.get("content", "")
+            self.logger.debug("fs_read_success", path=path, content_size=len(content))
+            return content
+        except Exception as e:
+            self.logger.error("fs_read_error", path=path, error=str(e))
+            return ""
+
+    def _handle_fs_write(self, path: str, content: str) -> bool:
+        """Обработать fs/write_text_file от агента.
+
+        Синхронный callback, вызывается когда агент запрашивает запись файла.
+        Запускает асинхронный handler в event loop.
+
+        Args:
+            path: Путь к файлу для записи
+            content: Содержимое для записи
+
+        Returns:
+            True если запись успешна, False в случае ошибки
+        """
+        try:
+            import asyncio
+
+            session_id = self._active_session_id
+            if not session_id:
+                self.logger.warning("fs_write_no_active_session", path=path)
+                return False
+
+            # Проверяем наличие handler'а перед использованием
+            if self._fs_handler is None:
+                self.logger.warning("fs_handler_not_initialized", path=path)
+                return False
+
+            # Запускаем асинхронный метод в текущем event loop
+            loop = asyncio.get_event_loop()
+            result = loop.run_until_complete(
+                self._fs_handler.handle_write_text_file({
+                    "sessionId": session_id,
+                    "path": path,
+                    "content": content
+                })
+            )
+            success = result.get("success", False)
+            self.logger.debug("fs_write_result", path=path, success=success)
+            return success
+        except Exception as e:
+            self.logger.error("fs_write_error", path=path, error=str(e))
+            return False
+
+    def _handle_terminal_execute(
+        self, command: str, cwd: str | None = None
+    ) -> dict[str, Any]:
+        """Обработать terminal/execute от агента.
+
+        Синхронный callback, вызывается когда агент запрашивает выполнение команды.
+        Запускает асинхронный handler в event loop.
+
+        Args:
+            command: Команда для выполнения
+            cwd: Рабочая директория (опционально)
+
+        Returns:
+            Словарь с результатом выполнения (success, output, error)
+        """
+        try:
+            import asyncio
+
+            session_id = self._active_session_id
+            if not session_id:
+                self.logger.warning(
+                    "terminal_execute_no_active_session", command=command
+                )
+                return {"success": False, "error": "No active session"}
+
+            # Проверяем наличие handler'а перед использованием
+            if self._terminal_handler is None:
+                self.logger.warning(
+                    "terminal_handler_not_initialized", command=command
+                )
+                return {
+                    "success": False,
+                    "error": "Terminal handler not initialized",
+                }
+
+            # Запускаем асинхронный метод в текущем event loop
+            loop = asyncio.get_event_loop()
+            result = loop.run_until_complete(
+                self._terminal_handler.handle_execute({
+                    "sessionId": session_id,
+                    "command": command,
+                    "cwd": cwd
+                })
+            )
+            self.logger.debug(
+                "terminal_execute_result",
+                command=command,
+                success=result.get("success"),
+            )
+            return result
+        except Exception as e:
+            self.logger.error(
+                "terminal_execute_error", command=command, error=str(e)
+            )
+            return {"success": False, "error": str(e)}
 
     def add_message(self, role: str, content: str, session_id: str | None = None) -> None:
         """Добавить сообщение в чат.
