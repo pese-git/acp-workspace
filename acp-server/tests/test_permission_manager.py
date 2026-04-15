@@ -109,9 +109,10 @@ class TestPermissionManagerRequest:
         assert msg.method == "session/request_permission"
         assert msg.params is not None
         assert msg.params["sessionId"] == "sess_1"
-        assert msg.params["toolCallId"] == "call_001"
-        assert msg.params["toolTitle"] == "Execute Command"
-        assert msg.params["toolKind"] == "execute"
+        assert isinstance(msg.params.get("toolCall"), dict)
+        assert msg.params["toolCall"]["toolCallId"] == "call_001"
+        assert msg.params["toolCall"]["title"] == "Execute Command"
+        assert msg.params["toolCall"]["kind"] == "execute"
         assert "options" in msg.params
 
     def test_permission_options_structure(self, manager: PermissionManager) -> None:

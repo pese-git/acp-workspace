@@ -100,13 +100,29 @@ class TestDIBootstrapper:
         assert transport2.host == "example.com"
         assert transport2.port == 9000
 
+    def test_build_passes_history_dir_to_chat_view_model(self, tmp_path) -> None:
+        """DIBootstrapper передает history_dir в ChatViewModel."""
+        history_dir = tmp_path / "custom-history"
+
+        container = DIBootstrapper.build(
+            host="localhost",
+            port=8000,
+            history_dir=str(history_dir),
+        )
+        chat_vm = container.resolve(ChatViewModel)
+
+        assert chat_vm._history_dir == history_dir
+
     def test_build_handles_errors(self) -> None:
         """DIBootstrapper выбрасывает RuntimeError при ошибке."""
         # Имитируем ошибку при создании сервиса
-        with patch(
-            "acp_client.infrastructure.di_bootstrapper.EventBus",
-            side_effect=Exception("Test error"),
-        ), pytest.raises(RuntimeError, match="Failed to build DI container"):
+        with (
+            patch(
+                "acp_client.infrastructure.di_bootstrapper.EventBus",
+                side_effect=Exception("Test error"),
+            ),
+            pytest.raises(RuntimeError, match="Failed to build DI container"),
+        ):
             DIBootstrapper.build(host="localhost", port=8000)
 
 

@@ -411,7 +411,6 @@ class PromptOrchestrator:
             # Получить информацию о tool call
             tool_name = getattr(tool_call, "name", None)
             tool_arguments = getattr(tool_call, "arguments", {})
-            tool_id = getattr(tool_call, "id", None)
 
             if not tool_name:
                 logger.warning(
@@ -422,27 +421,18 @@ class PromptOrchestrator:
 
             # Создать tool call в сессии
             tool_call_id = self.tool_call_handler.create_tool_call(
-                session,
-                tool_id,
-                tool_name,
-                tool_name,
-                "auto",
+                session=session,
+                title=tool_name,
+                kind="other",
             )
 
             # Отправить notification о создании tool_call
             notifications.append(
-                ACPMessage.notification(
-                    "session/update",
-                    {
-                        "sessionId": session_id,
-                        "update": {
-                            "sessionUpdate": "tool_call",
-                            "toolCallId": tool_call_id,
-                            "title": tool_name,
-                            "kind": "other",
-                            "status": "pending",
-                        },
-                    },
+                self.tool_call_handler.build_tool_call_notification(
+                    session_id=session_id,
+                    tool_call_id=tool_call_id,
+                    title=tool_name,
+                    kind="other",
                 )
             )
 
@@ -452,7 +442,8 @@ class PromptOrchestrator:
             # Проверить разрешения если режим ask
             should_request_permission = False
             permission_request_id: JsonRpcId | None = None
-            
+            permission_msg: ACPMessage | None = None
+
             if mode == "ask":
                 # Определить kind из tool name (например fs/read -> read)
                 tool_kind = "other"
@@ -473,15 +464,17 @@ class PromptOrchestrator:
 
                 # Проверить, нужно ли запрашивать разрешение
                 if self.permission_manager.should_request_permission(session, tool_kind):
-                    # Запросить разрешение у пользователя
-                    should_request_permission = True
-                    permission_request_id = self.permission_manager.request_tool_permission(
+                    # Запросить разрешение у пользователя одним RPC-запросом.
+                    permission_msg = self.permission_manager.build_permission_request(
                         session,
-                        tool_call_state,
-                        tool_kind,
                         session_id,
+                        tool_call_state.tool_call_id,
+                        tool_call_state.title,
+                        tool_kind,
                     )
-                    
+                    should_request_permission = True
+                    permission_request_id = permission_msg.id
+
                     logger.debug(
                         "permission request created for tool",
                         session_id=session_id,
@@ -494,13 +487,13 @@ class PromptOrchestrator:
                         session,
                         tool_kind,
                     )
-                    
+
                     if remembered == "reject":
-                        # Отменить tool call согласно policy
+                        # Отклонение по policy маппим в `failed` для ACP-совместимого статуса.
                         self.tool_call_handler.update_tool_call_status(
                             session,
                             tool_call_id,
-                            "cancelled",
+                            "failed",
                         )
                         notifications.append(
                             ACPMessage.notification(
@@ -510,7 +503,7 @@ class PromptOrchestrator:
                                     "update": {
                                         "sessionUpdate": "tool_call_update",
                                         "toolCallId": tool_call_id,
-                                        "status": "cancelled",
+                                        "status": "failed",
                                     },
                                 },
                             )
@@ -524,52 +517,22 @@ class PromptOrchestrator:
                         continue
 
             # Если нужно запросить разрешение - отправить notification и установить статус
-            if should_request_permission and permission_request_id is not None:
-                # Получить tool call для отправки в notification
-                tool_call_state = session.tool_calls.get(tool_call_id)
-                if tool_call_state is not None:
-                    # Обновить статус на pending_permission
-                    self.tool_call_handler.update_tool_call_status(
-                        session,
-                        tool_call_id,
-                        "pending_permission",
-                    )
-                    
-                    # Отправить notification об обновлении статуса
-                    notifications.append(
-                        ACPMessage.notification(
-                            "session/update",
-                            {
-                                "sessionId": session_id,
-                                "update": {
-                                    "sessionUpdate": "tool_call_update",
-                                    "toolCallId": tool_call_id,
-                                    "status": "pending_permission",
-                                },
-                            },
-                        )
-                    )
-                    
-                    # Отправить notification о permission request
-                    # (build_permission_request уже создана в request_tool_permission)
-                    # Нужно отправить клиенту session/request_permission
-                    permission_msg = self.permission_manager.build_permission_request(
-                        session,
-                        session_id,
-                        tool_call_id,
-                        tool_call_state.title,
-                        tool_call_state.kind,
-                    )
-                    notifications.append(permission_msg)
-                    
-                    logger.debug(
-                        "permission request sent to client",
-                        session_id=session_id,
-                        tool_call_id=tool_call_id,
-                        permission_request_id=permission_request_id,
-                    )
+            if (
+                should_request_permission
+                and permission_request_id is not None
+                and permission_msg is not None
+            ):
+                # При ожидании user approval сохраняем исходный `pending`.
+                notifications.append(permission_msg)
+
+                logger.debug(
+                    "permission request sent to client",
+                    session_id=session_id,
+                    tool_call_id=tool_call_id,
+                    permission_request_id=permission_request_id,
+                )
                 continue
-            
+
             # Выполнить tool если не нужно запрашивать разрешение
             if not should_request_permission:
                 try:
@@ -580,16 +543,10 @@ class PromptOrchestrator:
                         "in_progress",
                     )
                     notifications.append(
-                        ACPMessage.notification(
-                            "session/update",
-                            {
-                                "sessionId": session_id,
-                                "update": {
-                                    "sessionUpdate": "tool_call_update",
-                                    "toolCallId": tool_call_id,
-                                    "status": "in_progress",
-                                },
-                            },
+                        self.tool_call_handler.build_tool_update_notification(
+                            session_id=session_id,
+                            tool_call_id=tool_call_id,
+                            status="in_progress",
                         )
                     )
 
@@ -627,17 +584,9 @@ class PromptOrchestrator:
                         status = "failed"
 
                     # Отправить notification об окончании выполнения
-                    update_params: dict[str, Any] = {
-                        "sessionId": session_id,
-                        "update": {
-                            "sessionUpdate": "tool_call_update",
-                            "toolCallId": tool_call_id,
-                            "status": status,
-                        },
-                    }
-
+                    notification_content: list[dict[str, Any]] | None = None
                     if result.success and result.output:
-                        update_params["update"]["content"] = [
+                        notification_content = [
                             {
                                 "type": "content",
                                 "content": {
@@ -648,9 +597,11 @@ class PromptOrchestrator:
                         ]
 
                     notifications.append(
-                        ACPMessage.notification(
-                            "session/update",
-                            update_params,
+                        self.tool_call_handler.build_tool_update_notification(
+                            session_id=session_id,
+                            tool_call_id=tool_call_id,
+                            status=status,
+                            content=notification_content,
                         )
                     )
 
@@ -676,16 +627,10 @@ class PromptOrchestrator:
                         "failed",
                     )
                     notifications.append(
-                        ACPMessage.notification(
-                            "session/update",
-                            {
-                                "sessionId": session_id,
-                                "update": {
-                                    "sessionUpdate": "tool_call_update",
-                                    "toolCallId": tool_call_id,
-                                    "status": "failed",
-                                },
-                            },
+                        self.tool_call_handler.build_tool_update_notification(
+                            session_id=session_id,
+                            tool_call_id=tool_call_id,
+                            status="failed",
                         )
                     )
 

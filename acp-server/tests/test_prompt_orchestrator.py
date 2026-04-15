@@ -4,10 +4,12 @@
 при обработке prompt-turn.
 """
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
+from acp_server.llm.base import LLMToolCall
 from acp_server.protocol.handlers.client_rpc_handler import ClientRPCHandler
 from acp_server.protocol.handlers.permission_manager import PermissionManager
 from acp_server.protocol.handlers.plan_builder import PlanBuilder
@@ -570,3 +572,214 @@ class TestPromptOrchestratorComponentIntegration:
 
         # Проверяем что TurnLifecycleManager очистил turn
         assert session.active_turn is None
+
+
+class TestPromptOrchestratorToolCallFlow:
+    """Тесты tool-call flow в PromptOrchestrator."""
+
+    @pytest.mark.asyncio
+    async def test_handle_prompt_processes_tool_calls_with_valid_signature(
+        self,
+        orchestrator: PromptOrchestrator,
+        session: SessionState,
+        sessions: dict[str, SessionState],
+        agent_orchestrator: AsyncMock,
+        tool_registry: SimpleToolRegistry,
+    ) -> None:
+        """Проверяет, что tool call обрабатывается без TypeError по сигнатуре."""
+        session.config_values["mode"] = "auto"
+
+        tool_registry.register_tool(
+            name="demo/tool",
+            description="Demo tool",
+            parameters={"type": "object", "properties": {}},
+            kind="other",
+            executor=lambda: "ok",
+            requires_permission=False,
+        )
+
+        agent_orchestrator.process_prompt.return_value = SimpleNamespace(
+            text="Tool executed",
+            tool_calls=[
+                LLMToolCall(
+                    id="tc_1",
+                    name="demo/tool",
+                    arguments={},
+                )
+            ],
+        )
+
+        outcome = await orchestrator.handle_prompt(
+            "req_1",
+            {"prompt": [{"type": "text", "text": "run tool"}]},
+            session,
+            sessions,
+            agent_orchestrator,
+        )
+
+        tool_call_notifications = [
+            n
+            for n in outcome.notifications
+            if n.method == "session/update"
+            and isinstance(n.params, dict)
+            and isinstance(n.params.get("update"), dict)
+            and n.params["update"].get("sessionUpdate") == "tool_call"
+        ]
+        assert len(tool_call_notifications) == 1
+
+        tool_updates = [
+            n
+            for n in outcome.notifications
+            if n.method == "session/update"
+            and isinstance(n.params, dict)
+            and isinstance(n.params.get("update"), dict)
+            and n.params["update"].get("sessionUpdate") == "tool_call_update"
+        ]
+        statuses: list[str | None] = []
+        for notification in tool_updates:
+            params = notification.params
+            if not isinstance(params, dict):
+                continue
+            update = params.get("update")
+            if not isinstance(update, dict):
+                continue
+            statuses.append(update.get("status"))
+        assert "in_progress" in statuses
+        assert "completed" in statuses
+
+    @pytest.mark.asyncio
+    async def test_handle_prompt_ask_mode_keeps_pending_status_while_waiting_permission(
+        self,
+        orchestrator: PromptOrchestrator,
+        session: SessionState,
+        sessions: dict[str, SessionState],
+        agent_orchestrator: AsyncMock,
+    ) -> None:
+        """Проверяет, что ask-режим не публикует не-ACP статус pending_permission."""
+        session.config_values["mode"] = "ask"
+
+        agent_orchestrator.process_prompt.return_value = SimpleNamespace(
+            text="Need permission",
+            tool_calls=[
+                LLMToolCall(
+                    id="tc_2",
+                    name="fs/read_text_file",
+                    arguments={"path": "README.md"},
+                )
+            ],
+        )
+
+        outcome = await orchestrator.handle_prompt(
+            "req_2",
+            {"prompt": [{"type": "text", "text": "read file"}]},
+            session,
+            sessions,
+            agent_orchestrator,
+        )
+
+        permission_requests = [
+            n for n in outcome.notifications if n.method == "session/request_permission"
+        ]
+        assert len(permission_requests) == 1
+        assert permission_requests[0].id is not None
+        assert session.active_turn is None
+
+        statuses: list[str | None] = []
+        for notification in outcome.notifications:
+            if notification.method != "session/update":
+                continue
+            params = notification.params
+            if not isinstance(params, dict):
+                continue
+            update = params.get("update")
+            if not isinstance(update, dict):
+                continue
+            if update.get("sessionUpdate") != "tool_call_update":
+                continue
+            statuses.append(update.get("status"))
+        assert "pending_permission" not in statuses
+
+    @pytest.mark.asyncio
+    async def test_handle_prompt_emits_single_permission_request_message(
+        self,
+        orchestrator: PromptOrchestrator,
+        session: SessionState,
+        sessions: dict[str, SessionState],
+        agent_orchestrator: AsyncMock,
+    ) -> None:
+        """Проверяет, что в ask-flow отправляется ровно один RPC permission request."""
+        session.config_values["mode"] = "ask"
+
+        agent_orchestrator.process_prompt.return_value = SimpleNamespace(
+            text="Need permission",
+            tool_calls=[
+                LLMToolCall(
+                    id="tc_4",
+                    name="fs/read_text_file",
+                    arguments={"path": "README.md"},
+                )
+            ],
+        )
+
+        outcome = await orchestrator.handle_prompt(
+            "req_4",
+            {"prompt": [{"type": "text", "text": "read file"}]},
+            session,
+            sessions,
+            agent_orchestrator,
+        )
+
+        permission_requests = [
+            n for n in outcome.notifications if n.method == "session/request_permission"
+        ]
+        assert len(permission_requests) == 1
+        request_params = permission_requests[0].params
+        assert isinstance(request_params, dict)
+        assert isinstance(request_params.get("toolCall"), dict)
+
+    @pytest.mark.asyncio
+    async def test_handle_prompt_reject_policy_maps_to_failed_status(
+        self,
+        orchestrator: PromptOrchestrator,
+        session: SessionState,
+        sessions: dict[str, SessionState],
+        agent_orchestrator: AsyncMock,
+    ) -> None:
+        """Проверяет, что reject policy публикуется как failed, а не cancelled."""
+        session.config_values["mode"] = "ask"
+        session.permission_policy["read"] = "reject_always"
+
+        agent_orchestrator.process_prompt.return_value = SimpleNamespace(
+            text="Permission denied by policy",
+            tool_calls=[
+                LLMToolCall(
+                    id="tc_3",
+                    name="fs/read_text_file",
+                    arguments={"path": "README.md"},
+                )
+            ],
+        )
+
+        outcome = await orchestrator.handle_prompt(
+            "req_3",
+            {"prompt": [{"type": "text", "text": "read file"}]},
+            session,
+            sessions,
+            agent_orchestrator,
+        )
+
+        statuses: list[str | None] = []
+        for notification in outcome.notifications:
+            if notification.method != "session/update":
+                continue
+            params = notification.params
+            if not isinstance(params, dict):
+                continue
+            update = params.get("update")
+            if not isinstance(update, dict):
+                continue
+            if update.get("sessionUpdate") != "tool_call_update":
+                continue
+            statuses.append(update.get("status"))
+        assert "failed" in statuses
+        assert "cancelled" not in statuses

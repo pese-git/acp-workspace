@@ -70,7 +70,14 @@ class ACPClientApp(App[None]):
 
     CSS_PATH = str(Path(__file__).with_name("styles") / "app.tcss")
 
-    def __init__(self, *, host: str, port: int, cwd: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        host: str,
+        port: int,
+        cwd: str | None = None,
+        history_dir: str | None = None,
+    ) -> None:
         """Инициализирует приложение с Clean Architecture.
 
         Все компоненты инициализируются через DI контейнер.
@@ -79,6 +86,7 @@ class ACPClientApp(App[None]):
             host: Адрес сервера ACP
             port: Порт сервера ACP
             cwd: Путь к проекту (если None, используется текущая рабочая директория)
+            history_dir: Путь к директории локальной истории чата (опционально)
         """
         super().__init__()
         self._host = host
@@ -108,6 +116,7 @@ class ACPClientApp(App[None]):
                 host=host,
                 port=port,
                 cwd=cwd,
+                history_dir=history_dir,
                 logger=self._app_logger,
             )
             self._app_logger.info("di_container_built_successfully", cwd=cwd)
@@ -442,6 +451,7 @@ def run_tui_app(
     host: str | None = None,
     port: int | None = None,
     cwd: str | None = None,
+    history_dir: str | None = None,
 ) -> None:
     """Запускает TUI приложение с параметрами подключения и рабочей директории.
 
@@ -449,7 +459,8 @@ def run_tui_app(
         host: Адрес сервера ACP (если None, используется значение по умолчанию)
         port: Порт сервера ACP (если None, используется значение по умолчанию)
         cwd: Путь к проекту (если None, используется текущая рабочая директория)
+        history_dir: Путь к директории локальной истории чата (опционально)
     """
     resolved_host, resolved_port = resolve_tui_connection(host=host, port=port)
-    app = ACPClientApp(host=resolved_host, port=resolved_port, cwd=cwd)
+    app = ACPClientApp(host=resolved_host, port=resolved_port, cwd=cwd, history_dir=history_dir)
     app.run()

@@ -4,6 +4,7 @@
 и их регистрации в Dependency Injection контейнере.
 """
 
+from pathlib import Path
 from typing import Any
 
 import structlog
@@ -24,42 +25,44 @@ from acp_client.presentation.ui_view_model import UIViewModel
 
 class ViewModelFactory:
     """Factory для регистрации всех ViewModels в DIContainer.
-    
+
     Обеспечивает:
     - Централизованную регистрацию всех ViewModels
     - Конфигурацию с опциональным EventBus
     - Singleton scope для ViewModels (один экземпляр на приложение)
-    
+
     Пример использования:
         >>> container = DIContainer()
         >>> ViewModelFactory.register_view_models(container, event_bus=event_bus)
-        >>> 
+        >>>
         >>> # Получить ViewModel из контейнера
         >>> ui_vm = container.resolve(UIViewModel)
         >>> session_vm = container.resolve(SessionViewModel)
         >>> chat_vm = container.resolve(ChatViewModel)
     """
-    
+
     @staticmethod
     def register_view_models(
         container: DIContainer,
         session_coordinator: Any,  # Обязательный параметр
         event_bus: Any | None = None,
         logger: Any | None = None,
+        history_dir: Path | str | None = None,
     ) -> None:
         """Регистрирует все ViewModels как singletons в контейнере.
-        
+
         Создает и регистрирует три основных ViewModels:
         - UIViewModel: управление глобальным UI состоянием (соединение, ошибки, модалы)
         - SessionViewModel: управление сессиями (список, выбор, операции)
         - ChatViewModel: управление чатом (сообщения, streaming, tool calls)
-        
+
         Args:
             container: DIContainer для регистрации ViewModels
             session_coordinator: SessionCoordinator для ViewModels (ТРЕБУЕТСЯ)
             event_bus: EventBus для публикации/подписки на события (опционально)
             logger: Logger для структурированного логирования (опционально)
-        
+            history_dir: Директория локального persistence истории чата (опционально)
+
         Raises:
             TypeError: Если session_coordinator не передан или None
         """
@@ -68,20 +71,20 @@ class ViewModelFactory:
                 "session_coordinator is required for ViewModelFactory.register_view_models(). "
                 "Cannot create SessionViewModel and ChatViewModel without coordinator."
             )
-        
+
         if logger is None:
             logger = structlog.get_logger("view_model_factory")
-        
+
         logger.info(
             "registering_view_models",
             event_bus_present=event_bus is not None,
         )
-        
+
         # Регистрируем UIViewModel - синглтон для глобального UI состояния
         ui_vm = UIViewModel(event_bus=event_bus, logger=logger)
         container.register(UIViewModel, ui_vm, Scope.SINGLETON)
         logger.debug("registered_view_model", vm_class="UIViewModel", scope="SINGLETON")
-        
+
         # Регистрируем SessionViewModel - синглтон для управления сессиями
         session_vm = SessionViewModel(
             coordinator=session_coordinator,
@@ -94,7 +97,7 @@ class ViewModelFactory:
             vm_class="SessionViewModel",
             scope="SINGLETON",
         )
-        
+
         # Регистрируем ChatViewModel - синглтон для управления чатом
         fs_executor = container.resolve(FileSystemExecutor)
         terminal_executor = container.resolve(TerminalExecutor)
@@ -102,6 +105,7 @@ class ViewModelFactory:
             coordinator=session_coordinator,
             event_bus=event_bus,
             logger=logger,
+            history_dir=history_dir,
             fs_executor=fs_executor,
             terminal_executor=terminal_executor,
         )
@@ -111,7 +115,7 @@ class ViewModelFactory:
             vm_class="ChatViewModel",
             scope="SINGLETON",
         )
-        
+
         # Регистрируем PlanViewModel - синглтон для управления планом
         plan_vm = PlanViewModel(event_bus=event_bus, logger=logger)
         container.register(PlanViewModel, plan_vm, Scope.SINGLETON)
@@ -120,7 +124,7 @@ class ViewModelFactory:
             vm_class="PlanViewModel",
             scope="SINGLETON",
         )
-        
+
         # Регистрируем TerminalViewModel - синглтон для управления терминалом
         terminal_vm = TerminalViewModel(event_bus=event_bus, logger=logger)
         container.register(TerminalViewModel, terminal_vm, Scope.SINGLETON)
@@ -129,7 +133,7 @@ class ViewModelFactory:
             vm_class="TerminalViewModel",
             scope="SINGLETON",
         )
-        
+
         # Регистрируем FileSystemViewModel - синглтон для управления файловой системой
         filesystem_vm = FileSystemViewModel(event_bus=event_bus, logger=logger)
         container.register(FileSystemViewModel, filesystem_vm, Scope.SINGLETON)
@@ -138,7 +142,7 @@ class ViewModelFactory:
             vm_class="FileSystemViewModel",
             scope="SINGLETON",
         )
-        
+
         # Регистрируем FileViewerViewModel - синглтон для просмотра файлов
         file_viewer_vm = FileViewerViewModel(event_bus=event_bus, logger=logger)
         container.register(FileViewerViewModel, file_viewer_vm, Scope.SINGLETON)
@@ -147,7 +151,7 @@ class ViewModelFactory:
             vm_class="FileViewerViewModel",
             scope="SINGLETON",
         )
-        
+
         # Регистрируем PermissionViewModel - синглтон для управления разрешениями
         permission_vm = PermissionViewModel(event_bus=event_bus, logger=logger)
         container.register(PermissionViewModel, permission_vm, Scope.SINGLETON)
@@ -156,7 +160,7 @@ class ViewModelFactory:
             vm_class="PermissionViewModel",
             scope="SINGLETON",
         )
-        
+
         # Регистрируем TerminalLogViewModel - синглтон для просмотра логов терминала
         terminal_log_vm = TerminalLogViewModel(event_bus=event_bus, logger=logger)
         container.register(TerminalLogViewModel, terminal_log_vm, Scope.SINGLETON)
@@ -165,5 +169,5 @@ class ViewModelFactory:
             vm_class="TerminalLogViewModel",
             scope="SINGLETON",
         )
-        
+
         logger.info("view_models_registered", count=9)

@@ -8,6 +8,7 @@
 """
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -83,7 +84,7 @@ class ChatViewModel(BaseViewModel):
             event_bus: EventBus для публикации/подписки на события
             logger: Logger для логирования
             history_dir: Директория локального persistence истории
-                (по умолчанию ~/.acp-client/history)
+                (приоритет: аргумент history_dir -> ACP_CLIENT_HISTORY_DIR -> ~/.acp-client/history)
             fs_executor: FileSystemExecutor для обработки fs/* callbacks (синхронно)
             terminal_executor: TerminalExecutor для обработки terminal/* callbacks (синхронно)
         """
@@ -93,9 +94,14 @@ class ChatViewModel(BaseViewModel):
         self._terminal_executor = terminal_executor
 
         # Локальный storage истории нужен для восстановления UI без network roundtrip.
-        resolved_history_dir = (
-            Path.home() / ".acp-client" / "history" if history_dir is None else Path(history_dir)
-        )
+        # Порядок приоритета: явный аргумент -> переменная окружения -> путь по умолчанию.
+        env_history_dir = os.getenv("ACP_CLIENT_HISTORY_DIR")
+        if history_dir is not None:
+            resolved_history_dir = Path(history_dir)
+        elif env_history_dir:
+            resolved_history_dir = Path(env_history_dir)
+        else:
+            resolved_history_dir = Path.home() / ".acp-client" / "history"
         self._history_dir = resolved_history_dir
         try:
             self._history_dir.mkdir(parents=True, exist_ok=True)
@@ -174,7 +180,7 @@ class ChatViewModel(BaseViewModel):
                 on_fs_read=self._handle_fs_read,
                 on_fs_write=self._handle_fs_write,
                 on_terminal_execute=self._handle_terminal_execute,
-                **kwargs
+                **kwargs,
             )
 
             # Гарантированное добавление streaming текста в историю после завершения
@@ -445,9 +451,7 @@ class ChatViewModel(BaseViewModel):
             self.logger.error("fs_write_error", path=path, error=str(e))
             return False
 
-    def _handle_terminal_execute(
-        self, command: str, cwd: str | None = None
-    ) -> dict[str, Any]:
+    def _handle_terminal_execute(self, command: str, cwd: str | None = None) -> dict[str, Any]:
         """Обработать terminal/execute от агента (синхронный).
 
         Используется синхронный метод TerminalExecutor напрямую.
@@ -462,16 +466,12 @@ class ChatViewModel(BaseViewModel):
         try:
             session_id = self._active_session_id
             if not session_id:
-                self.logger.warning(
-                    "terminal_execute_no_active_session", command=command
-                )
+                self.logger.warning("terminal_execute_no_active_session", command=command)
                 return {"success": False, "error": "No active session"}
 
             # Проверяем наличие executor'а перед использованием
             if self._terminal_executor is None:
-                self.logger.warning(
-                    "terminal_executor_not_initialized", command=command
-                )
+                self.logger.warning("terminal_executor_not_initialized", command=command)
                 return {
                     "success": False,
                     "error": "Terminal executor not initialized",
@@ -487,9 +487,7 @@ class ChatViewModel(BaseViewModel):
             )
             return result
         except Exception as e:
-            self.logger.error(
-                "terminal_execute_error", command=command, error=str(e)
-            )
+            self.logger.error("terminal_execute_error", command=command, error=str(e))
             return {"success": False, "error": str(e)}
 
     def add_message(self, role: str, content: str, session_id: str | None = None) -> None:

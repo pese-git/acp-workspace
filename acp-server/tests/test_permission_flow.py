@@ -136,9 +136,10 @@ class TestPermissionFlowBasics:
         assert msg.method == "session/request_permission"
         assert msg.params is not None
         assert msg.params.get("sessionId") == "test_session"
-        assert msg.params.get("toolCallId") == "call_001"
-        assert msg.params.get("toolTitle") == "Read File"
-        assert msg.params.get("toolKind") == "read"
+        assert isinstance(msg.params.get("toolCall"), dict)
+        assert msg.params["toolCall"].get("toolCallId") == "call_001"
+        assert msg.params["toolCall"].get("title") == "Read File"
+        assert msg.params["toolCall"].get("kind") == "read"
 
         # Проверяем наличие опций
         options = msg.params.get("options", [])
@@ -240,9 +241,7 @@ class TestPermissionFlowIntegration:
         session.permission_policy["read"] = "allow_always"
 
         # Проверяем, что разрешение применяется
-        remembered = orchestrator.permission_manager.get_remembered_permission(
-            session, "read"
-        )
+        remembered = orchestrator.permission_manager.get_remembered_permission(session, "read")
         assert remembered == "allow"
 
     def test_permission_remembered_reject_always(
@@ -255,9 +254,7 @@ class TestPermissionFlowIntegration:
         session.permission_policy["execute"] = "reject_always"
 
         # Проверяем, что отклонение применяется
-        remembered = orchestrator.permission_manager.get_remembered_permission(
-            session, "execute"
-        )
+        remembered = orchestrator.permission_manager.get_remembered_permission(session, "execute")
         assert remembered == "reject"
 
     def test_build_permission_acceptance_updates(
@@ -271,7 +268,7 @@ class TestPermissionFlowIntegration:
             tool_call_id="call_001",
             title="Execute",
             kind="execute",
-            status="pending_permission",
+            status="pending",
         )
         session.tool_calls["call_001"] = tool_call
 

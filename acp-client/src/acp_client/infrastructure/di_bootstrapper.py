@@ -41,6 +41,7 @@ class DIBootstrapper:
         host: str,
         port: int,
         cwd: str | None = None,
+        history_dir: str | None = None,
         logger: Any | None = None,
     ) -> Any:
         """Собирает и конфигурирует DIContainer.
@@ -51,6 +52,7 @@ class DIBootstrapper:
             host: Адрес сервера ACP
             port: Порт сервера ACP
             cwd: Абсолютный путь к рабочей директории проекта (если None, используется текущая)
+            history_dir: Путь к директории локальной истории чата (опционально)
             logger: Logger для структурированного логирования (опционально)
 
         Returns:
@@ -118,6 +120,7 @@ class DIBootstrapper:
                 session_coordinator=coordinator,
                 event_bus=event_bus,
                 logger=logger,
+                history_dir=history_dir,
             )
 
             logger.info("di_container_built_successfully")
@@ -129,6 +132,5 @@ class DIBootstrapper:
                 error=str(e),
             )
             raise RuntimeError(
-                f"Failed to build DI container: {e}. "
-                "Check logs for detailed error information."
+                f"Failed to build DI container: {e}. Check logs for detailed error information."
             ) from e

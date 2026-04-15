@@ -124,13 +124,17 @@ class PermissionManager:
         """
         options = self.build_permission_options()
 
+        # Формируем `toolCall` как ToolCallUpdate-объект по спецификации ACP.
+        # Для совместимости UI передаем также title/kind, хотя обязателен только ID.
         msg = ACPMessage.request(
             "session/request_permission",
             {
                 "sessionId": session_id,
-                "toolCallId": tool_call_id,
-                "toolTitle": tool_title,
-                "toolKind": tool_kind,
+                "toolCall": {
+                    "toolCallId": tool_call_id,
+                    "title": tool_title,
+                    "kind": tool_kind,
+                },
                 "options": options,
             },
         )
@@ -316,8 +320,8 @@ class PermissionManager:
     ) -> JsonRpcId:
         """Запросить разрешение для выполнения tool call.
 
-        Создает session/request_permission notification с информацией о tool call.
-        Сохраняет pending request в session состояние.
+        Создает session/request_permission request с информацией о tool call.
+        Сохраняет correlation IDs в active turn для последующей обработки response.
 
         Логика:
         1. Генерировать уникальный permission_request_id
