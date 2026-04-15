@@ -252,6 +252,8 @@ output = await rpc_service.terminal_output(
 - Для WS-оркестрации также поддерживаются structured overrides через `_meta.promptDirectives`.
 - Legacy marker-триггеры (`[plan]`, `[tool]`, `[tool-pending]`) больше не обрабатываются.
 - Если turn отменяется методом `session/cancel`, исходный `session/prompt` завершается с `stopReason: "cancelled"`.
+- При разрыве WebSocket соединения сервер автоматически отменяет все активные turn этой
+  connection (auto-cancel on disconnect), чтобы не оставлять зависшие in-flight операции.
 
 ### Поведение `authenticate`
 

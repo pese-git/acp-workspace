@@ -16,6 +16,7 @@ from typing import Any
 import structlog
 from pydantic import BaseModel
 
+from ..messages import JsonRpcId
 from .exceptions import (
     ClientCapabilityMissingError,
     ClientRPCError,
@@ -96,9 +97,7 @@ class ClientRPCService:
             current = current[part]
 
         if not current:
-            raise ClientCapabilityMissingError(
-                f"Capability {capability_path} отключена"
-            )
+            raise ClientCapabilityMissingError(f"Capability {capability_path} отключена")
 
     async def _call_method(
         self,
@@ -148,9 +147,7 @@ class ClientRPCService:
             return response_model.model_validate(result)
 
         except TimeoutError as err:
-            raise ClientRPCTimeoutError(
-                f"Timeout при вызове {method} (>{self._timeout}s)"
-            ) from err
+            raise ClientRPCTimeoutError(f"Timeout при вызове {method} (>{self._timeout}s)") from err
         finally:
             self._pending_requests.pop(request_id, None)
 
@@ -186,9 +183,49 @@ class ClientRPCService:
         elif "result" in response:
             future.set_result(response["result"])
         else:
-            future.set_exception(
-                ClientRPCError("Invalid response: missing 'result' or 'error'")
+            future.set_exception(ClientRPCError("Invalid response: missing 'result' or 'error'"))
+
+    def has_pending_request(self, request_id: JsonRpcId | None) -> bool:
+        """Проверить, ожидает ли сервис ответ для указанного request_id.
+
+        Пример использования:
+            if service.has_pending_request("req_1"):
+                ...
+        """
+
+        if not isinstance(request_id, str):
+            return False
+        return request_id in self._pending_requests
+
+    def cancel_all_pending_requests(self, reason: str) -> int:
+        """Отменить все ожидающие RPC-запросы с заданной причиной.
+
+        Метод используется транспортом при закрытии соединения, чтобы не
+        оставлять зависшие Future в памяти.
+
+        Args:
+            reason: Текст причины отмены.
+
+        Returns:
+            Количество запросов, которые были завершены исключением.
+        """
+
+        cancelled_count = 0
+        for request_id, future in list(self._pending_requests.items()):
+            if future.done():
+                self._pending_requests.pop(request_id, None)
+                continue
+            future.set_exception(ClientRPCError(reason))
+            self._pending_requests.pop(request_id, None)
+            cancelled_count += 1
+
+        if cancelled_count > 0:
+            logger.info(
+                "pending client RPC requests cancelled",
+                cancelled_count=cancelled_count,
+                reason=reason,
             )
+        return cancelled_count
 
     # ===== File System методы =====
 

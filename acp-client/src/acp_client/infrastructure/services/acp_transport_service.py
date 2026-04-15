@@ -534,6 +534,12 @@ class ACPTransportService(TransportService):
                     if permission_task is not None and permission_task in done:
                         try:
                             permission_data = permission_task.result()
+                            self._logger.debug(
+                                "tool_lifecycle_permission_request_received",
+                                method=method,
+                                request_id=request_id,
+                                permission_id=permission_data.get("id"),
+                            )
                             await self._handle_permission_request(
                                 permission_data=permission_data,
                                 on_permission=on_permission,
@@ -541,13 +547,25 @@ class ACPTransportService(TransportService):
                         except TimeoutError:
                             # Таймаут при ожидании уведомления — нормально.
                             pass
-                        except Exception:
-                            # Игнорируем ошибки обработки уведомлений.
-                            pass
+                        except Exception as e:
+                            # Логируем ошибки, чтобы видеть причину зависания turn.
+                            self._logger.warning(
+                                "tool_lifecycle_permission_request_failed",
+                                method=method,
+                                request_id=request_id,
+                                error=str(e),
+                            )
 
                     if notification_task is not None and notification_task in done:
                         try:
                             notification_data = notification_task.result()
+                            self._logger.debug(
+                                "tool_lifecycle_notification_received",
+                                method=method,
+                                request_id=request_id,
+                                notification_id=notification_data.get("id"),
+                                notification_method=notification_data.get("method"),
+                            )
                             await self._handle_notification_or_client_rpc(
                                 method=method,
                                 request_id=request_id,
@@ -564,9 +582,14 @@ class ACPTransportService(TransportService):
                         except TimeoutError:
                             # Таймаут при ожидании уведомления — нормально.
                             pass
-                        except Exception:
-                            # Игнорируем ошибки обработки уведомлений.
-                            pass
+                        except Exception as e:
+                            # Логируем ошибки, чтобы видеть причину зависания turn.
+                            self._logger.warning(
+                                "tool_lifecycle_notification_failed",
+                                method=method,
+                                request_id=request_id,
+                                error=str(e),
+                            )
 
                     # Проверяем результат от response queue.
                     if response_task in done:
@@ -667,7 +690,18 @@ class ACPTransportService(TransportService):
         if permission.method != "session/request_permission":
             return
 
+        self._logger.debug(
+            "tool_lifecycle_permission_callback_start",
+            permission_id=permission.id,
+            has_callback=on_permission is not None,
+        )
+
         permission_result = on_permission(permission_data) if on_permission is not None else None
+        self._logger.debug(
+            "tool_lifecycle_permission_callback_done",
+            permission_id=permission.id,
+            selected_option=permission_result,
+        )
         permission_reply = ACPMessage.response(
             permission.id,
             {
@@ -681,7 +715,16 @@ class ACPTransportService(TransportService):
                 )
             },
         )
+        self._logger.debug(
+            "tool_lifecycle_permission_response_sending",
+            permission_id=permission.id,
+            outcome=permission_reply.result,
+        )
         await self.send(permission_reply.to_dict())
+        self._logger.debug(
+            "tool_lifecycle_permission_response_sent",
+            permission_id=permission.id,
+        )
 
     async def _handle_notification_or_client_rpc(
         self,
@@ -723,27 +766,101 @@ class ACPTransportService(TransportService):
             return
 
         rpc_params = notification.params if isinstance(notification.params, dict) else {}
+        self._logger.debug(
+            "tool_lifecycle_rpc_received",
+            request_id=request_id,
+            method=method,
+            rpc_id=notification.id,
+            rpc_method=rpc_method,
+        )
 
         if rpc_method == "fs/read_text_file":
             path = rpc_params.get("path")
+            self._logger.debug(
+                "tool_lifecycle_callback_start",
+                rpc_id=notification.id,
+                rpc_method=rpc_method,
+                path=path,
+                has_callback=on_fs_read is not None,
+            )
             content = on_fs_read(path) if on_fs_read is not None and isinstance(path, str) else ""
+            self._logger.debug(
+                "tool_lifecycle_callback_done",
+                rpc_id=notification.id,
+                rpc_method=rpc_method,
+                content_size=len(content),
+            )
+            self._logger.debug(
+                "tool_lifecycle_response_sending",
+                rpc_id=notification.id,
+                rpc_method=rpc_method,
+                result_keys=["content"],
+            )
             await self.send(ACPMessage.response(notification.id, {"content": content}).to_dict())
+            self._logger.debug(
+                "tool_lifecycle_response_sent",
+                rpc_id=notification.id,
+                rpc_method=rpc_method,
+            )
             return
 
         if rpc_method == "fs/write_text_file":
             path = rpc_params.get("path")
             text = rpc_params.get("content")
+            self._logger.debug(
+                "tool_lifecycle_callback_start",
+                rpc_id=notification.id,
+                rpc_method=rpc_method,
+                path=path,
+                text_size=len(text) if isinstance(text, str) else 0,
+                has_callback=on_fs_write is not None,
+            )
             if on_fs_write is not None and isinstance(path, str) and isinstance(text, str):
                 on_fs_write(path, text)
+            self._logger.debug(
+                "tool_lifecycle_callback_done",
+                rpc_id=notification.id,
+                rpc_method=rpc_method,
+            )
+            self._logger.debug(
+                "tool_lifecycle_response_sending",
+                rpc_id=notification.id,
+                rpc_method=rpc_method,
+                result_keys=[],
+            )
             await self.send(ACPMessage.response(notification.id, {}).to_dict())
+            self._logger.debug(
+                "tool_lifecycle_response_sent",
+                rpc_id=notification.id,
+                rpc_method=rpc_method,
+            )
             return
 
         if rpc_method == "terminal/create":
             command = rpc_params.get("command")
+            self._logger.debug(
+                "tool_lifecycle_callback_start",
+                rpc_id=notification.id,
+                rpc_method=rpc_method,
+                command=command,
+                has_callback=on_terminal_create is not None,
+            )
             terminal_id = (
                 on_terminal_create(command)
                 if on_terminal_create is not None and isinstance(command, str)
                 else None
+            )
+            self._logger.debug(
+                "tool_lifecycle_callback_done",
+                rpc_id=notification.id,
+                rpc_method=rpc_method,
+                terminal_id=terminal_id,
+            )
+            self._logger.debug(
+                "tool_lifecycle_response_sending",
+                rpc_id=notification.id,
+                rpc_method=rpc_method,
+                result_keys=["terminalId"] if terminal_id else [],
             )
             await self.send(
                 ACPMessage.response(
@@ -751,22 +868,58 @@ class ACPTransportService(TransportService):
                     {"terminalId": terminal_id} if terminal_id else {},
                 ).to_dict()
             )
+            self._logger.debug(
+                "tool_lifecycle_response_sent",
+                rpc_id=notification.id,
+                rpc_method=rpc_method,
+            )
             return
 
         if rpc_method == "terminal/output":
             terminal_id = rpc_params.get("terminalId")
+            self._logger.debug(
+                "tool_lifecycle_callback_start",
+                rpc_id=notification.id,
+                rpc_method=rpc_method,
+                terminal_id=terminal_id,
+                has_callback=on_terminal_output is not None,
+            )
             output = (
                 on_terminal_output(terminal_id)
                 if on_terminal_output is not None and isinstance(terminal_id, str)
                 else None
             )
+            self._logger.debug(
+                "tool_lifecycle_callback_done",
+                rpc_id=notification.id,
+                rpc_method=rpc_method,
+                output_size=len(output) if isinstance(output, str) else 0,
+            )
+            self._logger.debug(
+                "tool_lifecycle_response_sending",
+                rpc_id=notification.id,
+                rpc_method=rpc_method,
+                result_keys=["output"] if output else [],
+            )
             await self.send(
                 ACPMessage.response(notification.id, {"output": output} if output else {}).to_dict()
+            )
+            self._logger.debug(
+                "tool_lifecycle_response_sent",
+                rpc_id=notification.id,
+                rpc_method=rpc_method,
             )
             return
 
         if rpc_method == "terminal/wait_for_exit":
             terminal_id = rpc_params.get("terminalId")
+            self._logger.debug(
+                "tool_lifecycle_callback_start",
+                rpc_id=notification.id,
+                rpc_method=rpc_method,
+                terminal_id=terminal_id,
+                has_callback=on_terminal_wait is not None,
+            )
             exit_code: int | None = None
             output: str | None = None
             if on_terminal_wait is not None and isinstance(terminal_id, str):
@@ -780,34 +933,115 @@ class ACPTransportService(TransportService):
                 elif isinstance(wait_result, int):
                     exit_code = wait_result
 
+            self._logger.debug(
+                "tool_lifecycle_callback_done",
+                rpc_id=notification.id,
+                rpc_method=rpc_method,
+                exit_code=exit_code,
+                output_size=len(output) if isinstance(output, str) else 0,
+            )
             result_payload: dict[str, Any] = {}
             if exit_code is not None:
                 result_payload["exitCode"] = exit_code
             if output is not None:
                 result_payload["output"] = output
+            self._logger.debug(
+                "tool_lifecycle_response_sending",
+                rpc_id=notification.id,
+                rpc_method=rpc_method,
+                result_keys=list(result_payload.keys()),
+            )
             await self.send(ACPMessage.response(notification.id, result_payload).to_dict())
+            self._logger.debug(
+                "tool_lifecycle_response_sent",
+                rpc_id=notification.id,
+                rpc_method=rpc_method,
+            )
             return
 
         if rpc_method == "terminal/release":
             terminal_id = rpc_params.get("terminalId")
+            self._logger.debug(
+                "tool_lifecycle_callback_start",
+                rpc_id=notification.id,
+                rpc_method=rpc_method,
+                terminal_id=terminal_id,
+                has_callback=on_terminal_release is not None,
+            )
             if on_terminal_release is not None and isinstance(terminal_id, str):
                 on_terminal_release(terminal_id)
+            self._logger.debug(
+                "tool_lifecycle_callback_done",
+                rpc_id=notification.id,
+                rpc_method=rpc_method,
+            )
+            self._logger.debug(
+                "tool_lifecycle_response_sending",
+                rpc_id=notification.id,
+                rpc_method=rpc_method,
+                result_keys=[],
+            )
             await self.send(ACPMessage.response(notification.id, {}).to_dict())
+            self._logger.debug(
+                "tool_lifecycle_response_sent",
+                rpc_id=notification.id,
+                rpc_method=rpc_method,
+            )
             return
 
         if rpc_method == "terminal/kill":
             terminal_id = rpc_params.get("terminalId")
+            self._logger.debug(
+                "tool_lifecycle_callback_start",
+                rpc_id=notification.id,
+                rpc_method=rpc_method,
+                terminal_id=terminal_id,
+                has_callback=on_terminal_kill is not None,
+            )
             killed = (
                 on_terminal_kill(terminal_id)
                 if on_terminal_kill is not None and isinstance(terminal_id, str)
                 else False
             )
+            self._logger.debug(
+                "tool_lifecycle_callback_done",
+                rpc_id=notification.id,
+                rpc_method=rpc_method,
+                killed=killed,
+            )
+            self._logger.debug(
+                "tool_lifecycle_response_sending",
+                rpc_id=notification.id,
+                rpc_method=rpc_method,
+                result_keys=["killed"],
+            )
             await self.send(ACPMessage.response(notification.id, {"killed": killed}).to_dict())
+            self._logger.debug(
+                "tool_lifecycle_response_sent",
+                rpc_id=notification.id,
+                rpc_method=rpc_method,
+            )
             return
 
         # Для неизвестных server->client RPC возвращаем пустой успешный response,
         # чтобы не блокировать prompt-turn на сервере.
+        self._logger.warning(
+            "tool_lifecycle_unknown_rpc_fallback",
+            rpc_id=notification.id,
+            rpc_method=rpc_method,
+        )
+        self._logger.debug(
+            "tool_lifecycle_response_sending",
+            rpc_id=notification.id,
+            rpc_method=rpc_method,
+            result_keys=[],
+        )
         await self.send(ACPMessage.response(notification.id, {}).to_dict())
+        self._logger.debug(
+            "tool_lifecycle_response_sent",
+            rpc_id=notification.id,
+            rpc_method=rpc_method,
+        )
 
     def cleanup(self) -> None:
         """Очищает ресурсы синхронно (вызывается DI контейнером).

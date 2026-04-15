@@ -49,6 +49,9 @@ acp-client-tui
 ```bash
 # Запуск TUI через CLI entrypoint
 uv run acp-client --host 127.0.0.1 --port 8000
+
+# Запуск с кастомной директорией истории
+uv run acp-client --host 127.0.0.1 --port 8000 --history-dir ./data/client-history
 ```
 
 ## 🏗️ Архитектура
@@ -340,6 +343,28 @@ python -m acp_client.tui --log-level DEBUG
 # JSON логи для production
 python -m acp_client.tui --log-json
 ```
+
+Для диагностики зависаний tool lifecycle добавлены trace-события (уровень `DEBUG`):
+- `tool_lifecycle_notification_received` — клиент получил server->client RPC/notification
+- `tool_lifecycle_rpc_received` — распознан конкретный tool RPC (`fs/*`, `terminal/*`)
+- `tool_lifecycle_callback_start` / `tool_lifecycle_callback_done` — старт/завершение локального callback
+- `tool_lifecycle_response_sending` / `tool_lifecycle_response_sent` — отправка ответа серверу
+- `tool_lifecycle_notification_failed` — ошибка в обработке callback (ключевой сигнал места «затыка»)
+
+## 🗂️ Локальная история чата
+
+Клиент сохраняет локальный кэш истории по умолчанию в `~/.acp-client/history`.
+
+Путь можно переопределить через переменную окружения `ACP_CLIENT_HISTORY_DIR`:
+
+```bash
+export ACP_CLIENT_HISTORY_DIR=./data/client-history
+uv run acp-client --host 127.0.0.1 --port 8000
+```
+
+Также путь можно задать через флаг CLI `--history-dir` (`acp-client` и `acp-client-tui`).
+
+Приоритет путей: `--history-dir`/`history_dir` в коде → `ACP_CLIENT_HISTORY_DIR` → `~/.acp-client/history`.
 
 ## 📋 Требования
 

@@ -249,18 +249,18 @@ class ACPHttpServer:
 
         ws = web.WebSocketResponse()
         await ws.prepare(request)
-        
+
         # Создаем callback для отправки RPC запросов клиенту
         async def send_rpc_request(request_dict: dict) -> None:
             """Отправляет JSON-RPC request клиенту."""
             await ws.send_json(request_dict)
-        
+
         # Создаем ClientRPCService с пустыми capabilities (будут обновлены после initialize)
         client_rpc_service = ClientRPCService(
             send_request_callback=send_rpc_request,
             client_capabilities={},
         )
-        
+
         protocol = ACPProtocol(
             require_auth=self.require_auth,
             auth_api_key=self.auth_api_key,
@@ -271,11 +271,138 @@ class ACPHttpServer:
         )
         # Храним отложенные завершения prompt-turn по sessionId в рамках WS-соединения.
         deferred_prompt_tasks: dict[str, asyncio.Task[None]] = {}
+        # Храним in-flight задачи обработки долгих `session/prompt`, чтобы WS-loop
+        # не блокировался и мог принимать client RPC responses.
+        prompt_request_tasks: set[asyncio.Task[None]] = set()
         # По ACP любые session-методы в WS доступны только после initialize.
         initialized = False
+        # Сериализуем отправку в один WS, чтобы параллельные задачи не конкурировали.
+        ws_send_lock = asyncio.Lock()
 
         # Создаем логгер с контекстом подключения
         conn_logger = logger.bind(connection_id=connection_id)
+
+        async def _send_outcome(
+            outcome: ProtocolOutcome,
+            *,
+            request_id: str | None,
+        ) -> None:
+            """Отправляет notifications/response/followups в рамках одного lock.
+
+            Это гарантирует консистентный порядок отправки для конкретного outcome.
+            """
+
+            async with ws_send_lock:
+                if ws.closed:
+                    return
+
+                for notification in outcome.notifications:
+                    notification_json = notification.to_json()
+                    await ws.send_str(notification_json)
+                    conn_logger.debug(
+                        "notification sent",
+                        method=notification.method,
+                        payload=_truncate_payload(notification_json),
+                    )
+
+                if outcome.response is not None:
+                    response_json = outcome.response.to_json()
+                    await ws.send_str(response_json)
+                    conn_logger.debug(
+                        "response sent",
+                        request_id=request_id,
+                        has_error=outcome.response.error is not None,
+                        payload=_truncate_payload(response_json),
+                    )
+
+                for followup_response in outcome.followup_responses:
+                    followup_json = followup_response.to_json()
+                    await ws.send_str(followup_json)
+                    conn_logger.debug(
+                        "followup response sent",
+                        request_id=followup_response.id,
+                        payload=_truncate_payload(followup_json),
+                    )
+
+        async def _finalize_outcome_and_send(
+            *,
+            method_name: str | None,
+            session_id: str | None,
+            request_id: str | None,
+            outcome: ProtocolOutcome,
+        ) -> None:
+            """Применяет post-processing outcome и отправляет его в WS."""
+
+            if method_name == "session/cancel" and session_id is not None:
+                task = deferred_prompt_tasks.pop(session_id, None)
+                if task is not None:
+                    task.cancel()
+
+            if (
+                method_name == "session/prompt"
+                and session_id is not None
+                and outcome.response is None
+                and protocol.should_auto_complete_active_turn(session_id)
+            ):
+                task = deferred_prompt_tasks.pop(session_id, None)
+                if task is not None:
+                    task.cancel()
+                deferred_prompt_tasks[session_id] = asyncio.create_task(
+                    self._complete_deferred_prompt(
+                        ws=ws,
+                        protocol=protocol,
+                        session_id=session_id,
+                        deferred_prompt_tasks=deferred_prompt_tasks,
+                        connection_id=connection_id,
+                    )
+                )
+
+            await _send_outcome(outcome, request_id=request_id)
+
+            if method_name == "shutdown":
+                conn_logger.info("shutdown requested")
+                await ws.close()
+
+        async def _process_prompt_request_in_background(
+            *,
+            acp_request: ACPMessage,
+            method_name: str,
+            session_id: str | None,
+            request_id: str | None,
+        ) -> None:
+            """Выполняет `session/prompt` в фоне, не блокируя receive-loop."""
+
+            try:
+                outcome = await protocol.handle(acp_request)
+                conn_logger.info(
+                    "request received",
+                    method=method_name,
+                    request_id=request_id,
+                    session_id=session_id,
+                )
+                await _finalize_outcome_and_send(
+                    method_name=method_name,
+                    session_id=session_id,
+                    request_id=request_id,
+                    outcome=outcome,
+                )
+            except Exception as exc:
+                conn_logger.error(
+                    "background prompt request error",
+                    request_id=request_id,
+                    session_id=session_id,
+                    error=str(exc),
+                    exc_info=True,
+                )
+                error_outcome = ProtocolOutcome(
+                    response=ACPMessage.error_response(
+                        acp_request.id,
+                        code=-32603,
+                        message="Internal error",
+                        data=str(exc),
+                    )
+                )
+                await _send_outcome(error_outcome, request_id=request_id)
 
         try:
             async for message in ws:
@@ -296,6 +423,19 @@ class ACPHttpServer:
 
                         if method_name is None:
                             outcome = protocol.handle_client_response(acp_request)
+                            conn_logger.info(
+                                "request received",
+                                method=method_name,
+                                request_id=request_id,
+                                session_id=session_id,
+                            )
+                            await _finalize_outcome_and_send(
+                                method_name=method_name,
+                                session_id=session_id,
+                                request_id=request_id,
+                                outcome=outcome,
+                            )
+                            continue
                         else:
                             if method_name == "initialize":
                                 initialized = True
@@ -321,17 +461,34 @@ class ACPHttpServer:
                                     )
                                 method_name = None
                                 session_id = None
-                                for notification in outcome.notifications:
-                                    await ws.send_str(notification.to_json())
-                                if outcome.response is not None:
-                                    await ws.send_str(outcome.response.to_json())
-                                for followup_response in outcome.followup_responses:
-                                    await ws.send_str(followup_response.to_json())
+                                await _send_outcome(outcome, request_id=request_id)
                                 continue
                             if isinstance(acp_request.params, dict):
                                 raw_session_id = acp_request.params.get("sessionId")
                                 if isinstance(raw_session_id, str):
                                     session_id = raw_session_id
+                            if method_name == "session/prompt":
+                                prompt_task = asyncio.create_task(
+                                    _process_prompt_request_in_background(
+                                        acp_request=acp_request,
+                                        method_name=method_name,
+                                        session_id=session_id,
+                                        request_id=request_id,
+                                    )
+                                )
+                                prompt_request_tasks.add(prompt_task)
+                                prompt_task.add_done_callback(
+                                    lambda finished_task: prompt_request_tasks.discard(
+                                        finished_task
+                                    )
+                                )
+                                conn_logger.debug(
+                                    "prompt request scheduled in background",
+                                    request_id=request_id,
+                                    session_id=session_id,
+                                )
+                                continue
+
                             outcome = await protocol.handle(acp_request)
 
                         # Логируем входящий запрос с методом и сессией
@@ -357,69 +514,28 @@ class ACPHttpServer:
                                 data=str(exc),
                             )
                         )
-
-                    if method_name == "session/cancel" and session_id is not None:
-                        task = deferred_prompt_tasks.pop(session_id, None)
-                        if task is not None:
-                            task.cancel()
-
-                    if (
-                        method_name == "session/prompt"
-                        and session_id is not None
-                        and outcome.response is None
-                        and protocol.should_auto_complete_active_turn(session_id)
-                    ):
-                        task = deferred_prompt_tasks.pop(session_id, None)
-                        if task is not None:
-                            task.cancel()
-                        deferred_prompt_tasks[session_id] = asyncio.create_task(
-                            self._complete_deferred_prompt(
-                                ws=ws,
-                                protocol=protocol,
-                                session_id=session_id,
-                                deferred_prompt_tasks=deferred_prompt_tasks,
-                                connection_id=connection_id,
-                            )
-                        )
-
-                    # Отправляем уведомления
-                    for notification in outcome.notifications:
-                        notification_json = notification.to_json()
-                        await ws.send_str(notification_json)
-                        conn_logger.debug(
-                            "notification sent",
-                            method=notification.method,
-                            payload=_truncate_payload(notification_json),
-                        )
-
-                    # Отправляем основной ответ
-                    if outcome.response is not None:
-                        response_json = outcome.response.to_json()
-                        await ws.send_str(response_json)
-                        conn_logger.debug(
-                            "response sent",
-                            request_id=request_id,
-                            has_error=outcome.response.error is not None,
-                            payload=_truncate_payload(response_json),
-                        )
-
-                    # Отправляем дополнительные ответы
-                    for followup_response in outcome.followup_responses:
-                        followup_json = followup_response.to_json()
-                        await ws.send_str(followup_json)
-                        conn_logger.debug(
-                            "followup response sent",
-                            request_id=followup_response.id,
-                            payload=_truncate_payload(followup_json),
-                        )
-
+                    await _finalize_outcome_and_send(
+                        method_name=method_name,
+                        session_id=session_id,
+                        request_id=request_id,
+                        outcome=outcome,
+                    )
                     if method_name == "shutdown":
-                        conn_logger.info("shutdown requested")
-                        await ws.close()
                         break
                 elif message.type in {WSMsgType.ERROR, WSMsgType.CLOSE, WSMsgType.CLOSING}:
                     break
         finally:
+            if prompt_request_tasks:
+                conn_logger.info(
+                    "cleaning up prompt request tasks",
+                    pending_tasks_count=len(prompt_request_tasks),
+                )
+                for prompt_task in list(prompt_request_tasks):
+                    if not prompt_task.done():
+                        prompt_task.cancel()
+                await asyncio.gather(*prompt_request_tasks, return_exceptions=True)
+                prompt_request_tasks.clear()
+
             # Очищаем все оставшиеся deferred prompt tasks с подробным логированием
             if deferred_prompt_tasks:
                 conn_logger.info(
@@ -434,6 +550,24 @@ class ACPHttpServer:
                             session_id=session_id_to_cancel,
                         )
                     deferred_prompt_tasks.pop(session_id_to_cancel, None)
+
+            # Принудительно отменяем все активные turn при разрыве WS-соединения.
+            # Это предотвращает зависание prompt-turn без клиентского consumer.
+            cancelled_turns_count = await protocol.cancel_active_turns_on_disconnect()
+            if cancelled_turns_count > 0:
+                conn_logger.info(
+                    "active turns cancelled on disconnect",
+                    cancelled_turns_count=cancelled_turns_count,
+                )
+
+            cancelled_rpc_count = client_rpc_service.cancel_all_pending_requests(
+                reason="WS connection closed before client response",
+            )
+            if cancelled_rpc_count > 0:
+                conn_logger.info(
+                    "pending client rpc cancelled on disconnect",
+                    cancelled_rpc_count=cancelled_rpc_count,
+                )
 
             # Логируем закрытие соединения с продолжительностью и статусом
             duration = time.time() - start_time

@@ -1,5 +1,8 @@
+import asyncio
+
 import pytest
 
+from acp_server.client_rpc import ClientRPCService
 from acp_server.messages import ACPMessage
 from acp_server.protocol import ACPProtocol
 from acp_server.storage import JsonFileStorage
@@ -41,6 +44,40 @@ async def test_initialize_request() -> None:
     assert outcome.response.error is None
     assert outcome.response.result is not None
     assert outcome.response.result["protocolVersion"] == 1
+
+
+@pytest.mark.asyncio
+async def test_handle_client_response_routes_pending_client_rpc_service_response() -> None:
+    """Проверяет routing ответа в ClientRPCService для async tool-вызова."""
+
+    sent_requests: list[dict[str, object]] = []
+
+    async def send_request(request: dict[str, object]) -> None:
+        sent_requests.append(request)
+
+    client_rpc_service = ClientRPCService(
+        send_request_callback=send_request,
+        client_capabilities={
+            "fs": {"readTextFile": True, "writeTextFile": True},
+            "terminal": True,
+        },
+        timeout=1.0,
+    )
+    protocol = ACPProtocol(client_rpc_service=client_rpc_service)
+
+    read_task = asyncio.create_task(client_rpc_service.read_text_file("sess_1", "README.md"))
+    await asyncio.sleep(0.01)
+
+    assert len(sent_requests) == 1
+    request_id = sent_requests[0]["id"]
+    assert isinstance(request_id, str)
+
+    outcome = protocol.handle_client_response(ACPMessage.response(request_id, {"content": "ok"}))
+
+    assert outcome.response is None
+    assert outcome.notifications == []
+    assert outcome.followup_responses == []
+    assert await read_task == "ok"
 
 
 @pytest.mark.asyncio
@@ -2266,6 +2303,68 @@ async def test_late_terminal_create_response_after_cancel_is_ignored() -> None:
     )
     assert late_create_response.notifications == []
     assert late_create_response.followup_responses == []
+
+    next_prompt = await protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "normal prompt"}],
+            },
+        )
+    )
+    assert next_prompt.response is not None
+    assert next_prompt.response.result == {"stopReason": "end_turn"}
+
+
+@pytest.mark.asyncio
+async def test_disconnect_auto_cancel_turn_with_pending_permission() -> None:
+    """Проверяет auto-cancel активного turn при разрыве соединения."""
+
+    protocol = ACPProtocol()
+    await _initialize_with_tool_runtime(protocol)
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
+    assert created.response is not None
+    assert isinstance(created.response.result, dict)
+    session_id = created.response.result["sessionId"]
+
+    prompt_outcome = await protocol.handle(
+        ACPMessage.request(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "run tool"}],
+                "_meta": {"promptDirectives": {"requestTool": True}},
+            },
+        )
+    )
+    assert prompt_outcome.response is None
+
+    permission_request = next(
+        notification
+        for notification in prompt_outcome.notifications
+        if notification.method == "session/request_permission"
+    )
+    assert permission_request.id is not None
+
+    cancelled_count = await protocol.cancel_active_turns_on_disconnect()
+    assert cancelled_count == 1
+
+    late_permission = protocol.handle_client_response(
+        ACPMessage.response(
+            permission_request.id,
+            {
+                "outcome": {
+                    "outcome": "selected",
+                    "optionId": "allow_once",
+                },
+            },
+        )
+    )
+    assert late_permission.notifications == []
+    assert late_permission.followup_responses == []
 
     next_prompt = await protocol.handle(
         ACPMessage.request(

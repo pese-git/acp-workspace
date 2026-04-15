@@ -13,6 +13,7 @@ import pytest
 
 from acp_server.client_rpc import (
     ClientCapabilityMissingError,
+    ClientRPCError,
     ClientRPCResponseError,
     ClientRPCService,
     ClientRPCTimeoutError,
@@ -62,9 +63,7 @@ async def test_read_text_file_success(
 ) -> None:
     """Тест успешного чтения файла."""
     # Запустить вызов
-    task = asyncio.create_task(
-        rpc_service.read_text_file(session_id="sess_123", path="/test.txt")
-    )
+    task = asyncio.create_task(rpc_service.read_text_file(session_id="sess_123", path="/test.txt"))
 
     # Дождаться отправки request
     await asyncio.sleep(0.01)
@@ -94,9 +93,7 @@ async def test_read_text_file_with_line_and_limit(
 ) -> None:
     """Тест чтения файла с параметрами line и limit."""
     task = asyncio.create_task(
-        rpc_service.read_text_file(
-            session_id="sess_123", path="/test.txt", line=10, limit=20
-        )
+        rpc_service.read_text_file(session_id="sess_123", path="/test.txt", line=10, limit=20)
     )
 
     await asyncio.sleep(0.01)
@@ -119,9 +116,7 @@ async def test_write_text_file_success(
 ) -> None:
     """Тест успешной записи файла."""
     task = asyncio.create_task(
-        rpc_service.write_text_file(
-            session_id="sess_123", path="/test.txt", content="new content"
-        )
+        rpc_service.write_text_file(session_id="sess_123", path="/test.txt", content="new content")
     )
 
     await asyncio.sleep(0.01)
@@ -170,9 +165,7 @@ async def test_create_terminal_success(
     rpc_service: ClientRPCService, mock_send_request: Any
 ) -> None:
     """Тест создания терминала."""
-    task = asyncio.create_task(
-        rpc_service.create_terminal(session_id="sess_123", command="python")
-    )
+    task = asyncio.create_task(rpc_service.create_terminal(session_id="sess_123", command="python"))
 
     await asyncio.sleep(0.01)
 
@@ -230,9 +223,7 @@ async def test_create_terminal_with_args_and_env(
 
 
 @pytest.mark.asyncio
-async def test_terminal_output(
-    rpc_service: ClientRPCService, mock_send_request: Any
-) -> None:
+async def test_terminal_output(rpc_service: ClientRPCService, mock_send_request: Any) -> None:
     """Тест получения output терминала."""
     task = asyncio.create_task(
         rpc_service.terminal_output(session_id="sess_123", terminal_id="term_456")
@@ -287,9 +278,7 @@ async def test_terminal_output_completed(
 
 
 @pytest.mark.asyncio
-async def test_wait_for_exit(
-    rpc_service: ClientRPCService, mock_send_request: Any
-) -> None:
+async def test_wait_for_exit(rpc_service: ClientRPCService, mock_send_request: Any) -> None:
     """Тест ожидания завершения команды."""
     task = asyncio.create_task(
         rpc_service.wait_for_exit(session_id="sess_123", terminal_id="term_456")
@@ -321,9 +310,7 @@ async def test_wait_for_exit_with_timeout(
 ) -> None:
     """Тест ожидания завершения с timeout."""
     task = asyncio.create_task(
-        rpc_service.wait_for_exit(
-            session_id="sess_123", terminal_id="term_456", timeout=5.0
-        )
+        rpc_service.wait_for_exit(session_id="sess_123", terminal_id="term_456", timeout=5.0)
     )
 
     await asyncio.sleep(0.01)
@@ -344,14 +331,10 @@ async def test_wait_for_exit_with_timeout(
 
 
 @pytest.mark.asyncio
-async def test_kill_terminal(
-    rpc_service: ClientRPCService, mock_send_request: Any
-) -> None:
+async def test_kill_terminal(rpc_service: ClientRPCService, mock_send_request: Any) -> None:
     """Тест прерывания команды."""
     task = asyncio.create_task(
-        rpc_service.kill_terminal(
-            session_id="sess_123", terminal_id="term_456", signal="SIGKILL"
-        )
+        rpc_service.kill_terminal(session_id="sess_123", terminal_id="term_456", signal="SIGKILL")
     )
 
     await asyncio.sleep(0.01)
@@ -393,9 +376,7 @@ async def test_kill_terminal_default_signal(
 
 
 @pytest.mark.asyncio
-async def test_release_terminal(
-    rpc_service: ClientRPCService, mock_send_request: Any
-) -> None:
+async def test_release_terminal(rpc_service: ClientRPCService, mock_send_request: Any) -> None:
     """Тест освобождения ресурсов терминала."""
     task = asyncio.create_task(
         rpc_service.release_terminal(session_id="sess_123", terminal_id="term_456")
@@ -440,13 +421,26 @@ async def test_timeout_error(rpc_service: ClientRPCService) -> None:
 
 
 @pytest.mark.asyncio
-async def test_rpc_error_response(
-    rpc_service: ClientRPCService, mock_send_request: Any
+async def test_cancel_all_pending_requests_finishes_waiters(
+    rpc_service: ClientRPCService,
 ) -> None:
+    """Тест отмены всех pending RPC при закрытии транспорта."""
+
+    task = asyncio.create_task(rpc_service.read_text_file("sess_123", "/test.txt"))
+
+    await asyncio.sleep(0.01)
+    cancelled_count = rpc_service.cancel_all_pending_requests("connection dropped")
+
+    assert cancelled_count == 1
+    with pytest.raises(ClientRPCError) as exc_info:
+        await task
+    assert "connection dropped" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_rpc_error_response(rpc_service: ClientRPCService, mock_send_request: Any) -> None:
     """Тест обработки ошибки от клиента."""
-    task = asyncio.create_task(
-        rpc_service.read_text_file("sess_123", "/test.txt")
-    )
+    task = asyncio.create_task(rpc_service.read_text_file("sess_123", "/test.txt"))
 
     await asyncio.sleep(0.01)
 
@@ -468,13 +462,9 @@ async def test_rpc_error_response(
 
 
 @pytest.mark.asyncio
-async def test_rpc_error_with_data(
-    rpc_service: ClientRPCService, mock_send_request: Any
-) -> None:
+async def test_rpc_error_with_data(rpc_service: ClientRPCService, mock_send_request: Any) -> None:
     """Тест обработки ошибки с дополнительными данными."""
-    task = asyncio.create_task(
-        rpc_service.read_text_file("sess_123", "/test.txt")
-    )
+    task = asyncio.create_task(rpc_service.read_text_file("sess_123", "/test.txt"))
 
     await asyncio.sleep(0.01)
 
@@ -504,7 +494,7 @@ async def test_unknown_response_id(
     rpc_service: ClientRPCService,
 ) -> None:
     """Тест обработки ответа для неизвестного request_id.
-    
+
     Функция должна обработать ответ без ошибок, даже если request_id неизвестен.
     """
     # Это не должно выбросить исключение
@@ -520,9 +510,7 @@ async def test_invalid_response_no_result_or_error(
     """Тест обработки невалидного response без result/error."""
     from acp_server.client_rpc import ClientRPCError
 
-    task = asyncio.create_task(
-        rpc_service.read_text_file("sess_123", "/test.txt")
-    )
+    task = asyncio.create_task(rpc_service.read_text_file("sess_123", "/test.txt"))
 
     await asyncio.sleep(0.01)
 
@@ -538,13 +526,9 @@ async def test_invalid_response_no_result_or_error(
 
 
 @pytest.mark.asyncio
-async def test_json_rpc_format(
-    rpc_service: ClientRPCService, mock_send_request: Any
-) -> None:
+async def test_json_rpc_format(rpc_service: ClientRPCService, mock_send_request: Any) -> None:
     """Тест формата JSON-RPC request."""
-    task = asyncio.create_task(
-        rpc_service.read_text_file("sess_123", "/test.txt")
-    )
+    task = asyncio.create_task(rpc_service.read_text_file("sess_123", "/test.txt"))
 
     await asyncio.sleep(0.01)
 
@@ -606,15 +590,9 @@ async def test_multiple_concurrent_requests(
 ) -> None:
     """Тест нескольких одновременных requests."""
     # Запустить несколько задач
-    task1 = asyncio.create_task(
-        rpc_service.read_text_file("sess_123", "/file1.txt")
-    )
-    task2 = asyncio.create_task(
-        rpc_service.read_text_file("sess_123", "/file2.txt")
-    )
-    task3 = asyncio.create_task(
-        rpc_service.write_text_file("sess_123", "/file3.txt", "content")
-    )
+    task1 = asyncio.create_task(rpc_service.read_text_file("sess_123", "/file1.txt"))
+    task2 = asyncio.create_task(rpc_service.read_text_file("sess_123", "/file2.txt"))
+    task3 = asyncio.create_task(rpc_service.write_text_file("sess_123", "/file3.txt", "content"))
 
     await asyncio.sleep(0.02)
 
@@ -625,20 +603,14 @@ async def test_multiple_concurrent_requests(
     ids = [req["id"] for req in mock_send_request.sent_requests]
 
     # Ответить в другом порядке
-    rpc_service.handle_response(
-        {"jsonrpc": "2.0", "id": ids[2], "result": {"success": True}}
-    )
+    rpc_service.handle_response({"jsonrpc": "2.0", "id": ids[2], "result": {"success": True}})
     result3 = await task3
     assert result3 is True
 
-    rpc_service.handle_response(
-        {"jsonrpc": "2.0", "id": ids[0], "result": {"content": "content1"}}
-    )
+    rpc_service.handle_response({"jsonrpc": "2.0", "id": ids[0], "result": {"content": "content1"}})
     result1 = await task1
     assert result1 == "content1"
 
-    rpc_service.handle_response(
-        {"jsonrpc": "2.0", "id": ids[1], "result": {"content": "content2"}}
-    )
+    rpc_service.handle_response({"jsonrpc": "2.0", "id": ids[1], "result": {"content": "content2"}})
     result2 = await task2
     assert result2 == "content2"

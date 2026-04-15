@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+import structlog
+
 from ..messages import ACPMessage, JsonRpcId
 from ..storage import SessionStorage
 from .handlers import (
@@ -29,6 +31,9 @@ if TYPE_CHECKING:
     from ..agent.orchestrator import AgentOrchestrator
     from ..client_rpc.service import ClientRPCService
     from ..tools.base import ToolRegistry
+
+
+logger = structlog.get_logger()
 
 
 class ACPProtocol:
@@ -385,6 +390,19 @@ class ACPProtocol:
         if resolved_client_rpc is not None:
             return resolved_client_rpc
 
+        if self._client_rpc_service is not None and self._client_rpc_service.has_pending_request(
+            message.id
+        ):
+            # Пробрасываем response в ClientRPCService для async-ожиданий,
+            # используемых tool executors (filesystem/terminal).
+            logger.debug(
+                "forwarding client response to client_rpc_service",
+                request_id=message.id,
+                has_error=message.error is not None,
+            )
+            self._client_rpc_service.handle_response(message.to_dict())
+            return ProtocolOutcome()
+
         if permissions.consume_cancelled_client_rpc_response(message.id, self._sessions):
             # Late response на отмененный agent->client RPC считаем no-op.
             return ProtocolOutcome()
@@ -489,3 +507,34 @@ class ACPProtocol:
             if next_cursor is None:
                 break
             cursor = next_cursor
+
+    async def cancel_active_turns_on_disconnect(self) -> int:
+        """Отменяет все активные turn в рамках текущего протокольного инстанса.
+
+        Используется транспортом при разрыве соединения клиента. Метод
+        обеспечивает ACP-инвариант остановки in-flight turn и освобождение
+        внутренних ожиданий без отправки сетевых сообщений.
+
+        Returns:
+            Количество сессий, в которых активный turn был отменен.
+        """
+
+        cancelled_count = 0
+        for session_id, session_state in list(self._sessions.items()):
+            if session_state.active_turn is None:
+                continue
+
+            prompt.session_cancel(
+                request_id=None,
+                params={"sessionId": session_id},
+                sessions=self._sessions,
+            )
+            cancelled_count += 1
+
+            try:
+                await self._storage.save_session(self._sessions[session_id])
+            except Exception:
+                # Ошибка персистентности не должна блокировать cleanup при disconnect.
+                continue
+
+        return cancelled_count
