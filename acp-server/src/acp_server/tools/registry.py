@@ -4,7 +4,12 @@ import inspect
 from collections.abc import Callable
 from typing import Any
 
+import structlog
+
 from acp_server.tools.base import ToolDefinition, ToolExecutionResult, ToolRegistry
+
+# Используем structlog для структурированного логирования
+logger = structlog.get_logger()
 
 
 class SimpleToolRegistry(ToolRegistry):
@@ -174,8 +179,21 @@ class SimpleToolRegistry(ToolRegistry):
         Returns:
             ToolExecutionResult с успехом/ошибкой и metadata если доступен
         """
+        logger.debug(
+            "tool registry execute_tool called",
+            session_id=session_id,
+            tool_name=tool_name,
+            arguments=arguments,
+            has_session=session is not None,
+        )
+        
         # Проверка существования инструмента
         if tool_name not in self._tools:
+            logger.error(
+                "tool not found in registry",
+                tool_name=tool_name,
+                registered_tools=list(self._tools.keys()),
+            )
             return ToolExecutionResult(
                 success=False,
                 error=f"Инструмент '{tool_name}' не найден в реестре",
@@ -183,10 +201,22 @@ class SimpleToolRegistry(ToolRegistry):
 
         # Получение обработчика
         handler = self._handlers[tool_name]
+        is_async = inspect.iscoroutinefunction(handler)
+        
+        logger.debug(
+            "tool handler found",
+            tool_name=tool_name,
+            is_async=is_async,
+            handler_type=type(handler).__name__,
+        )
 
         try:
             # Проверяем является ли обработчик асинхронным
-            if inspect.iscoroutinefunction(handler):
+            if is_async:
+                logger.debug(
+                    "executing async tool handler",
+                    tool_name=tool_name,
+                )
                 # Для async executors вызываем await
                 # Если session доступен, передаём его в handler
                 if session is not None and "session" in inspect.signature(handler).parameters:
@@ -194,6 +224,10 @@ class SimpleToolRegistry(ToolRegistry):
                 else:
                     result = await handler(**arguments)
             else:
+                logger.debug(
+                    "executing sync tool handler",
+                    tool_name=tool_name,
+                )
                 # Для синхронных функций вызываем напрямую
                 output = handler(**arguments)
                 result = ToolExecutionResult(
@@ -201,11 +235,26 @@ class SimpleToolRegistry(ToolRegistry):
                     output=str(output) if output is not None else None,
                 )
 
+            logger.info(
+                "tool handler execution completed",
+                tool_name=tool_name,
+                success=result.success,
+                has_output=bool(result.output),
+                has_error=bool(result.error),
+                has_metadata=bool(result.metadata),
+            )
+            
             # Возвращаем результат с сохранением metadata
             return result
 
         except Exception as exc:
             # Обработка исключений при выполнении
+            logger.error(
+                "tool handler execution failed with exception",
+                tool_name=tool_name,
+                error=str(exc),
+                exc_info=True,
+            )
             error_msg = f"Ошибка при выполнении инструмента '{tool_name}': {str(exc)}"
             return ToolExecutionResult(
                 success=False,

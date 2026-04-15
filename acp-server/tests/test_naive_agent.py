@@ -6,6 +6,7 @@ from acp_server.agent.base import AgentContext
 from acp_server.agent.naive import NaiveAgent
 from acp_server.llm.base import LLMMessage, LLMToolCall
 from acp_server.llm.mock_provider import MockLLMProvider
+from acp_server.protocol.state import SessionState
 from acp_server.tools.base import ToolDefinition
 from acp_server.tools.registry import SimpleToolRegistry
 
@@ -92,6 +93,16 @@ def naive_agent(tool_registry: SimpleToolRegistry) -> NaiveAgent:
     return NaiveAgent(llm=llm, tools=tool_registry, max_iterations=5)
 
 
+@pytest.fixture
+def session_state() -> SessionState:
+    """Создать SessionState для тестов."""
+    return SessionState(
+        session_id="test-session",
+        cwd="/tmp",
+        mcp_servers=[],
+    )
+
+
 # ============================================================================
 # Базовые тесты
 # ============================================================================
@@ -101,10 +112,12 @@ def naive_agent(tool_registry: SimpleToolRegistry) -> NaiveAgent:
 async def test_simple_response_without_tool_calls(
     naive_agent: NaiveAgent,
     tool_registry: SimpleToolRegistry,
+    session_state: SessionState,
 ) -> None:
     """Тест простого ответа без tool calls."""
     context = AgentContext(
         session_id="test-session",
+        session=session_state,
         prompt=[{"type": "text", "text": "Hello, agent!"}],
         conversation_history=[],
         available_tools=tool_registry.list_tools(),
@@ -121,6 +134,7 @@ async def test_simple_response_without_tool_calls(
 @pytest.mark.asyncio
 async def test_single_tool_call_success(
     tool_registry: SimpleToolRegistry,
+    session_state: SessionState,
 ) -> None:
     """Тест успешного выполнения одного tool call."""
 
@@ -161,6 +175,7 @@ async def test_single_tool_call_success(
 
     context = AgentContext(
         session_id="test-session",
+        session=session_state,
         prompt=[{"type": "text", "text": "Calculate 2 + 3"}],
         conversation_history=[],
         available_tools=tool_registry.list_tools(),
@@ -178,6 +193,7 @@ async def test_single_tool_call_success(
 @pytest.mark.asyncio
 async def test_multiple_tool_calls_in_single_response(
     tool_registry: SimpleToolRegistry,
+    session_state: SessionState,
 ) -> None:
     """Тест нескольких tool calls в одном ответе."""
     tool_calls = [
@@ -202,6 +218,7 @@ async def test_multiple_tool_calls_in_single_response(
 
     context = AgentContext(
         session_id="test-session",
+        session=session_state,
         prompt=[{"type": "text", "text": "Echo hello and world"}],
         conversation_history=[],
         available_tools=tool_registry.list_tools(),
@@ -223,6 +240,7 @@ async def test_multiple_tool_calls_in_single_response(
 @pytest.mark.asyncio
 async def test_tool_call_chain(
     tool_registry: SimpleToolRegistry,
+    session_state: SessionState,
 ) -> None:
     """Тест цепочки tool calls (tool -> response -> tool -> response)."""
 
@@ -277,6 +295,7 @@ async def test_tool_call_chain(
 
     context = AgentContext(
         session_id="test-session",
+        session=session_state,
         prompt=[{"type": "text", "text": "Calculate 5 + 3 and tell me the result"}],
         conversation_history=[],
         available_tools=tool_registry.list_tools(),
@@ -298,6 +317,7 @@ async def test_tool_call_chain(
 @pytest.mark.asyncio
 async def test_max_iterations_exceeded(
     tool_registry: SimpleToolRegistry,
+    session_state: SessionState,
 ) -> None:
     """Тест достижения максимума итераций."""
 
@@ -324,6 +344,7 @@ async def test_max_iterations_exceeded(
 
     context = AgentContext(
         session_id="test-session",
+        session=session_state,
         prompt=[{"type": "text", "text": "Loop forever"}],
         conversation_history=[],
         available_tools=tool_registry.list_tools(),
@@ -340,6 +361,7 @@ async def test_max_iterations_exceeded(
 @pytest.mark.asyncio
 async def test_tool_not_found(
     tool_registry: SimpleToolRegistry,
+    session_state: SessionState,
 ) -> None:
     """Тест вызова несуществующего инструмента."""
     tool_call = LLMToolCall(
@@ -357,6 +379,7 @@ async def test_tool_not_found(
 
     context = AgentContext(
         session_id="test-session",
+        session=session_state,
         prompt=[{"type": "text", "text": "Use nonexistent tool"}],
         conversation_history=[],
         available_tools=tool_registry.list_tools(),
@@ -372,6 +395,7 @@ async def test_tool_not_found(
 @pytest.mark.asyncio
 async def test_tool_execution_error(
     tool_registry: SimpleToolRegistry,
+    session_state: SessionState,
 ) -> None:
     """Тест обработки исключения при выполнении инструмента."""
 
@@ -411,6 +435,7 @@ async def test_tool_execution_error(
 
     context = AgentContext(
         session_id="test-session",
+        session=session_state,
         prompt=[{"type": "text", "text": "Call error tool"}],
         conversation_history=[],
         available_tools=tool_registry.list_tools(),
@@ -432,10 +457,12 @@ async def test_tool_execution_error(
 async def test_empty_prompt(
     naive_agent: NaiveAgent,
     tool_registry: SimpleToolRegistry,
+    session_state: SessionState,
 ) -> None:
     """Тест с пустым промптом."""
     context = AgentContext(
         session_id="test-session",
+        session=session_state,
         prompt=[],  # Пустой промпт
         conversation_history=[],
         available_tools=tool_registry.list_tools(),
@@ -452,6 +479,7 @@ async def test_empty_prompt(
 async def test_with_conversation_history(
     naive_agent: NaiveAgent,
     tool_registry: SimpleToolRegistry,
+    session_state: SessionState,
 ) -> None:
     """Тест с историей предыдущих сообщений."""
     history = [
@@ -461,6 +489,7 @@ async def test_with_conversation_history(
 
     context = AgentContext(
         session_id="test-session",
+        session=session_state,
         prompt=[{"type": "text", "text": "Second message"}],
         conversation_history=history,
         available_tools=tool_registry.list_tools(),
@@ -547,10 +576,12 @@ async def test_initialize_agent(
 async def test_format_prompt_with_multiple_blocks(
     naive_agent: NaiveAgent,
     tool_registry: SimpleToolRegistry,
+    session_state: SessionState,
 ) -> None:
     """Тест форматирования промпта с несколькими блоками."""
     context = AgentContext(
         session_id="test-session",
+        session=session_state,
         prompt=[
             {"type": "text", "text": "Hello "},
             {"type": "text", "text": "World"},
@@ -575,6 +606,7 @@ async def test_format_prompt_with_multiple_blocks(
 @pytest.mark.asyncio
 async def test_integration_with_mock_provider(
     tool_registry: SimpleToolRegistry,
+    session_state: SessionState,
 ) -> None:
     """Интеграционный тест с MockLLMProvider."""
 
@@ -616,6 +648,7 @@ async def test_integration_with_mock_provider(
 
     context = AgentContext(
         session_id="test-session",
+        session=session_state,
         prompt=[{"type": "text", "text": "What is 7 * 6?"}],
         conversation_history=[],
         available_tools=tool_registry.list_tools(),

@@ -5,6 +5,7 @@ import pytest
 from acp_server.agent.base import AgentContext, AgentResponse, LLMAgent
 from acp_server.agent.state import OrchestratorConfig
 from acp_server.llm.base import LLMMessage, LLMProvider, LLMResponse, LLMToolCall
+from acp_server.protocol.state import SessionState
 from acp_server.tools.base import ToolDefinition, ToolRegistry
 
 
@@ -66,14 +67,23 @@ def test_tool_definition_creation() -> None:
 
 def test_agent_context_creation() -> None:
     """Проверить создание AgentContext."""
+    # Создать SessionState для контекста
+    session_state = SessionState(
+        session_id="test-session",
+        cwd="/tmp",
+        mcp_servers=[],
+    )
+    
     context = AgentContext(
         session_id="test-session",
+        session=session_state,
         prompt=[{"type": "text", "text": "Hello"}],
         conversation_history=[],
         available_tools=[],
         config={},
     )
     assert context.session_id == "test-session"
+    assert context.session is session_state
     assert len(context.prompt) == 1
 
 

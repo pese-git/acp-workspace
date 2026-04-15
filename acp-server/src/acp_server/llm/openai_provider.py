@@ -247,10 +247,29 @@ class OpenAIProvider(LLMProvider):
         # Извлечь текст
         text = message.content or ""
 
+        logger.debug(
+            "parsing openai completion",
+            finish_reason=choice.finish_reason,
+            has_message_tool_calls=bool(message.tool_calls),  # type: ignore[union-attr]
+            message_content_length=len(text),
+        )
+
         # Извлечь tool calls
         tool_calls: list[LLMToolCall] = []
         if message.tool_calls:  # type: ignore[union-attr]
-            for tool_call in message.tool_calls:  # type: ignore[union-attr]
+            logger.debug(
+                "parsing tool_calls from message",
+                num_tool_calls=len(message.tool_calls),  # type: ignore[union-attr]
+            )
+            
+            for idx, tool_call in enumerate(message.tool_calls):  # type: ignore[union-attr]
+                logger.debug(
+                    "parsing individual tool_call",
+                    tool_call_index=idx,
+                    tool_call_id=tool_call.id,  # type: ignore[union-attr]
+                    tool_call_type=tool_call.type,  # type: ignore[union-attr]
+                )
+                
                 if tool_call.type == "function":  # type: ignore[union-attr]
                     # Получить функцию из tool_call
                     func = tool_call.function  # type: ignore[union-attr]
@@ -260,10 +279,26 @@ class OpenAIProvider(LLMProvider):
                         if isinstance(func.arguments, str):  # type: ignore[union-attr]
                             try:
                                 args = json.loads(func.arguments)  # type: ignore[union-attr]
-                            except (json.JSONDecodeError, TypeError):
+                                logger.debug(
+                                    "parsed tool arguments from json",
+                                    tool_name=func.name,  # type: ignore[union-attr]
+                                    arguments=args,
+                                )
+                            except (json.JSONDecodeError, TypeError) as e:
+                                logger.error(
+                                    "failed to parse tool arguments json",
+                                    tool_name=func.name,  # type: ignore[union-attr]
+                                    raw_arguments=func.arguments,  # type: ignore[union-attr]
+                                    error=str(e),
+                                )
                                 args = {}
                         elif isinstance(func.arguments, dict):  # type: ignore[union-attr]
                             args = func.arguments  # type: ignore[union-attr]
+                            logger.debug(
+                                "tool arguments already dict",
+                                tool_name=func.name,  # type: ignore[union-attr]
+                                arguments=args,
+                            )
 
                     tool_calls.append(
                         LLMToolCall(
@@ -272,6 +307,12 @@ class OpenAIProvider(LLMProvider):
                             arguments=args,
                         )
                     )
+                    
+                    logger.debug(
+                        "tool_call parsed successfully",
+                        tool_call_id=tool_call.id,  # type: ignore[union-attr]
+                        tool_name=func.name,  # type: ignore[union-attr]
+                    )
 
         # Определить stop reason
         stop_reason = "end_turn"
@@ -279,6 +320,13 @@ class OpenAIProvider(LLMProvider):
             stop_reason = "tool_use"
         elif choice.finish_reason == "length":
             stop_reason = "max_tokens"
+
+        logger.info(
+            "openai completion parsed",
+            stop_reason=stop_reason,
+            num_tool_calls_parsed=len(tool_calls),
+            text_length=len(text),
+        )
 
         return LLMResponse(
             text=text,

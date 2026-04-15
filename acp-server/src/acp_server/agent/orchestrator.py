@@ -137,6 +137,7 @@ class AgentOrchestrator:
         # Создать и вернуть AgentContext
         return AgentContext(
             session_id=session_state.session_id,
+            session=session_state,  # Передаём session_state для использования в tool handlers
             prompt=prompt_blocks,
             conversation_history=conversation_history,
             available_tools=available_tools,

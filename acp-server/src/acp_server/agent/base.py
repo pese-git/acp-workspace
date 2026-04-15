@@ -2,10 +2,13 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from acp_server.llm.base import LLMMessage, LLMProvider, LLMToolCall
 from acp_server.tools.base import ToolDefinition, ToolRegistry
+
+if TYPE_CHECKING:
+    from acp_server.protocol.state import SessionState
 
 
 @dataclass
@@ -13,6 +16,7 @@ class AgentContext:
     """Контекст выполнения агента для одного prompt turn."""
 
     session_id: str
+    session: "SessionState"  # Состояние сессии для выполнения инструментов
     prompt: list[dict[str, Any]]  # Содержимое prompt от пользователя
     conversation_history: list[LLMMessage]  # История сообщений для LLM
     available_tools: list[ToolDefinition]  # Инструменты для этого turn

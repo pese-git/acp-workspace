@@ -75,6 +75,7 @@ class ToolRegistry(ABC):
         session_id: str,
         tool_name: str,
         arguments: dict[str, Any],
+        session: Any = None,
     ) -> ToolExecutionResult:
         """Выполнить инструмент."""
         pass

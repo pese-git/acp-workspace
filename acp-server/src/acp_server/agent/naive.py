@@ -140,13 +140,48 @@ class NaiveAgent(LLMAgent):
             )
 
             # Выполнить каждый tool
-            for tool_call in response.tool_calls:
+            logger.info(
+                "starting tool execution loop",
+                iteration=iteration,
+                num_tool_calls=len(response.tool_calls),
+                tool_names=[tc.name for tc in response.tool_calls],
+            )
+            
+            for idx, tool_call in enumerate(response.tool_calls):
+                logger.debug(
+                    "executing tool",
+                    iteration=iteration,
+                    tool_index=idx,
+                    tool_id=tool_call.id,
+                    tool_name=tool_call.name,
+                    tool_arguments=tool_call.arguments,
+                )
+                
                 # Выполнить инструмент
                 result = await self.tools.execute_tool(
                     context.session_id,
                     tool_call.name,
                     tool_call.arguments,
+                    session=context.session,  # Передаём session для tool handlers
                 )
+                
+                logger.info(
+                    "tool execution completed",
+                    iteration=iteration,
+                    tool_index=idx,
+                    tool_name=tool_call.name,
+                    success=result.success,
+                    has_output=bool(result.output),
+                    has_error=bool(result.error),
+                    output_length=len(result.output) if result.output else 0,
+                )
+                
+                if not result.success:
+                    logger.warning(
+                        "tool execution failed",
+                        tool_name=tool_call.name,
+                        error=result.error,
+                    )
 
                 # Добавить результат в историю как tool message
                 # ВАЖНО: Для OpenAI API tool message должен содержать tool_call_id
@@ -162,6 +197,12 @@ class NaiveAgent(LLMAgent):
                         name=tool_call.name,
                     )
                 )
+            
+            logger.info(
+                "tool execution loop completed",
+                iteration=iteration,
+                num_tools_executed=len(response.tool_calls),
+            )
 
         # Достигнут лимит итераций
         if context.session_id not in self._session_histories:
