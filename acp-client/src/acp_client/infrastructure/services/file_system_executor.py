@@ -1,15 +1,20 @@
 """FileSystemExecutor - исполнитель файловых операций в локальной среде клиента.
 
 Модуль предоставляет:
-- Чтение текстовых файлов с поддержкой диапазонов строк
-- Запись текстовых файлов
+- Чтение текстовых файлов с поддержкой диапазонов строк (async и sync)
+- Запись текстовых файлов (async и sync)
 - Валидацию путей (защита от path traversal)
 - Асинхронные операции через aiofiles
+- Синхронные операции для использования в callbacks
 
 Пример использования:
     executor = FileSystemExecutor(base_path=Path("/workspace"))
+    # Асинхронно
     content = await executor.read_text_file("src/main.py", line=1, limit=50)
     await executor.write_text_file("output.txt", "Hello, World!")
+    # Синхронно
+    content = executor.read_text_file_sync("src/main.py")
+    executor.write_text_file_sync("output.txt", "Hello, World!")
 """
 
 from __future__ import annotations
@@ -180,4 +185,96 @@ class FileSystemExecutor:
             return True
         except Exception as e:
             logger.error("file_write_error", path=path, error=str(e))
+            raise OSError(f"Error writing file {path}: {e}") from e
+
+    def read_text_file_sync(
+        self,
+        path: str,
+        line: int | None = None,
+        limit: int | None = None,
+    ) -> str:
+        """Прочитать текстовый файл синхронно.
+
+        Поддерживает чтение диапазона строк через параметры line и limit.
+
+        Args:
+            path: Путь к файлу
+            line: Начальная строка (1-based, опционально)
+            limit: Максимум строк для чтения (опционально)
+
+        Returns:
+            Содержимое файла или диапазона строк
+
+        Raises:
+            FileNotFoundError: Файл не найден
+            ValueError: Некорректный путь или не файл
+            IOError: Ошибка чтения
+        """
+        file_path = self._validate_path(path)
+
+        if not file_path.exists():
+            logger.warning("file_not_found", path=path)
+            raise FileNotFoundError(f"File not found: {path}")
+
+        if not file_path.is_file():
+            logger.warning("not_a_file", path=path)
+            raise ValueError(f"Not a file: {path}")
+
+        try:
+            with open(file_path, encoding="utf-8") as f:
+                if line is None and limit is None:
+                    # Читать весь файл
+                    content = f.read()
+                else:
+                    # Читать построчно с учетом диапазона
+                    lines = f.readlines()
+                    start = (line - 1) if line else 0
+                    end = start + limit if limit else None
+                    content = "".join(lines[start:end])
+
+            logger.info(
+                "file_read_successfully_sync",
+                path=path,
+                size=len(content),
+                line=line,
+                limit=limit,
+            )
+            return content
+        except Exception as e:
+            logger.error("file_read_error_sync", path=path, error=str(e))
+            raise OSError(f"Error reading file {path}: {e}") from e
+
+    def write_text_file_sync(self, path: str, content: str) -> bool:
+        """Записать текстовый файл синхронно.
+
+        Создает родительские директории если необходимо.
+
+        Args:
+            path: Путь к файлу
+            content: Содержимое для записи
+
+        Returns:
+            True при успешной записи
+
+        Raises:
+            ValueError: Некорректный путь
+            IOError: Ошибка записи
+        """
+        file_path = self._validate_path(path)
+
+        try:
+            # Создать родительские директории если нужно
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+
+            with open(file_path, mode="w", encoding="utf-8") as f:
+                f.write(content)
+
+            logger.info(
+                "file_written_successfully_sync",
+                path=path,
+                size=len(content),
+            )
+            return True
+        except Exception as e:
+            logger.error("file_write_error_sync", path=path, error=str(e))
             raise OSError(f"Error writing file {path}: {e}") from e

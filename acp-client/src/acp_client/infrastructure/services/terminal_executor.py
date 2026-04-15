@@ -1,27 +1,33 @@
 """TerminalExecutor - исполнитель терминальных команд в локальной среде клиента.
 
 Модуль предоставляет:
-- Создание и управление терминальными сессиями
+- Создание и управление терминальными сессиями (асинхронно)
 - Запуск команд в фоновом режиме
 - Чтение output с буферизацией
 - Ожидание завершения процесса
 - Убийство процесса
 - Освобождение ресурсов
+- Синхронное выполнение команд для callbacks
 
 Пример использования:
     executor = TerminalExecutor()
+    # Асинхронно
     terminal_id = await executor.create_terminal("python", ["-m", "pytest"], cwd="/project")
     output, is_complete, exit_code = await executor.get_output(terminal_id)
     exit_code = await executor.wait_for_exit(terminal_id)
     await executor.release_terminal(terminal_id)
+    # Синхронно
+    result = executor.execute("ls -la", cwd="/project")
 """
 
 from __future__ import annotations
 
 import asyncio
+import subprocess
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 
 import structlog
 
@@ -349,3 +355,59 @@ class TerminalExecutor:
                 logger.warning("error_releasing_terminal_on_cleanup", error=str(e))
 
         logger.info("all_terminals_cleaned_up", count=len(terminal_ids))
+
+    def execute(self, command: str, cwd: str | None = None) -> dict[str, Any]:
+        """Выполнить команду синхронно и дождаться результата.
+
+        Используется для синхронных callbacks (не требует asyncio event loop).
+
+        Args:
+            command: Команда для выполнения (shell command string)
+            cwd: Рабочая директория (опционально)
+
+        Returns:
+            Словарь с ключами:
+            - exit_code (int): Код выхода процесса
+            - output (str): Вывод процесса (stdout + stderr)
+            - success (bool): True если exit_code == 0
+
+        Example:
+            result = executor.execute("ls -la", cwd="/tmp")
+            print(result["output"])
+        """
+        try:
+            logger.debug("execute_command_sync", command=command, cwd=cwd)
+            
+            # Выполнить команду синхронно
+            process = subprocess.run(
+                command,
+                shell=True,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+            )
+            
+            output = process.stdout
+            if process.stderr:
+                # Объединить stderr с stdout
+                output = output + process.stderr if output else process.stderr
+            
+            logger.info(
+                "execute_command_sync_complete",
+                command=command,
+                exit_code=process.returncode,
+                output_size=len(output),
+            )
+            
+            return {
+                "exit_code": process.returncode,
+                "output": output,
+                "success": process.returncode == 0,
+            }
+        except Exception as e:
+            logger.error("execute_command_sync_error", command=command, error=str(e))
+            return {
+                "exit_code": -1,
+                "output": f"Error executing command: {e}",
+                "success": False,
+            }

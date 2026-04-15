@@ -9,7 +9,8 @@ from typing import Any
 import structlog
 
 from acp_client.infrastructure.di_container import DIContainer, Scope
-from acp_client.infrastructure.handlers import FileSystemHandler, TerminalHandler
+from acp_client.infrastructure.services.file_system_executor import FileSystemExecutor
+from acp_client.infrastructure.services.terminal_executor import TerminalExecutor
 from acp_client.presentation.chat_view_model import ChatViewModel
 from acp_client.presentation.file_viewer_view_model import FileViewerViewModel
 from acp_client.presentation.filesystem_view_model import FileSystemViewModel
@@ -95,14 +96,14 @@ class ViewModelFactory:
         )
         
         # Регистрируем ChatViewModel - синглтон для управления чатом
-        fs_handler = container.resolve(FileSystemHandler)
-        terminal_handler = container.resolve(TerminalHandler)
+        fs_executor = container.resolve(FileSystemExecutor)
+        terminal_executor = container.resolve(TerminalExecutor)
         chat_vm = ChatViewModel(
             coordinator=session_coordinator,
             event_bus=event_bus,
             logger=logger,
-            fs_handler=fs_handler,
-            terminal_handler=terminal_handler,
+            fs_executor=fs_executor,
+            terminal_executor=terminal_executor,
         )
         container.register(ChatViewModel, chat_vm, Scope.SINGLETON)
         logger.debug(
