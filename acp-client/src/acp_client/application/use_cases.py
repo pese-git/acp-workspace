@@ -89,7 +89,13 @@ class InitializeUseCase(UseCase):
                 method="initialize",
                 params={
                     "protocolVersion": 1,  # Обязательный параметр протокола ACP
-                    "clientCapabilities": {},  # Возможности клиента (пока пусто)
+                    "clientCapabilities": {  # Возможности клиента согласно ACP спецификации
+                        "fs": {  # File System capabilities
+                            "readTextFile": True,  # Поддержка fs/read_text_file
+                            "writeTextFile": True,  # Поддержка fs/write_text_file
+                        },
+                        "terminal": True,  # Поддержка terminal/* методов
+                    },
                     "clientInfo": {
                         "name": "acp-client",  # Идентификатор клиента
                         "version": "1.0.0",  # Версия клиента

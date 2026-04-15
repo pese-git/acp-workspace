@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 from acp_server.tools.base import ToolDefinition
+
+if TYPE_CHECKING:
+    from acp_server.protocol.state import SessionState
+    from acp_server.tools.base import ToolRegistry
+    from acp_server.tools.executors.filesystem_executor import FileSystemToolExecutor
 
 
 class FileSystemToolDefinitions:
@@ -91,4 +98,43 @@ class FileSystemToolDefinitions:
             },
             kind="write",
             requires_permission=True,
+        )
+
+    @staticmethod
+    def register_all(
+        tool_registry: ToolRegistry,
+        executor: FileSystemToolExecutor,
+    ) -> None:
+        """Зарегистрировать все файловые инструменты в реестре.
+        
+        Регистрирует:
+        - fs/read_text_file с executor для чтения
+        - fs/write_text_file с executor для записи
+        
+        Args:
+            tool_registry: Реестр инструментов для регистрации
+            executor: Executor для выполнения операций с файлами
+        """
+        # Создать обработчик для чтения файлов
+        async def read_handler(session: SessionState, **arguments: Any) -> Any:
+            """Обработчик для fs/read_text_file."""
+            # Добавить тип операции в аргументы
+            arguments["operation"] = "read"
+            return await executor.execute(session, arguments)
+
+        # Создать обработчик для записи файлов
+        async def write_handler(session: SessionState, **arguments: Any) -> Any:
+            """Обработчик для fs/write_text_file."""
+            # Добавить тип операции в аргументы
+            arguments["operation"] = "write"
+            return await executor.execute(session, arguments)
+
+        # Зарегистрировать инструменты в реестре
+        tool_registry.register(
+            FileSystemToolDefinitions.read_text_file(),
+            read_handler,
+        )
+        tool_registry.register(
+            FileSystemToolDefinitions.write_text_file(),
+            write_handler,
         )

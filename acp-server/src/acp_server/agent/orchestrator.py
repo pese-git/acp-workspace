@@ -8,8 +8,8 @@ from acp_server.agent.base import AgentContext, AgentResponse, LLMAgent
 from acp_server.agent.naive import NaiveAgent
 from acp_server.agent.state import OrchestratorConfig
 from acp_server.llm.base import LLMMessage, LLMProvider
-from acp_server.protocol.state import SessionState
-from acp_server.tools.base import ToolRegistry
+from acp_server.protocol.state import ClientRuntimeCapabilities, SessionState
+from acp_server.tools.base import ToolDefinition, ToolRegistry
 
 # Используем structlog для структурированного логирования
 logger = structlog.get_logger()
@@ -124,7 +124,15 @@ class AgentOrchestrator:
         prompt_blocks = [{"type": "text", "text": prompt}]
 
         # Получить доступные инструменты для этой сессии
-        available_tools = self.tool_registry.get_available_tools(session_state.session_id)
+        all_tools = self.tool_registry.get_available_tools(session_state.session_id)
+
+        # Отфильтровать tools согласно ACP спецификации:
+        # Согласно спецификации, capabilities omitted in the initialize request
+        # считаются UNSUPPORTED
+        available_tools = self._filter_tools_by_capabilities(
+            all_tools,
+            session_state.runtime_capabilities,
+        )
 
         # Создать и вернуть AgentContext
         return AgentContext(
@@ -195,3 +203,63 @@ class AgentOrchestrator:
             )
 
         return history
+
+    def _filter_tools_by_capabilities(
+        self,
+        tools: list[ToolDefinition],
+        runtime_capabilities: ClientRuntimeCapabilities | None,
+    ) -> list[ToolDefinition]:
+        """Отфильтровать tools согласно ACP спецификации.
+
+        Согласно спецификации, capabilities omitted in the initialize request
+        считаются UNSUPPORTED и не должны быть доступны для использования.
+
+        Args:
+            tools: Все доступные tools
+            runtime_capabilities: Parsed capabilities от клиента
+
+        Returns:
+            Отфильтрованный список tools
+        """
+        if runtime_capabilities is None:
+            # Если capabilities не указаны, возвращаем пустой список tools
+            logger.debug(
+                "runtime_capabilities is None, filtering out all tools",
+            )
+            return []
+
+        # Отфильтровать tools на основе capabilities
+        filtered_tools: list[ToolDefinition] = []
+
+        for tool in tools:
+            # File System tools
+            if (
+                (
+                    tool.name == "fs/read_text_file"
+                    and runtime_capabilities.fs_read
+                )
+                or (
+                    tool.name == "fs/write_text_file"
+                    and runtime_capabilities.fs_write
+                )
+            ):
+                filtered_tools.append(tool)
+            # Terminal tools
+            elif tool.name.startswith("terminal/"):
+                if runtime_capabilities.terminal:
+                    filtered_tools.append(tool)
+            # Другие tools пропускаем
+            else:
+                # Пока не зарегистрировано других tools
+                pass
+
+        logger.debug(
+            "tools filtered by capabilities",
+            total_tools=len(tools),
+            filtered_tools=len(filtered_tools),
+            fs_read=runtime_capabilities.fs_read,
+            fs_write=runtime_capabilities.fs_write,
+            terminal=runtime_capabilities.terminal,
+        )
+
+        return filtered_tools

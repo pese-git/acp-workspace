@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 from acp_server.tools.base import ToolDefinition
+
+if TYPE_CHECKING:
+    from acp_server.protocol.state import SessionState
+    from acp_server.tools.base import ToolRegistry
+    from acp_server.tools.executors.terminal_executor import TerminalToolExecutor
 
 
 class TerminalToolDefinitions:
@@ -131,4 +138,55 @@ class TerminalToolDefinitions:
             },
             kind="delete",
             requires_permission=False,
+        )
+
+    @staticmethod
+    def register_all(
+        tool_registry: ToolRegistry,
+        executor: TerminalToolExecutor,
+    ) -> None:
+        """Зарегистрировать все терминальные инструменты в реестре.
+        
+        Регистрирует:
+        - terminal/execute_command (create) для запуска команды
+        - terminal/wait_for_exit для ожидания завершения
+        - terminal/release_terminal (release) для освобождения ресурсов
+        
+        Args:
+            tool_registry: Реестр инструментов для регистрации
+            executor: Executor для выполнения терминальных операций
+        """
+        # Создать обработчик для создания терминала и запуска команды
+        async def create_handler(session: SessionState, **arguments: Any) -> Any:
+            """Обработчик для terminal/execute_command (create)."""
+            # Добавить тип операции в аргументы
+            arguments["operation"] = "create"
+            return await executor.execute(session, arguments)
+
+        # Создать обработчик для ожидания завершения
+        async def wait_for_exit_handler(session: SessionState, **arguments: Any) -> Any:
+            """Обработчик для terminal/wait_for_exit."""
+            # Добавить тип операции в аргументы
+            arguments["operation"] = "wait_for_exit"
+            return await executor.execute(session, arguments)
+
+        # Создать обработчик для освобождения терминала
+        async def release_handler(session: SessionState, **arguments: Any) -> Any:
+            """Обработчик для terminal/release_terminal (release)."""
+            # Добавить тип операции в аргументы
+            arguments["operation"] = "release"
+            return await executor.execute(session, arguments)
+
+        # Зарегистрировать инструменты в реестре
+        tool_registry.register(
+            TerminalToolDefinitions.create(),
+            create_handler,
+        )
+        tool_registry.register(
+            TerminalToolDefinitions.wait_for_exit(),
+            wait_for_exit_handler,
+        )
+        tool_registry.register(
+            TerminalToolDefinitions.release(),
+            release_handler,
         )

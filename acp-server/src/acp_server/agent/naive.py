@@ -73,12 +73,15 @@ class NaiveAgent(LLMAgent):
         # Получить список инструментов для этой сессии
         available_tools = self.tools.get_available_tools(context.session_id)
 
-        # Преобразовать определения инструментов в формат для LLM
+        # Преобразовать определения инструментов в формат OpenAI function calling
         tools_dict = [
             {
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": tool.parameters,
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.parameters,
+                }
             }
             for tool in available_tools
         ]

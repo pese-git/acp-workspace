@@ -35,7 +35,8 @@ class SessionFactory:
             mcp_servers: Список MCP-серверов (опционально)
             config_values: Значения конфигурации сессии (опционально)
             available_commands: Доступные slash-команды (опционально)
-            runtime_capabilities: Runtime capabilities клиента (опционально)
+            runtime_capabilities: Runtime capabilities клиента (опционально,
+                используется для фильтрации tools)
             session_id: ID сессии (генерируется автоматически, если не указан)
 
         Returns:

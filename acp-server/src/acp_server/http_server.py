@@ -13,18 +13,23 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
+from typing import TYPE_CHECKING
 
 import structlog
 from aiohttp import WSMsgType, web
 
 from .agent.orchestrator import AgentOrchestrator
 from .agent.state import OrchestratorConfig
+from .client_rpc.service import ClientRPCService
 from .config import AppConfig
 from .llm import LLMProvider, MockLLMProvider, OpenAIProvider
 from .messages import ACPMessage
 from .protocol import ACPProtocol, ProtocolOutcome
 from .storage import SessionStorage
 from .tools.registry import SimpleToolRegistry
+
+if TYPE_CHECKING:
+    from .tools.base import ToolRegistry
 
 # Получаем структурированный logger
 logger = structlog.get_logger()
@@ -92,6 +97,8 @@ class ACPHttpServer:
         self.config = config or AppConfig()
         # Оркестратор агента инициализируется в методе run()
         self._agent_orchestrator: AgentOrchestrator | None = None
+        # Реестр инструментов инициализируется в методе run()
+        self._tool_registry: ToolRegistry | None = None
 
         # Логируем инициализацию сервера
         logger.debug(
@@ -159,12 +166,12 @@ class ACPHttpServer:
         # Инициализируем LLM провайдера на основе конфигурации
         llm_provider = await self._initialize_llm_provider()
 
+        # Создаем реестр инструментов для всего сервера
+        self._tool_registry = SimpleToolRegistry()
+
         # Создаем AgentOrchestrator если есть провайдер
         agent_orchestrator: AgentOrchestrator | None = None
         if llm_provider is not None:
-            # Создаем реестр инструментов (пока пустой, можно расширить в будущем)
-            tool_registry = SimpleToolRegistry()
-
             # Создаем конфигурацию оркестратора на основе глобального конфига
             orchestrator_config = OrchestratorConfig(
                 enabled=True,
@@ -175,11 +182,11 @@ class ACPHttpServer:
                 llm_provider_class="openai" if self.config.llm.provider == "openai" else "mock",
             )
 
-            # Инициализируем оркестратор
+            # Инициализируем оркестратор со общим реестром инструментов
             agent_orchestrator = AgentOrchestrator(
                 config=orchestrator_config,
                 llm_provider=llm_provider,
-                tool_registry=tool_registry,
+                tool_registry=self._tool_registry,
             )
 
             logger.info(
@@ -242,11 +249,25 @@ class ACPHttpServer:
 
         ws = web.WebSocketResponse()
         await ws.prepare(request)
+        
+        # Создаем callback для отправки RPC запросов клиенту
+        async def send_rpc_request(request_dict: dict) -> None:
+            """Отправляет JSON-RPC request клиенту."""
+            await ws.send_json(request_dict)
+        
+        # Создаем ClientRPCService с пустыми capabilities (будут обновлены после initialize)
+        client_rpc_service = ClientRPCService(
+            send_request_callback=send_rpc_request,
+            client_capabilities={},
+        )
+        
         protocol = ACPProtocol(
             require_auth=self.require_auth,
             auth_api_key=self.auth_api_key,
             storage=self.storage,
             agent_orchestrator=self._agent_orchestrator,
+            tool_registry=self._tool_registry,
+            client_rpc_service=client_rpc_service,
         )
         # Храним отложенные завершения prompt-turn по sessionId в рамках WS-соединения.
         deferred_prompt_tasks: dict[str, asyncio.Task[None]] = {}
@@ -278,6 +299,15 @@ class ACPHttpServer:
                         else:
                             if method_name == "initialize":
                                 initialized = True
+                                # Обновляем capabilities после инициализации
+                                if isinstance(acp_request.params, dict):
+                                    caps = acp_request.params.get("clientCapabilities", {})
+                                    if isinstance(caps, dict):
+                                        client_rpc_service._capabilities = caps
+                                        conn_logger.debug(
+                                            "client_rpc_service capabilities updated",
+                                            capabilities=caps,
+                                        )
                             elif not initialized:
                                 if acp_request.is_notification:
                                     outcome = ProtocolOutcome()

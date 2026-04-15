@@ -27,6 +27,8 @@ from .state import (
 
 if TYPE_CHECKING:
     from ..agent.orchestrator import AgentOrchestrator
+    from ..client_rpc.service import ClientRPCService
+    from ..tools.base import ToolRegistry
 
 
 class ACPProtocol:
@@ -47,6 +49,8 @@ class ACPProtocol:
         auth_api_key: str | None = None,
         storage: SessionStorage | None = None,
         agent_orchestrator: AgentOrchestrator | None = None,
+        client_rpc_service: ClientRPCService | None = None,
+        tool_registry: ToolRegistry | None = None,
     ) -> None:
         """Инициализирует протокол и хранилище сессий.
 
@@ -55,6 +59,8 @@ class ACPProtocol:
             auth_api_key: API ключ для аутентификации.
             storage: Хранилище сессий (по умолчанию InMemoryStorage).
             agent_orchestrator: Оркестратор LLM-агента для обработки prompts (опционально).
+            client_rpc_service: Сервис ClientRPC для выполнения инструментов (опционально).
+            tool_registry: Реестр инструментов для регистрации и выполнения tools (опционально).
 
         Пример использования:
             protocol = ACPProtocol()
@@ -77,6 +83,12 @@ class ACPProtocol:
 
         # Оркестратор LLM-агента для обработки prompt-turns через агента
         self._agent_orchestrator = agent_orchestrator
+
+        # Сервис ClientRPC для выполнения встроенных инструментов
+        self._client_rpc_service = client_rpc_service
+
+        # Реестр инструментов для регистрации и выполнения tools
+        self._tool_registry = tool_registry
 
         # Последние capabilities, согласованные через initialize.
         # Для in-memory demo-сервера это достаточно; по мере роста можно
@@ -274,6 +286,8 @@ class ACPProtocol:
                 self._config_specs,
                 agent_orchestrator=self._agent_orchestrator,
                 storage=self._storage,
+                tool_registry=self._tool_registry,
+                client_rpc_service=self._client_rpc_service,
             )
 
         if method == "session/cancel":

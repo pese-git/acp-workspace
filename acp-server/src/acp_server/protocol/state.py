@@ -56,6 +56,10 @@ class SessionState:
     # Поздние ответы на такие запросы должны игнорироваться детерминированно.
     cancelled_client_rpc_requests: set[JsonRpcId] = field(default_factory=set)
     # Runtime-capabilities клиента, зафиксированные для этой сессии.
+    # Используется для фильтрации доступных tools согласно спецификации ACP:
+    # "Clients and Agents MUST treat all capabilities omitted in the
+    # initialize request as UNSUPPORTED"
+    # Структура: {fs_read: bool, fs_write: bool, terminal: bool}
     runtime_capabilities: ClientRuntimeCapabilities | None = None
     # История событий: session/update, permission requests и т.д.
     # Используется для полного восстановления истории при перезагрузке сессии.

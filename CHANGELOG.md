@@ -6,6 +6,24 @@
 
 ## [Unreleased]
 
+### Fixed - Tool Registry Duplication (2026-04-15)
+
+**Исправлена критическая ошибка: агент не имел доступа к зарегистрированным инструментам**
+
+- **Проблема**: `ToolRegistry` создавался в двух разных местах, что привело к тому, что инструменты, зарегистрированные в одном реестре, были недоступны другому.
+- **Решение**: 
+  - Добавлен параметр `tool_registry` в `ACPProtocol.__init__()`
+  - Единый экземпляр `ToolRegistry` создается в `ACPHttpServer` и передается через всю цепочку
+  - Результат: агент теперь получает доступ к инструментам (`num_tools=5` вместо `num_tools=0`)
+
+### Fixed - Client Capabilities Transmission (2026-04-15)
+
+**Исправлена передача capabilities от клиента согласно ACP спецификации**
+
+- acp-client теперь отправляет правильные `clientCapabilities` в `initialize` запросе
+- `AgentOrchestrator` фильтрует инструменты на основе объявленных capabilities
+- Соответствие спецификации: "Clients and Agents MUST treat all capabilities omitted in the initialize request as UNSUPPORTED"
+
 ### Added - Этап 3: Tool Calls Integration (2026-04-14)
 
 **Полная реализация встроенных инструментов для взаимодействия с локальной средой**

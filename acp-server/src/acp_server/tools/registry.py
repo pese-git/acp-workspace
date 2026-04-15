@@ -158,6 +158,7 @@ class SimpleToolRegistry(ToolRegistry):
         session_id: str,
         tool_name: str,
         arguments: dict[str, Any],
+        session: Any = None,
     ) -> ToolExecutionResult:
         """Выполнить инструмент асинхронно с поддержкой async executors.
 
@@ -168,6 +169,7 @@ class SimpleToolRegistry(ToolRegistry):
             session_id: ID сессии для контекста выполнения
             tool_name: Имя инструмента
             arguments: Аргументы для выполнения
+            session: Опциональный объект SessionState для executors (опционально)
 
         Returns:
             ToolExecutionResult с успехом/ошибкой и metadata если доступен
@@ -186,7 +188,11 @@ class SimpleToolRegistry(ToolRegistry):
             # Проверяем является ли обработчик асинхронным
             if inspect.iscoroutinefunction(handler):
                 # Для async executors вызываем await
-                result = await handler(**arguments)
+                # Если session доступен, передаём его в handler
+                if session is not None and "session" in inspect.signature(handler).parameters:
+                    result = await handler(session=session, **arguments)
+                else:
+                    result = await handler(**arguments)
             else:
                 # Для синхронных функций вызываем напрямую
                 output = handler(**arguments)

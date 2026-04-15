@@ -593,11 +593,12 @@ class PromptOrchestrator:
                         )
                     )
 
-                    # Выполнить tool
+                    # Выполнить tool с передачей session для executors
                     result = await self.tool_registry.execute_tool(
                         session_id,
                         tool_name,
                         tool_arguments,
+                        session=session,
                     )
 
                     # Обновить статус tool call

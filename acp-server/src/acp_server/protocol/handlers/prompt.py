@@ -96,6 +96,10 @@ def create_prompt_orchestrator(
         )
         # Для совместимости с session_cancel, который не нуждается в RPC
         client_rpc_service = None  # type: ignore[assignment]
+    else:
+        logger.info(
+            "client_rpc_service provided"
+        )
 
     orchestrator = PromptOrchestrator(
         state_manager=state_manager,
