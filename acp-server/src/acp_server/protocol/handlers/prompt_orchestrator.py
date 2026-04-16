@@ -15,6 +15,7 @@ from ...client_rpc.service import ClientRPCService
 from ...messages import ACPMessage, JsonRpcId
 from ...tools.base import ToolRegistry
 from ..content.extractor import ContentExtractor
+from ..content.formatter import ContentFormatter
 from ..content.validator import ContentValidator
 from ..state import ProtocolOutcome, SessionState
 from .client_rpc_handler import ClientRPCHandler
@@ -77,9 +78,10 @@ class PromptOrchestrator:
         self.tool_registry = tool_registry
         self.client_rpc_service = client_rpc_service
 
-        # Content processing (Фаза 2)
+        # Content processing (Фаза 2 и Фаза 3)
         self.content_extractor = ContentExtractor()
         self.content_validator = ContentValidator()
+        self.content_formatter = ContentFormatter()  # Фаза 3: LLM formatting
 
         # Создать bridge и permission checker для executors только если RPC service доступен
         if client_rpc_service is not None:
@@ -585,6 +587,19 @@ class PromptOrchestrator:
                     tool_call_state = session.tool_calls.get(tool_call_id)
                     if tool_call_state:
                         tool_call_state.result_content = extracted_content.content_items
+
+                    # Форматировать content для LLM (Фаза 3)
+                    provider = session.config_values.get("llm_provider", "openai")
+                    formatted_for_llm = self.content_formatter.format_for_llm(
+                        extracted_content,
+                        provider=provider
+                    )
+                    logger.debug(
+                        "tool_result_formatted_for_llm",
+                        tool_call_id=tool_call_id,
+                        provider=provider,
+                        formatted_keys=list(formatted_for_llm.keys())
+                    )
 
                     # Обновить статус tool call
                     if result.success:

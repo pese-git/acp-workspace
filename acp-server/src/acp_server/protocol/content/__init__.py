@@ -6,6 +6,7 @@
 from .audio import AudioContent
 from .embedded import EmbeddedResourceContent
 from .extractor import ContentExtractor, ExtractedContent
+from .formatter import ContentFormatter
 from .image import ImageContent
 from .resource_link import ResourceLinkContent
 from .text import TextContent
@@ -22,4 +23,5 @@ __all__ = [
     "ContentExtractor",
     "ExtractedContent",
     "ContentValidator",
+    "ContentFormatter",
 ]
