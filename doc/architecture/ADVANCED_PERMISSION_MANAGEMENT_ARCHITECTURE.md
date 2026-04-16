@@ -747,3 +747,906 @@ acp-cli permission reset-all          # Reset all permissions
 **Версия документа**: 1.0
 **Последнее обновление**: 2026-04-16
 **Статус**: Анализ и архитектура завершены, готово к реализации Фазы 2
+
+---
+
+# 13. Phase 3: Global Policy Management — Детальное проектирование
+
+## 13.1 Обзор Phase 3
+
+**Цель**: Реализовать глобальные policies, применяемые ко всем сессиям, с fallback chain:
+```
+Session Policy > Global Policy > Ask User
+```
+
+**Проблема**: Пользователю нужно переустанавливать разрешения для каждой новой сессии
+
+**Решение**: Хранилище глобальных policies (`~/.acp/global_permissions.json`) с механизмом fallback
+
+**Статус**: Готово к реализации
+
+---
+
+## 13.2 GlobalPolicyStorage: Детальная спецификация
+
+### 13.2.1 Класс GlobalPolicyStorage
+
+**Назначение**: Работать с файлом `~/.acp/global_permissions.json`, обеспечивая thread-safe операции
+
+**Расположение**: `acp-server/src/acp_server/storage/global_policy_storage.py`
+
+**Класс**:
+```python
+class GlobalPolicyStorage:
+    """Хранилище глобальных policies в JSON файле.
+    
+    Поддерживает CRUD операции для глобальных разрешений,
+    применяемых ко всем сессиям. Thread-safe благодаря asyncio.Lock.
+    
+    Файл: ~/.acp/global_permissions.json
+    Формат: JSON с metadata для каждого policy
+    """
+    
+    def __init__(self, base_path: Path | str = None) -> None:
+        """Инициализирует хранилище.
+        
+        Args:
+            base_path: Директория для хранения. Default: ~/.acp
+        """
+        self.base_path = Path(base_path or Path.home() / ".acp")
+        self.base_path.mkdir(parents=True, exist_ok=True)
+        self.policy_file = self.base_path / "global_permissions.json"
+        self._lock = asyncio.Lock()
+        self._cache: dict[str, str] | None = None
+    
+    async def load(self) -> dict[str, str]:
+        """Загружает все глобальные policies из файла.
+        
+        Returns:
+            dict[str, str]: {tool_kind: decision} где decision в allow_always/reject_always
+        
+        Raises:
+            StorageError: Если файл повреждён или недоступен
+        """
+    
+    async def save(self, policies: dict[str, str]) -> None:
+        """Сохраняет все policies в файл (atomic write).
+        
+        Args:
+            policies: dict[str, str] с policies
+        
+        Raises:
+            StorageError: Если не удалось записать файл
+        """
+    
+    async def get_policy(self, tool_kind: str) -> str | None:
+        """Получает decision для tool_kind.
+        
+        Args:
+            tool_kind: Тип инструмента (например, 'execute')
+        
+        Returns:
+            'allow_always', 'reject_always' или None
+        """
+    
+    async def set_policy(self, tool_kind: str, decision: str) -> None:
+        """Устанавливает decision для tool_kind.
+        
+        Args:
+            tool_kind: Тип инструмента
+            decision: 'allow_always' или 'reject_always'
+        
+        Raises:
+            ValueError: Если decision некорректен
+        """
+    
+    async def delete_policy(self, tool_kind: str) -> bool:
+        """Удаляет policy для tool_kind.
+        
+        Returns:
+            True если удалён, False если не существовал
+        """
+    
+    async def list_policies(self) -> dict[str, str]:
+        """Возвращает все policies.
+        
+        Returns:
+            Копия всех текущих policies
+        """
+    
+    async def clear_all(self) -> None:
+        """Удаляет все глобальные policies (reset)."""
+```
+
+### 13.2.2 JSON Schema для `~/.acp/global_permissions.json`
+
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Global Permission Policies",
+  "description": "Глобальные разрешения, применяемые ко всем ACP сессиям",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "integer",
+      "description": "Версия формата (для миграции)",
+      "default": 1,
+      "examples": [1]
+    },
+    "policies": {
+      "type": "object",
+      "description": "Словарь policies по tool kind",
+      "additionalProperties": {
+        "type": "string",
+        "enum": ["allow_always", "reject_always"],
+        "description": "Решение для tool kind"
+      },
+      "examples": {
+        "execute": "allow_always",
+        "read": "reject_always",
+        "write": "allow_always"
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Метаинформация о policies (future use)",
+      "properties": {
+        "updated_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Время последнего обновления"
+        },
+        "updated_by": {
+          "type": "string",
+          "description": "Кто обновил (future: user/system)"
+        }
+      }
+    }
+  },
+  "required": ["version", "policies"],
+  "additionalProperties": false
+}
+```
+
+**Пример файла**:
+```json
+{
+  "version": 1,
+  "policies": {
+    "execute": "allow_always",
+    "read": "reject_always",
+    "write": "allow_always"
+  },
+  "metadata": {
+    "updated_at": "2026-04-16T14:30:00Z",
+    "updated_by": "user"
+  }
+}
+```
+
+---
+
+## 13.3 GlobalPolicyManager: Детальная спецификация
+
+### 13.3.1 Класс GlobalPolicyManager
+
+**Назначение**: Singleton для работы с глобальными policies
+
+**Расположение**: `acp-server/src/acp_server/protocol/handlers/global_policy_manager.py`
+
+**Класс**:
+```python
+class GlobalPolicyManager:
+    """Singleton manager для глобальных policies.
+    
+    Обеспечивает:
+    - Загрузку/сохранение глобальных policies
+    - Кэширование для performance
+    - Integration с PermissionManager
+    - Fallback chain: session > global > ask
+    
+    Пример использования:
+        manager = GlobalPolicyManager.get_instance()
+        decision = await manager.get_global_policy('execute')
+        await manager.set_global_policy('execute', 'allow_always')
+    """
+    
+    _instance: ClassVar[GlobalPolicyManager | None] = None
+    _lock: ClassVar[asyncio.Lock] = asyncio.Lock()
+    
+    def __init__(self, storage: GlobalPolicyStorage | None = None) -> None:
+        """Инициализирует manager.
+        
+        Args:
+            storage: GlobalPolicyStorage instance. Default: создаёт новый
+        """
+        self.storage = storage or GlobalPolicyStorage()
+        self._cache: dict[str, str] = {}
+        self._initialized = False
+    
+    @classmethod
+    async def get_instance(cls) -> GlobalPolicyManager:
+        """Возвращает singleton instance (thread-safe).
+        
+        Returns:
+            GlobalPolicyManager instance
+        """
+    
+    async def initialize(self) -> None:
+        """Загружает policies из файла при запуске (one-time).
+        
+        Raises:
+            StorageError: Если файл повреждён
+        """
+    
+    async def get_global_policy(self, tool_kind: str) -> str | None:
+        """Получает глобальный policy для tool_kind.
+        
+        Args:
+            tool_kind: Тип инструмента
+        
+        Returns:
+            'allow_always', 'reject_always' или None
+        """
+    
+    async def set_global_policy(
+        self,
+        tool_kind: str,
+        decision: str,
+    ) -> None:
+        """Устанавливает глобальный policy.
+        
+        Args:
+            tool_kind: Тип инструмента
+            decision: 'allow_always' или 'reject_always'
+        
+        Raises:
+            ValueError: Если decision некорректен
+        """
+    
+    async def delete_global_policy(self, tool_kind: str) -> bool:
+        """Удаляет глобальный policy.
+        
+        Returns:
+            True если удалён, False если не существовал
+        """
+    
+    async def list_global_policies(self) -> dict[str, str]:
+        """Возвращает все глобальные policies.
+        
+        Returns:
+            Копия всех policies
+        """
+    
+    async def clear_all_policies(self) -> None:
+        """Удаляет все глобальные policies (reset)."""
+```
+
+### 13.3.2 Кэширование и Synchronization
+
+**Механизм кэширования**:
+- Кэш загружается один раз при `initialize()`
+- При изменении (set/delete) кэш обновляется и файл пересохраняется
+- Invalidation: автоматическое при `set_policy()` или `delete_policy()`
+
+**Thread-safety**:
+- `asyncio.Lock` на уровне методов `set_policy()` и `delete_policy()`
+- `GlobalPolicyStorage` имеет собственный `asyncio.Lock` для файловых операций
+
+---
+
+## 13.4 Integration с PermissionManager
+
+### 13.4.1 Модифицированная функция resolve_remembered_permission_decision()
+
+**Текущая реализация** (`permissions.py`):
+```python
+def resolve_remembered_permission_decision(*, session: SessionState, tool_kind: str) -> str:
+    """Возвращает 'allow', 'reject' или 'ask'"""
+    remembered = session.permission_policy.get(tool_kind)
+    if remembered == "allow_always":
+        return "allow"
+    if remembered == "reject_always":
+        return "reject"
+    return "ask"
+```
+
+**Новая реализация (с fallback)**:
+```python
+async def resolve_remembered_permission_decision(
+    *,
+    session: SessionState,
+    tool_kind: str,
+    global_manager: GlobalPolicyManager | None = None,
+) -> str:
+    """Возвращает 'allow', 'reject' или 'ask' с fallback chain.
+    
+    Fallback chain:
+    1. Check session.permission_policy (Session-Level)
+    2. Check global policy (Global-Level)
+    3. Return 'ask' (Ask User)
+    
+    Args:
+        session: SessionState с session-level policies
+        tool_kind: Тип инструмента
+        global_manager: GlobalPolicyManager instance (optional)
+    
+    Returns:
+        'allow', 'reject' или 'ask'
+    """
+    # Step 1: Check session policy
+    remembered = session.permission_policy.get(tool_kind)
+    if remembered == "allow_always":
+        return "allow"
+    if remembered == "reject_always":
+        return "reject"
+    
+    # Step 2: Check global policy (если доступен manager)
+    if global_manager:
+        global_decision = await global_manager.get_global_policy(tool_kind)
+        if global_decision == "allow_always":
+            return "allow"
+        if global_decision == "reject_always":
+            return "reject"
+    
+    # Step 3: Ask user
+    return "ask"
+```
+
+**Вызов из handlers**:
+```python
+# В prompt handler, где вызывается resolve_remembered_permission_decision
+global_manager = await GlobalPolicyManager.get_instance()
+decision = await resolve_remembered_permission_decision(
+    session=session,
+    tool_kind=tool_kind,
+    global_manager=global_manager,
+)
+```
+
+### 13.4.2 Backward Compatibility
+
+- Существующий код, вызывающий `resolve_remembered_permission_decision()` без `global_manager`, продолжит работать
+- `global_manager` — опциональный параметр с default `None`
+- Если `global_manager=None`, fallback работает как раньше (только session policy)
+
+---
+
+## 13.5 CLI Commands Specification
+
+### 13.5.1 Команды управления policies
+
+**Команда 1: Просмотр всех глобальных policies**
+```bash
+acp-server permissions list
+```
+
+**Output** (JSON format):
+```json
+{
+  "global_policies": {
+    "execute": "allow_always",
+    "read": "reject_always",
+    "write": "allow_always"
+  },
+  "count": 3,
+  "policy_file": "/Users/sergey/.acp/global_permissions.json"
+}
+```
+
+**Output** (Table format):
+```
+Global Permissions:
+┌─────────┬────────────┐
+│ Tool    │ Decision   │
+├─────────┼────────────┤
+│ execute │ allow_always │
+│ read    │ reject_always │
+│ write   │ allow_always │
+└─────────┴────────────┘
+Total: 3 policies
+```
+
+---
+
+**Команда 2: Установить global policy**
+```bash
+acp-server permissions set <tool_kind> <decision>
+```
+
+**Примеры**:
+```bash
+acp-server permissions set execute allow_always
+acp-server permissions set read reject_always
+```
+
+**Output**:
+```
+✓ Set global policy: execute = allow_always
+```
+
+**Валидация**:
+- `tool_kind` — любая строка (no validation, пользователь должен знать свои tool kinds)
+- `decision` — только `allow_always` или `reject_always` (case-insensitive)
+
+---
+
+**Команда 3: Сбросить policy**
+```bash
+acp-server permissions reset [tool_kind]
+```
+
+**Без аргумента** (сбросить все):
+```bash
+acp-server permissions reset
+```
+Output:
+```
+✓ Reset all global permissions (3 policies deleted)
+```
+
+**С аргументом** (сбросить конкретный):
+```bash
+acp-server permissions reset execute
+```
+Output:
+```
+✓ Reset global policy for: execute
+```
+
+или если не существует:
+```
+✗ No global policy found for: execute
+```
+
+---
+
+### 13.5.2 CLI Implementation Details
+
+**Расположение**: `acp-server/src/acp_server/cli.py`
+
+**Субкоманда**: 
+```python
+def add_permissions_subcommand(subparsers) -> None:
+    """Добавляет subcommand для управления permissions.
+    
+    Usage:
+        acp-server permissions list
+        acp-server permissions set <tool_kind> <decision>
+        acp-server permissions reset [tool_kind]
+    """
+```
+
+**Структура argparse**:
+```python
+parser = argparse.ArgumentParser(prog="acp-server")
+subparsers = parser.add_subparsers(dest="command")
+
+# Main 'run' command (existing)
+run_parser = subparsers.add_parser("run")
+# ... run-specific args
+
+# New 'permissions' command
+perm_parser = subparsers.add_parser("permissions")
+perm_subparsers = perm_parser.add_subparsers(dest="perm_command")
+
+# permissions list
+list_parser = perm_subparsers.add_parser("list")
+list_parser.add_argument(
+    "--format",
+    choices=["json", "table"],
+    default="table",
+    help="Output format"
+)
+
+# permissions set
+set_parser = perm_subparsers.add_parser("set")
+set_parser.add_argument("tool_kind")
+set_parser.add_argument("decision")
+
+# permissions reset
+reset_parser = perm_subparsers.add_parser("reset")
+reset_parser.add_argument(
+    "tool_kind",
+    nargs="?",
+    help="Tool kind to reset (optional, reset all if not specified)"
+)
+```
+
+---
+
+## 13.6 Диаграммы Phase 3
+
+### 13.6.1 Global Policy Fallback Chain (Sequence Diagram)
+
+```mermaid
+sequenceDiagram
+    participant Клиент
+    participant Protocol as ACPProtocol
+    participant PermMgr as PermissionManager
+    participant GlobalMgr as GlobalPolicyManager
+    participant SessionState
+    
+    Клиент->>Protocol: session/prompt (tool_kind="execute")
+    Protocol->>PermMgr: resolve_remembered_permission_decision()
+    
+    PermMgr->>SessionState: Check session.permission_policy[execute]
+    SessionState-->>PermMgr: Not found (None)
+    
+    PermMgr->>GlobalMgr: get_global_policy(execute)
+    GlobalMgr-->>PermMgr: 'allow_always'
+    
+    PermMgr-->>Protocol: Return 'allow'
+    Protocol->>Protocol: Skip permission request
+    Protocol->>Protocol: Execute tool
+    Protocol-->>Клиент: Tool result
+```
+
+---
+
+### 13.6.2 Global Policy Management Architecture
+
+```mermaid
+classDiagram
+    class GlobalPolicyStorage {
+        -base_path: Path
+        -policy_file: Path
+        -_lock: asyncio.Lock
+        -_cache: dict[str, str]
+        +load() dict
+        +save(policies) void
+        +get_policy(tool_kind) str|None
+        +set_policy(tool_kind, decision) void
+        +delete_policy(tool_kind) bool
+        +list_policies() dict
+        +clear_all() void
+    }
+    
+    class GlobalPolicyManager {
+        -storage: GlobalPolicyStorage
+        -_cache: dict[str, str]
+        -_initialized: bool
+        -_instance: GlobalPolicyManager
+        -_lock: asyncio.Lock
+        +get_instance() GlobalPolicyManager
+        +initialize() void
+        +get_global_policy(tool_kind) str|None
+        +set_global_policy(tool_kind, decision) void
+        +delete_global_policy(tool_kind) bool
+        +list_global_policies() dict
+        +clear_all_policies() void
+    }
+    
+    class PermissionManager {
+        +resolve_remembered_permission_decision() str
+    }
+    
+    class ACPProtocol {
+        -global_manager: GlobalPolicyManager
+        +handle_prompt() ProtocolOutcome
+    }
+    
+    GlobalPolicyManager o-- GlobalPolicyStorage
+    PermissionManager --> GlobalPolicyManager
+    ACPProtocol --> GlobalPolicyManager
+    ACPProtocol --> PermissionManager
+```
+
+---
+
+## 13.7 Implementation Checklist
+
+### 13.7.1 Создание новых файлов
+
+- [ ] **`acp-server/src/acp_server/storage/global_policy_storage.py`**
+  - [ ] Класс `GlobalPolicyStorage`
+  - [ ] Методы load/save/get/set/delete/list/clear_all
+  - [ ] Обработка JSON schema validation
+  - [ ] Error handling (файл повреждён, нет доступа и т.д.)
+  - [ ] Atomic file writes (временные файлы + rename)
+  - [ ] Thread-safe операции (asyncio.Lock)
+  - [ ] Unit tests (test_global_policy_storage.py)
+
+- [ ] **`acp-server/src/acp_server/protocol/handlers/global_policy_manager.py`**
+  - [ ] Класс `GlobalPolicyManager` (Singleton)
+  - [ ] Методы get/set/delete/list/clear + initialize
+  - [ ] Кэширование с invalidation
+  - [ ] Thread-safe singleton pattern
+  - [ ] Integration с GlobalPolicyStorage
+  - [ ] Unit tests (test_global_policy_manager.py)
+
+### 13.7.2 Модификация существующих файлов
+
+- [ ] **`acp-server/src/acp_server/protocol/handlers/permissions.py`**
+  - [ ] Обновить `resolve_remembered_permission_decision()` сигнатуру
+  - [ ] Добавить fallback логику (session > global > ask)
+  - [ ] Maintain backward compatibility (optional global_manager param)
+  - [ ] Update docstrings
+
+- [ ] **`acp-server/src/acp_server/protocol/core.py` (ACPProtocol)**
+  - [ ] Инициализировать GlobalPolicyManager при startup
+  - [ ] Вызывать `await global_manager.initialize()` на startup
+  - [ ] Передавать global_manager в resolve_remembered_permission_decision()
+
+- [ ] **`acp-server/src/acp_server/cli.py`**
+  - [ ] Добавить `permissions` subcommand
+  - [ ] Реализовать `list`, `set`, `reset` sub-subcommands
+  - [ ] Add CLI handlers для каждой команды
+  - [ ] Output formatting (JSON/table)
+  - [ ] Error handling и user feedback
+
+- [ ] **`acp-server/src/acp_server/storage/__init__.py`**
+  - [ ] Export `GlobalPolicyStorage`
+
+### 13.7.3 Тесты
+
+**Unit Tests**:
+- [ ] `acp-server/tests/test_global_policy_storage.py`
+  - [ ] test_load_empty_file_returns_empty_dict
+  - [ ] test_save_creates_valid_json
+  - [ ] test_get_policy_returns_decision
+  - [ ] test_set_policy_updates_file
+  - [ ] test_delete_policy_removes_entry
+  - [ ] test_clear_all_resets_file
+  - [ ] test_concurrent_writes_are_safe
+  - [ ] test_corrupted_json_raises_storage_error
+  - [ ] test_invalid_decision_raises_value_error
+
+- [ ] `acp-server/tests/test_global_policy_manager.py`
+  - [ ] test_singleton_pattern
+  - [ ] test_initialize_loads_from_storage
+  - [ ] test_get_global_policy
+  - [ ] test_set_global_policy
+  - [ ] test_delete_global_policy
+  - [ ] test_list_global_policies
+  - [ ] test_cache_invalidation_on_set
+  - [ ] test_concurrent_set_operations
+
+**Integration Tests**:
+- [ ] `acp-server/tests/test_protocol_global_policy.py`
+  - [ ] test_global_policy_fallback_when_no_session_policy
+  - [ ] test_session_policy_takes_precedence_over_global
+  - [ ] test_permission_request_skipped_with_global_policy
+  - [ ] test_global_policy_persists_across_sessions
+
+**CLI Tests**:
+- [ ] `acp-server/tests/test_cli_permissions.py`
+  - [ ] test_permissions_list_command
+  - [ ] test_permissions_set_command
+  - [ ] test_permissions_reset_command_single
+  - [ ] test_permissions_reset_command_all
+  - [ ] test_invalid_decision_rejected
+  - [ ] test_output_formats_json_and_table
+
+### 13.7.4 Документация
+
+- [ ] **`acp-server/README.md`**
+  - [ ] Add "Global Policy Management" section
+  - [ ] Show CLI usage examples
+  - [ ] Explain fallback chain
+  - [ ] Link to architecture doc
+
+- [ ] **`CHANGELOG.md`**
+  - [ ] Add Phase 3 completion note
+  - [ ] List new files and modifications
+  - [ ] Document breaking changes (if any)
+
+- [ ] **Update this architecture document**
+  - [ ] Mark Phase 3 as DONE
+  - [ ] Update status summary
+
+### 13.7.5 Verification
+
+- [ ] Run `make check` — All tests pass
+- [ ] Run `uv run --directory acp-server ruff check .`
+- [ ] Run `uv run --directory acp-server python -m pytest tests/test_global_policy*.py tests/test_cli_permissions.py -v`
+- [ ] Manual testing:
+  - [ ] `acp-server permissions list` (empty)
+  - [ ] `acp-server permissions set execute allow_always`
+  - [ ] `acp-server permissions list` (shows 1 policy)
+  - [ ] `acp-server permissions reset execute`
+  - [ ] `acp-server permissions list` (empty again)
+- [ ] E2E: Create 2 sessions, set global policy, verify applied in both
+
+---
+
+## 13.8 Backward Compatibility Analysis
+
+### 13.8.1 Что остаётся неизменным
+
+| Компонент | Статус | Примечание |
+|-----------|--------|-----------|
+| `SessionState.permission_policy` | ✅ Неизменён | По-прежнему dict[str, str] |
+| `resolve_remembered_permission_decision()` сигнатура | ⚠️ Расширена | Добавлен optional параметр `global_manager` |
+| JSON format session files | ✅ Неизменён | Сохраняется в том же виде |
+| CLI команды `acp-server run` | ✅ Неизменены | Работают как раньше |
+| Permission options (allow_once/always/reject_once/always) | ✅ Неизменены | Поведение идентично |
+
+### 13.8.2 Что изменяется
+
+| Компонент | Было | Стало | Breaking? |
+|-----------|------|-------|-----------|
+| Fallback logic | Session > Ask | Session > Global > Ask | Нет (backward compatible) |
+| Global policies | ❌ Не существовали | ✅ Поддерживаются | Нет (опция) |
+| CLI | Только `run` command | `run` + `permissions` | Нет (новая команда) |
+
+### 13.8.3 Scenarios
+
+**Сценарий 1: Existing code без global manager**
+```python
+# Old code (до Phase 3)
+decision = resolve_remembered_permission_decision(
+    session=session,
+    tool_kind="execute",
+)
+# Работает как раньше: session > ask
+```
+
+**Результат**: ✅ Работает, global_manager=None → fallback игнорируется
+
+---
+
+**Сценарий 2: New code с global manager**
+```python
+# New code (с Phase 3)
+global_manager = await GlobalPolicyManager.get_instance()
+decision = await resolve_remembered_permission_decision(
+    session=session,
+    tool_kind="execute",
+    global_manager=global_manager,
+)
+# Работает как новое: session > global > ask
+```
+
+**Результат**: ✅ Работает с fallback chain
+
+---
+
+**Сценарий 3: Old session files (до Phase 3)**
+```json
+{
+  "session_id": "sess_123",
+  "permission_policy": {
+    "execute": "allow_always"
+  }
+}
+```
+
+**При загрузке в Phase 3**:
+- `permission_policy` загружается как обычно
+- Если есть global policy для "execute", session policy имеет приоритет
+- Работает как ожидается (session > global)
+
+**Результат**: ✅ Полная совместимость
+
+---
+
+**Сценарий 4: New global policies file (`~/.acp/global_permissions.json`)**
+```json
+{
+  "version": 1,
+  "policies": {
+    "read": "reject_always"
+  }
+}
+```
+
+**При отсутствии этого файла** (старые установки):
+- `GlobalPolicyStorage.load()` возвращает пустой dict
+- `GlobalPolicyManager.get_global_policy()` возвращает None
+- Fallback работает как раньше (session > ask)
+
+**Результат**: ✅ Graceful degradation
+
+---
+
+## 13.9 Performance Considerations
+
+### 13.9.1 Кэширование
+
+**GlobalPolicyStorage**:
+- Кэш в памяти (`self._cache`)
+- Загружается один раз при `GlobalPolicyManager.initialize()`
+- Invalidation: при `set_policy()` или `delete_policy()`
+
+**GlobalPolicyManager**:
+- Singleton instance (один на процесс)
+- Кэш policies в памяти
+- Нет дополнительных файловых операций после initialization
+
+### 13.9.2 File I/O
+
+**Atomic writes**:
+```python
+# Вместо прямой записи:
+# file.write(content)
+
+# Использовать:
+# 1. Write to temp file
+# 2. Rename temp to final (atomic on POSIX)
+```
+
+**Lock contention**:
+- `asyncio.Lock` в `GlobalPolicyStorage`
+- `asyncio.Lock` в `GlobalPolicyManager` для операций set/delete
+- Ожидаемая нагрузка: LOW (управление policies редкое событие)
+
+### 13.9.3 Memory
+
+**Per-process overhead**:
+- `GlobalPolicyManager` singleton: ~1KB (зависит от кол-ва policies)
+- `GlobalPolicyStorage`: ~1KB + файл JSON
+- **Expected**: <100 policies → <10KB total
+
+---
+
+## 13.10 Error Handling Strategy
+
+### 13.10.1 GlobalPolicyStorage errors
+
+| Сценарий | Обработка | Fallback |
+|----------|-----------|----------|
+| File not found | Create new empty | {} |
+| Corrupted JSON | Raise StorageError | Propagate to caller |
+| No write permission | Raise StorageError | Propagate to caller |
+| Invalid decision | Raise ValueError | Reject operation |
+
+### 13.10.2 GlobalPolicyManager errors
+
+```python
+try:
+    await global_manager.set_global_policy("execute", "invalid")
+except ValueError as e:
+    # Invalid decision
+    logger.error(f"Invalid decision: {e}")
+except StorageError as e:
+    # File I/O error
+    logger.error(f"Storage error: {e}")
+```
+
+### 13.10.3 CLI error messages
+
+```bash
+$ acp-server permissions set execute invalid
+✗ Invalid decision: 'invalid'. Must be 'allow_always' or 'reject_always'
+
+$ acp-server permissions set execute allow_always
+Permission denied: Cannot write to ~/.acp/global_permissions.json
+```
+
+---
+
+## 13.11 Future Extensions (Phase 4+)
+
+### 13.11.1 Policy Metadata (Phase 4)
+
+```json
+{
+  "version": 2,
+  "policies": {
+    "execute": {
+      "decision": "allow_always",
+      "set_at": "2026-04-16T14:30:00Z",
+      "set_by": "user",
+      "expires_at": "2026-05-16T14:30:00Z"
+    }
+  }
+}
+```
+
+### 13.11.2 Policy Versioning
+
+- Version in file (`version: 1`)
+- Migration scripts if format changes
+- Backward compatibility layer
+
+### 13.11.3 Policy per Agent
+
+- Current: Global policies apply to all agents
+- Future: `~/.acp/agents/{agent_id}/global_permissions.json`
+
+---
+
+**Версия документа**: 1.1
+**Последнее обновление**: 2026-04-16
+**Статус**: Phase 3 Detailed Design завершён, готово к реализации
