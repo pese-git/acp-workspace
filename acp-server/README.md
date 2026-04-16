@@ -408,6 +408,63 @@ acp-server/src/acp_server/
 └── # Остальные модули...
 ```
 
+## Content Integration в Tool Calls
+
+Начиная с Этапа 4, tool execution results поддерживают структурированный content для отправки клиенту и LLM.
+
+### Архитектура
+
+```
+ToolExecutor → ToolExecutionResult (с content)
+    ↓
+ContentExtractor → ExtractedContent
+    ↓
+ContentValidator → валидация согласно ACP
+    ↓
+ContentFormatter → OpenAI/Anthropic format
+    ↓
+LLM Provider
+```
+
+### Поддерживаемые Content Types
+
+- **text** - текстовый контент
+- **diff** - изменения в файлах (unified diff format)
+- **image** - изображения (base64)
+- **audio** - аудио файлы (base64)
+- **embedded** - вложенный контент
+- **resource_link** - ссылки на ресурсы
+
+### Пример использования
+
+```python
+from acp_server.tools.base import ToolExecutionResult
+
+# Tool executor генерирует content
+result = ToolExecutionResult(
+    success=True,
+    output="File written successfully",
+    content=[
+        {"type": "text", "text": "Successfully wrote file"},
+        {"type": "diff", "path": "file.py", "diff": "+new line\n-old line"}
+    ]
+)
+
+# Content автоматически извлекается, валидируется и форматируется для LLM
+```
+
+### Компоненты
+
+- **[`ContentExtractor`](src/acp_server/protocol/content/extractor.py)** - извлечение content из результатов инструментов
+- **[`ContentValidator`](src/acp_server/protocol/content/validator.py)** - валидация согласно ACP спецификации
+- **[`ContentFormatter`](src/acp_server/protocol/content/formatter.py)** - форматирование для OpenAI и Anthropic API
+
+### Документация
+
+- [Архитектура Content Integration](../../doc/architecture/PROMPT_TURN_CONTENT_INTEGRATION_ARCHITECTURE.md)
+- [Спецификация Content Types](../../doc/Agent%20Client%20Protocol/protocol/06-Content.md)
+- [Tool Calls спецификация](../../doc/Agent%20Client%20Protocol/protocol/08-Tool%20Calls.md)
+
 ## Tool Calls Integration
 
 ACP сервер поддерживает встроенные инструменты для взаимодействия с локальной средой клиента:
