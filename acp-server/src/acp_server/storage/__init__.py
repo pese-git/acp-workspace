@@ -5,7 +5,14 @@
 
 from ..exceptions import StorageError
 from .base import SessionStorage
+from .global_policy_storage import GlobalPolicyStorage
 from .json_file import JsonFileStorage
 from .memory import InMemoryStorage
 
-__all__ = ["SessionStorage", "StorageError", "InMemoryStorage", "JsonFileStorage"]
+__all__ = [
+    "SessionStorage",
+    "StorageError",
+    "InMemoryStorage",
+    "JsonFileStorage",
+    "GlobalPolicyStorage",
+]
