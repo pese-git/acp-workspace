@@ -4,6 +4,7 @@
 """
 
 from .audio import AudioContent
+from .base import BlobResource, TextResource
 from .embedded import EmbeddedResourceContent
 from .extractor import ContentExtractor, ExtractedContent
 from .formatter import ContentFormatter
@@ -19,6 +20,9 @@ __all__ = [
     "ImageContent",
     "EmbeddedResourceContent",
     "ResourceLinkContent",
+    # Base resources
+    "TextResource",
+    "BlobResource",
     # Extraction and validation
     "ContentExtractor",
     "ExtractedContent",

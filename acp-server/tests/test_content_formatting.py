@@ -2,8 +2,8 @@
 
 import pytest
 
-from acp_server.protocol.content.formatter import ContentFormatter
 from acp_server.protocol.content.extractor import ExtractedContent
+from acp_server.protocol.content.formatter import ContentFormatter
 
 
 class TestContentFormatter:
@@ -562,4 +562,4 @@ class TestContentFormatter:
 
         # Проверить, что items объединены с двойным новой строкой
         content = result["content"]
-        assert "First\n\nSecond\n\nThird" == content
+        assert content == "First\n\nSecond\n\nThird"
