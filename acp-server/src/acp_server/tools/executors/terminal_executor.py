@@ -150,13 +150,13 @@ class TerminalToolExecutor(ToolExecutor):
                 },
             )
             
-            # Сохранить terminal_id в session для отслеживания
-            if not hasattr(session, "active_terminals"):
-                session.active_terminals = {}
-            session.active_terminals[terminal_id] = {
-                "command": command,
-                "cwd": cwd,
-            }
+            # Сгенерировать content для отправки клиенту и LLM согласно ACP Content Types
+            content_items = [
+                {
+                    "type": "text",
+                    "text": f"Terminal {terminal_id} created for command: {command}"
+                }
+            ]
             
             return ToolExecutionResult(
                 success=True,
@@ -165,6 +165,7 @@ class TerminalToolExecutor(ToolExecutor):
                     "terminal_id": terminal_id,
                     "command": command,
                 },
+                content=content_items,
             )
             
         except Exception as e:
@@ -228,13 +229,23 @@ class TerminalToolExecutor(ToolExecutor):
                 },
             )
             
+            # Сгенерировать content для отправки клиенту и LLM согласно ACP Content Types
+            exit_message = f"Terminal {terminal_id} exited with code {exit_code}"
+            content_items = [
+                {
+                    "type": "text",
+                    "text": f"{exit_message}\n\nOutput:\n{output}"
+                }
+            ]
+            
             return ToolExecutionResult(
-                success=True,
+                success=exit_code == 0,
                 output=output,
                 metadata={
                     "terminal_id": terminal_id,
                     "exit_code": exit_code,
                 },
+                content=content_items,
             )
             
         except Exception as e:
@@ -293,10 +304,6 @@ class TerminalToolExecutor(ToolExecutor):
                     "terminal_id": terminal_id,
                 },
             )
-            
-            # Удалить terminal_id из session
-            if hasattr(session, "active_terminals"):
-                session.active_terminals.pop(terminal_id, None)
             
             return ToolExecutionResult(
                 success=True,

@@ -134,9 +134,18 @@ class FileSystemToolExecutor(ToolExecutor):
                 },
             )
             
+            # Сгенерировать content для отправки клиенту и LLM согласно ACP Content Types
+            content_items = [
+                {
+                    "type": "text",
+                    "text": f"File: {path}\n\n{content}"
+                }
+            ]
+            
             return ToolExecutionResult(
                 success=True,
                 output=content,
+                content=content_items,
             )
             
         except Exception as e:
@@ -229,6 +238,22 @@ class FileSystemToolExecutor(ToolExecutor):
                 },
             )
             
+            # Сгенерировать content для отправки клиенту и LLM согласно ACP Content Types
+            content_items = [
+                {
+                    "type": "text",
+                    "text": f"Successfully wrote {len(content)} bytes to {path}"
+                }
+            ]
+            
+            # Добавить diff content если доступен
+            if diff_text:
+                content_items.append({
+                    "type": "diff",
+                    "path": str(path),
+                    "diff": diff_text
+                })
+            
             return ToolExecutionResult(
                 success=True,
                 output=f"Файл {path} успешно записан",
@@ -236,6 +261,7 @@ class FileSystemToolExecutor(ToolExecutor):
                     "diff": diff_text,
                     "bytes": len(content),
                 },
+                content=content_items,
             )
             
         except Exception as e:

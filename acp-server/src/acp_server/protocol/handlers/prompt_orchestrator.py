@@ -14,6 +14,8 @@ import structlog
 from ...client_rpc.service import ClientRPCService
 from ...messages import ACPMessage, JsonRpcId
 from ...tools.base import ToolRegistry
+from ..content.extractor import ContentExtractor
+from ..content.validator import ContentValidator
 from ..state import ProtocolOutcome, SessionState
 from .client_rpc_handler import ClientRPCHandler
 from .permission_manager import PermissionManager
@@ -74,6 +76,10 @@ class PromptOrchestrator:
         self.client_rpc_handler = client_rpc_handler
         self.tool_registry = tool_registry
         self.client_rpc_service = client_rpc_service
+
+        # Content processing (Фаза 2)
+        self.content_extractor = ContentExtractor()
+        self.content_validator = ContentValidator()
 
         # Создать bridge и permission checker для executors только если RPC service доступен
         if client_rpc_service is not None:
@@ -557,6 +563,28 @@ class PromptOrchestrator:
                         tool_arguments,
                         session=session,
                     )
+
+                    # Извлечь content из result
+                    extracted_content = await self.content_extractor.extract_from_result(
+                        tool_call_id, result
+                    )
+
+                    # Валидировать content
+                    is_valid, errors = self.content_validator.validate_content_list(
+                        extracted_content.content_items
+                    )
+
+                    if not is_valid:
+                        logger.warning(
+                            "tool_result_content_validation_failed",
+                            tool_call_id=tool_call_id,
+                            errors=errors
+                        )
+
+                    # Сохранить content в tool call state
+                    tool_call_state = session.tool_calls.get(tool_call_id)
+                    if tool_call_state:
+                        tool_call_state.result_content = extracted_content.content_items
 
                     # Обновить статус tool call
                     if result.success:

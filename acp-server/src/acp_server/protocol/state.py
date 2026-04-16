@@ -90,6 +90,8 @@ class ToolCallState:
     status: str
     # Контент, возвращенный при завершении (если есть).
     content: list[dict[str, Any]] = field(default_factory=list)
+    # Извлеченный content из result tool execution для отправки клиенту.
+    result_content: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(slots=True)

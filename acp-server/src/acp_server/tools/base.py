@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -26,17 +26,24 @@ class ToolExecutionResult:
         output: Текстовый вывод инструмента (опционально)
         error: Сообщение об ошибке при неудачном выполнении (опционально)
         metadata: Дополнительные метаданные для специфичных инструментов (опционально)
+        content: Структурированный content для отправки клиенту и LLM согласно ACP Content Types
     
     Примеры использования metadata:
         - terminal_id для terminal/create: {"terminal_id": "term_xyz789"}
         - diff для fs/write_text_file: {"diff": "--- old\\n+++ new\\n..."}
         - file_size для fs/read_text_file: {"file_size": 1024, "lines": 50}
+    
+    Примеры использования content:
+        - text content: [{"type": "text", "text": "..."}]
+        - diff content: [{"type": "diff", "path": "file.py", "diff": "..."}]
+        - image content: [{"type": "image", "data": "...", "format": "png"}]
     """
 
     success: bool
     output: str | None = None
     error: str | None = None
     metadata: dict[str, Any] | None = None
+    content: list[dict[str, Any]] = field(default_factory=list)
 
 
 class ToolRegistry(ABC):
