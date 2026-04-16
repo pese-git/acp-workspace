@@ -269,6 +269,10 @@ class ACPHttpServer:
             tool_registry=self._tool_registry,
             client_rpc_service=client_rpc_service,
         )
+        
+        # Инициализируем GlobalPolicyManager для fallback на global policies
+        await protocol.initialize_global_policy_manager()
+        
         # Храним отложенные завершения prompt-turn по sessionId в рамках WS-соединения.
         deferred_prompt_tasks: dict[str, asyncio.Task[None]] = {}
         # Храним in-flight задачи обработки долгих `session/prompt`, чтобы WS-loop

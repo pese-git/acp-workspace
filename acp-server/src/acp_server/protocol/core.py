@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from ..agent.orchestrator import AgentOrchestrator
     from ..client_rpc.service import ClientRPCService
     from ..tools.base import ToolRegistry
+    from .handlers.global_policy_manager import GlobalPolicyManager
 
 
 logger = structlog.get_logger()
@@ -94,6 +95,9 @@ class ACPProtocol:
 
         # Реестр инструментов для регистрации и выполнения tools
         self._tool_registry = tool_registry
+
+        # GlobalPolicyManager для fallback chain в permission checks
+        self._global_policy_manager: GlobalPolicyManager | None = None
 
         # Последние capabilities, согласованные через initialize.
         # Для in-memory demo-сервера это достаточно; по мере роста можно
@@ -205,6 +209,14 @@ class ACPProtocol:
                 self._runtime_capabilities = auth.parse_client_runtime_capabilities(
                     client_capabilities
                 )
+            
+            # Инициализируем GlobalPolicyManager для fallback chain
+            if self._global_policy_manager is None:
+                # Вопрос: как инициализировать асинхронный менеджер в синхронном контексте?
+                # Решение: не инициализируем здесь, а передаем None (graceful degradation)
+                # GlobalPolicyManager требует async инициализации и singleton pattern
+                logger.debug("GlobalPolicyManager will be initialized on demand")
+            
             return ProtocolOutcome(response=response)
 
         if method == "authenticate":
@@ -293,6 +305,7 @@ class ACPProtocol:
                 storage=self._storage,
                 tool_registry=self._tool_registry,
                 client_rpc_service=self._client_rpc_service,
+                global_manager=self._global_policy_manager,
             )
 
         if method == "session/cancel":
@@ -538,3 +551,26 @@ class ACPProtocol:
                 continue
 
         return cancelled_count
+
+    async def initialize_global_policy_manager(self) -> None:
+        """Инициализировать GlobalPolicyManager для fallback на global policies.
+
+        Graceful degradation: если инициализация не удалась, продолжаем без global policies.
+
+        Пример использования:
+            await protocol.initialize_global_policy_manager()
+        """
+        try:
+            from .handlers.global_policy_manager import GlobalPolicyManager
+
+            self._global_policy_manager = await GlobalPolicyManager.get_instance()
+            await self._global_policy_manager.initialize()
+
+            logger.info("GlobalPolicyManager initialized successfully")
+        except Exception as e:
+            logger.warning(
+                "Failed to initialize GlobalPolicyManager, continuing without global policies",
+                error=str(e),
+                exc_info=True,
+            )
+            self._global_policy_manager = None
