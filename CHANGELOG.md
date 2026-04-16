@@ -6,6 +6,36 @@
 
 ## [Unreleased]
 
+### Added - Этап 4, Фаза 5: E2E Testing Content Integration (2026-04-16)
+
+#### Архитектура
+- Создан архитектурный документ [`doc/architecture/CONTENT_INTEGRATION_E2E_TESTING_ARCHITECTURE.md`](doc/architecture/CONTENT_INTEGRATION_E2E_TESTING_ARCHITECTURE.md)
+- 4 диаграммы Mermaid: Test Flow, Test Sequence, Coverage Matrix, Data Flow
+- Определено 40+ E2E сценариев с приоритетами
+
+#### E2E Test Infrastructure
+- [`acp-server/tests/e2e/conftest.py`](acp-server/tests/e2e/conftest.py) — 9 pytest fixtures для всех типов контента
+- [`acp-server/tests/e2e/helpers.py`](acp-server/tests/e2e/helpers.py) — 6 утилит-функций для проверок
+- [`acp-server/tests/e2e/base_e2e_test.py`](acp-server/tests/e2e/base_e2e_test.py) — базовый класс для E2E тестов
+
+#### E2E Tests (24 теста)
+- [`test_e2e_text_content.py`](acp-server/tests/e2e/test_e2e_text_content.py) — 4 теста для text content
+- [`test_e2e_diff_content.py`](acp-server/tests/e2e/test_e2e_diff_content.py) — 4 теста для diff content
+- [`test_e2e_image_content.py`](acp-server/tests/e2e/test_e2e_image_content.py) — 4 теста для image content
+- [`test_e2e_audio_content.py`](acp-server/tests/e2e/test_e2e_audio_content.py) — 4 теста для audio content
+- [`test_e2e_embedded_content.py`](acp-server/tests/e2e/test_e2e_embedded_content.py) — 4 теста для embedded content
+- [`test_e2e_resource_link_content.py`](acp-server/tests/e2e/test_e2e_resource_link_content.py) — 4 теста для resource_link content
+
+#### Test Coverage
+- Полный цикл: ToolExecutor → ContentExtractor → ContentValidator → ContentFormatter
+- Все 6 типов content: text, diff, image, audio, embedded, resource_link
+- Оба LLM провайдера: OpenAI и Anthropic
+- 100% success rate (24/24 passed)
+
+#### Fixes
+- Добавлены экспорты `TextResource` и `BlobResource` в [`protocol/content/__init__.py`](acp-server/src/acp_server/protocol/content/__init__.py)
+- Исправлены линтинг ошибки в [`test_content_formatting.py`](acp-server/tests/test_content_formatting.py)
+
 ### Fixed - Tool Registry Duplication (2026-04-15)
 
 **Исправлена критическая ошибка: агент не имел доступа к зарегистрированным инструментам**

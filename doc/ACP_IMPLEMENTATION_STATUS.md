@@ -363,10 +363,35 @@ Agent (acp-server)                    Client (acp-client)
 - `0922a29` — Фазы 1 и 2
 - `bee5578` — Фаза 3
 
+#### Фаза 5: E2E Testing ✅
+
+**Статус:** Полностью реализована и протестирована
+
+**Архитектура:**
+- [`doc/architecture/CONTENT_INTEGRATION_E2E_TESTING_ARCHITECTURE.md`](../doc/architecture/CONTENT_INTEGRATION_E2E_TESTING_ARCHITECTURE.md)
+- 4 диаграммы Mermaid
+- 40+ определенных E2E сценариев
+
+**Реализация:**
+- 10 файлов (4 инфраструктуры + 6 тестовых)
+- 24 E2E теста
+- 100% success rate
+- Покрытие всех 6 типов content × 2 провайдера
+
+**Тесты:**
+- `acp-server/tests/e2e/` — директория E2E тестов
+- Полный цикл: Extractor → Validator → Formatter
+- OpenAI и Anthropic форматы
+
+**Результаты:**
+- ✅ Все 24 теста проходят
+- ✅ Нет регрессий в существующих тестах
+- ✅ Ruff check passed
+- ✅ Готово к production
+
 ### Следующие шаги
 
 - **Фаза 4:** Client-side Rendering (опционально)
-- **Фаза 5:** E2E Testing
 - **Этап 5:** Advanced Permission Management
 - **Этап 6:** MCP Integration
 

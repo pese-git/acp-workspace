@@ -465,6 +465,27 @@ result = ToolExecutionResult(
 - [Спецификация Content Types](../../doc/Agent%20Client%20Protocol/protocol/06-Content.md)
 - [Tool Calls спецификация](../../doc/Agent%20Client%20Protocol/protocol/08-Tool%20Calls.md)
 
+### E2E Testing
+
+Полный набор E2E тестов для Content Integration находится в `tests/e2e/`:
+
+```bash
+# Запустить все E2E тесты
+cd acp-server && uv run python -m pytest tests/e2e/ -v
+
+# Запустить тесты для конкретного типа контента
+uv run python -m pytest tests/e2e/test_e2e_text_content.py -v
+```
+
+**Покрытие:**
+- 24 E2E теста
+- Все 6 типов content (text, diff, image, audio, embedded, resource_link)
+- Оба LLM провайдера (OpenAI, Anthropic)
+- Полный цикл: Extraction → Validation → Formatting
+
+**Архитектура тестов:**
+- [`doc/architecture/CONTENT_INTEGRATION_E2E_TESTING_ARCHITECTURE.md`](../doc/architecture/CONTENT_INTEGRATION_E2E_TESTING_ARCHITECTURE.md)
+
 ## Tool Calls Integration
 
 ACP сервер поддерживает встроенные инструменты для взаимодействия с локальной средой клиента:
