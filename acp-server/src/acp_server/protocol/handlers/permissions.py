@@ -5,10 +5,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ...messages import JsonRpcId
 from ..state import SessionState
+
+if TYPE_CHECKING:
+    from .global_policy_manager import GlobalPolicyManager
 
 
 def find_session_by_permission_request_id(
@@ -108,30 +111,55 @@ def resolve_permission_option_kind(
     return None
 
 
-def resolve_remembered_permission_decision(
+async def resolve_remembered_permission_decision(
     *,
     session: SessionState,
     tool_kind: str,
+    global_manager: GlobalPolicyManager | None = None,
 ) -> str:
-    """Возвращает применяемое policy-решение для tool kind.
+    """Возвращает применяемое policy-решение для tool kind с fallback chain.
+
+    Fallback chain:
+    1. Session policy (session.permission_policy)
+    2. Global policy (global_manager.get_global_policy) если global_manager передан
+    3. Ask user (default)
 
     Возвращаемые значения:
     - `allow`: выполнить tool-call без запроса permission.
     - `reject`: отклонить tool-call без запроса permission.
     - `ask`: запросить решение у клиента через `session/request_permission`.
 
+    Args:
+        session: Текущая сессия
+        tool_kind: Тип инструмента (execute, read, write, etc.)
+        global_manager: Optional GlobalPolicyManager для fallback на global policies
+
     Пример использования:
-        decision = resolve_remembered_permission_decision(
+        decision = await resolve_remembered_permission_decision(
             session=state,
             tool_kind="execute",
+            global_manager=manager,
         )
     """
 
-    remembered = session.permission_policy.get(tool_kind)
-    if remembered == "allow_always":
-        return "allow"
-    if remembered == "reject_always":
-        return "reject"
+    # 1. Check session policy
+    session_decision = session.permission_policy.get(tool_kind)
+    if session_decision is not None:
+        if session_decision == "allow_always":
+            return "allow"
+        if session_decision == "reject_always":
+            return "reject"
+
+    # 2. Check global policy (if manager provided)
+    if global_manager is not None:
+        global_decision = await global_manager.get_global_policy(tool_kind)
+        if global_decision is not None:
+            if global_decision == "allow_always":
+                return "allow"
+            if global_decision == "reject_always":
+                return "reject"
+
+    # 3. Default: ask user
     return "ask"
 
 

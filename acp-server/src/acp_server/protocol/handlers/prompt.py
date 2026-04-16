@@ -41,6 +41,7 @@ from .turn_lifecycle_manager import TurnLifecycleManager
 
 if TYPE_CHECKING:
     from ...agent.orchestrator import AgentOrchestrator
+    from .global_policy_manager import GlobalPolicyManager
 
 # Используем structlog для структурированного логирования
 logger = structlog.get_logger()
@@ -125,6 +126,7 @@ async def session_prompt(
     storage: Any | None = None,
     tool_registry: ToolRegistry | None = None,
     client_rpc_service: ClientRPCService | None = None,
+    global_manager: GlobalPolicyManager | None = None,
 ) -> ProtocolOutcome:
     """Обрабатывает пользовательский prompt-turn через PromptOrchestrator.
 
@@ -400,9 +402,10 @@ async def session_prompt(
         )
 
         if session.config_values.get("mode", "ask") == "ask":
-            remembered_permission = resolve_remembered_permission_decision(
+            remembered_permission = await resolve_remembered_permission_decision(
                 session=session,
                 tool_kind=directives.tool_kind,
+                global_manager=global_manager,
             )
             if remembered_permission == "allow":
                 notifications.extend(

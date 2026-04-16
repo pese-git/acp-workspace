@@ -82,7 +82,7 @@ class TestPermissionPolicyPersistence:
 
         # Assert - Проверяем что resolve_remembered_permission_decision использует
         # восстановленную policy и возвращает 'allow' без re-asking
-        decision = resolve_remembered_permission_decision(
+        decision = await resolve_remembered_permission_decision(
             session=loaded_session,
             tool_kind="read",
         )
@@ -132,7 +132,7 @@ class TestPermissionPolicyPersistence:
 
         # Assert - Проверяем что resolve_remembered_permission_decision использует
         # восстановленную policy и возвращает 'reject' без re-asking
-        decision = resolve_remembered_permission_decision(
+        decision = await resolve_remembered_permission_decision(
             session=loaded_session,
             tool_kind="execute",
         )
@@ -182,15 +182,15 @@ class TestPermissionPolicyPersistence:
 
         # Assert - Проверяем что resolve_remembered_permission_decision работает
         # для каждого tool kind
-        assert resolve_remembered_permission_decision(
+        assert await resolve_remembered_permission_decision(
             session=loaded_session,
             tool_kind="read",
         ) == "allow"
-        assert resolve_remembered_permission_decision(
+        assert await resolve_remembered_permission_decision(
             session=loaded_session,
             tool_kind="write",
         ) == "reject"
-        assert resolve_remembered_permission_decision(
+        assert await resolve_remembered_permission_decision(
             session=loaded_session,
             tool_kind="execute",
         ) == "allow"
@@ -230,7 +230,7 @@ class TestPermissionPolicyPersistence:
         loaded_session = await storage.load_session(session_id)
 
         # Assert - Проверяем что для неизвестного tool kind возвращается 'ask'
-        decision = resolve_remembered_permission_decision(
+        decision = await resolve_remembered_permission_decision(
             session=loaded_session,
             tool_kind="unknown_kind",
         )
@@ -275,7 +275,7 @@ class TestPermissionPolicyPersistence:
         # Assert - Проверяем что resolve_remembered_permission_decision возвращает 'ask'
         # для всех tool kinds (default)
         for tool_kind in ["read", "write", "execute", "other"]:
-            decision = resolve_remembered_permission_decision(
+            decision = await resolve_remembered_permission_decision(
                 session=loaded_session,
                 tool_kind=tool_kind,
             )
