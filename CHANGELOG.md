@@ -4,6 +4,52 @@
 
 Формат основан на [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), проект следует [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Этап 5: Advanced Permission Management
+
+### Phase 2: Cross-Session Policy Restoration (2026-04-16) ✅
+
+**Цель:** Обеспечить автоматическое восстановление permission policies при загрузке сессии.
+
+**Реализация:**
+- Проведен архитектурный анализ permission management system
+- Выявлено 4 проблемы (1 HIGH, 2 MEDIUM, 1 LOW)
+- Создана 4-фазная roadmap для Advanced Permission Management
+- Подтверждено: permission policies автоматически восстанавливаются при session/load
+- Добавлены integration тесты для проверки persistence
+
+**Документы:**
+- [`doc/architecture/ADVANCED_PERMISSION_MANAGEMENT_ARCHITECTURE.md`](doc/architecture/ADVANCED_PERMISSION_MANAGEMENT_ARCHITECTURE.md) (~750 строк)
+  * Анализ текущей реализации (SessionState, PermissionManager, Storage)
+  * 4 диаграммы Mermaid (sequence, state, class, gantt)
+  * 3-уровневая storage architecture
+  * 4-фазный план реализации
+- [`doc/architecture/ADVANCED_PERMISSION_MANAGEMENT_ANALYSIS_REPORT.md`](doc/architecture/ADVANCED_PERMISSION_MANAGEMENT_ANALYSIS_REPORT.md) (~480 строк)
+  * Детальный анализ 4 проблем с impact и root cause
+  * Рекомендации по приоритизации
+  * Риски и mitigation strategies
+
+**Тесты:**
+- [`acp-server/tests/test_permission_policy_persistence.py`](acp-server/tests/test_permission_policy_persistence.py) (6 integration тестов)
+  * `test_allow_always_persists_across_save_load`
+  * `test_reject_always_persists_across_save_load`
+  * `test_multiple_permission_policies_persist`
+  * `test_unknown_policy_defaults_to_ask`
+  * `test_empty_permission_policy_loads_correctly`
+  * `test_concurrent_save_load_operations`
+
+**Результаты:**
+- ✅ 51 permission-related тестов PASSED (15 flow + 30 manager + 6 persistence)
+- ✅ 846 unit тестов PASSED (no regressions)
+- ✅ Ruff check: All passed
+- ✅ Backward compatible
+
+**Commits:**
+- `30b210b` - docs(stage5): Архитектура Advanced Permission Management
+- `643034a` - test(stage5-phase2): Add integration tests for permission policy persistence
+
+**Статус:** Phase 2 завершена ✅
+**Следующее:** Phase 3 (Global Policy Management) - Future work
+
 ## [Unreleased]
 
 ### Added - Этап 4, Фаза 5: E2E Testing Content Integration (2026-04-16)

@@ -395,6 +395,49 @@ Agent (acp-server)                    Client (acp-client)
 - **Этап 5:** Advanced Permission Management
 - **Этап 6:** MCP Integration
 
+### Этап 5: Advanced Permission Management 🔄
+
+**Статус:** Phase 2 Complete ✅
+
+**Цель:** Расширенное управление разрешениями с persistence и global policies.
+
+#### Phase 1: Session-Level Persistence ✅
+- **Статус:** Complete (уже реализовано)
+- **Функциональность:**
+  - SessionState.permission_policy хранит policies
+  - JsonFileStorage сериализует/десериализует policies
+  - PermissionManager использует сохраненные policies
+
+#### Phase 2: Cross-Session Policy Restoration ✅
+- **Статус:** Complete (2026-04-16)
+- **Функциональность:**
+  - Permission policies автоматически восстанавливаются при session/load
+  - resolve_remembered_permission_decision() использует восстановленные policies
+  - No user re-prompts для already granted permissions
+- **Тесты:** 6 integration тестов (51 permission tests total)
+- **Документация:**
+  - [`doc/architecture/ADVANCED_PERMISSION_MANAGEMENT_ARCHITECTURE.md`](doc/architecture/ADVANCED_PERMISSION_MANAGEMENT_ARCHITECTURE.md)
+  - [`doc/architecture/ADVANCED_PERMISSION_MANAGEMENT_ANALYSIS_REPORT.md`](doc/architecture/ADVANCED_PERMISSION_MANAGEMENT_ANALYSIS_REPORT.md)
+
+#### Phase 3: Global Policy Management 🔮
+- **Статус:** Planned (Future work)
+- **Scope:**
+  - GlobalPolicyManager component
+  - `~/.acp/global_permissions.json` storage
+  - CLI: `acp-cli permissions list/reset`
+  - Cross-session policy inheritance
+
+#### Phase 4: Policy Metadata & Versioning 🔮
+- **Статус:** Planned (Future work)
+- **Scope:**
+  - PolicyMetadata dataclass (created_at, updated_at, version)
+  - Migration scripts для policy format changes
+  - Audit trail logging
+
+**Архитектурные документы:**
+- [`doc/architecture/ADVANCED_PERMISSION_MANAGEMENT_ARCHITECTURE.md`](doc/architecture/ADVANCED_PERMISSION_MANAGEMENT_ARCHITECTURE.md) - Полная архитектура с 4 диаграммами Mermaid
+- [`doc/architecture/ADVANCED_PERMISSION_MANAGEMENT_ANALYSIS_REPORT.md`](doc/architecture/ADVANCED_PERMISSION_MANAGEMENT_ANALYSIS_REPORT.md) - Анализ проблем и рекомендации
+
 ## Приоритетный backlog
 
 1. Финализировать production execution backend для `session/prompt` (убрать оставшийся in-memory executor stub и подключить реальное выполнение инструментов).
