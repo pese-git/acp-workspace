@@ -10,8 +10,9 @@
 - Обработку ошибок от executor
 """
 
-import pytest
 from unittest.mock import AsyncMock
+
+import pytest
 
 from acp_client.infrastructure.handlers.terminal_handler import TerminalHandler
 from acp_client.infrastructure.services.terminal_executor import TerminalExecutor

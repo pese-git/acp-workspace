@@ -7,8 +7,9 @@
 - Обработку ошибок от executor
 """
 
-import pytest
 from unittest.mock import AsyncMock
+
+import pytest
 
 from acp_client.infrastructure.handlers.file_system_handler import (
     FileSystemHandler,
@@ -95,7 +96,7 @@ class TestFileSystemHandlerReadFile:
         self, handler: FileSystemHandler, executor_mock: AsyncMock
     ) -> None:
         """Тест ошибки IO."""
-        executor_mock.read_text_file.side_effect = IOError("Permission denied")
+        executor_mock.read_text_file.side_effect = OSError("Permission denied")
         params = {"sessionId": "sess_123", "path": "test.txt"}
 
         with pytest.raises(IOError):
@@ -147,7 +148,7 @@ class TestFileSystemHandlerWriteFile:
         self, handler: FileSystemHandler, executor_mock: AsyncMock
     ) -> None:
         """Тест ошибки IO при записи."""
-        executor_mock.write_text_file.side_effect = IOError(
+        executor_mock.write_text_file.side_effect = OSError(
             "Permission denied"
         )
         params = {

@@ -18,6 +18,7 @@ from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 
 from acp_client.infrastructure.di_bootstrapper import DIBootstrapper
+from acp_client.messages import PermissionOption, PermissionToolCall
 from acp_client.presentation.chat_view_model import ChatViewModel
 from acp_client.presentation.file_viewer_view_model import FileViewerViewModel
 from acp_client.presentation.filesystem_view_model import FileSystemViewModel
@@ -35,6 +36,7 @@ from .components import (
     FooterBar,
     HeaderBar,
     HelpModal,
+    PermissionModal,
     PlanPanel,
     PromptInput,
     Sidebar,
@@ -419,6 +421,71 @@ class ACPClientApp(App[None]):
                     session_id=session_id,
                     error=str(error),
                 )
+
+    def show_permission_modal(
+        self,
+        request_id: str | int,
+        tool_call: PermissionToolCall,
+        options: list[PermissionOption],
+    ) -> None:
+        """Показывает модальное окно для запроса разрешения.
+
+        Интегрирует PermissionModal с SessionCoordinator через callback pattern.
+
+        Args:
+            request_id: ID permission request от сервера
+            tool_call: Информация о tool call (kind, title, toolCallId)
+            options: Доступные опции для выбора (allow_once, reject_once, и т.д.)
+        """
+        try:
+            # Получить SessionCoordinator из DI контейнера
+            from acp_client.application.session_coordinator import SessionCoordinator
+
+            coordinator = self._container.resolve(SessionCoordinator)
+
+            # Создать callback для обработки выбора пользователя
+            def on_choice(req_id: str | int, option_id: str) -> None:
+                """Callback вызываемый при выборе в modal.
+
+                Args:
+                    req_id: ID permission request
+                    option_id: ID выбранной опции или "cancelled"
+                """
+                self._app_logger.debug(
+                    "permission_modal_choice_made",
+                    request_id=req_id,
+                    option_id=option_id,
+                )
+                if option_id == "cancelled":
+                    coordinator.cancel_permission(req_id)
+                else:
+                    coordinator.resolve_permission(req_id, option_id)
+
+            # Создать и показать modal
+            title = f"{tool_call.kind}: {tool_call.title}"
+            modal = PermissionModal(
+                permission_vm=self._permission_vm,
+                request_id=request_id,
+                title=title,
+                options=options,
+                on_choice=on_choice,
+            )
+
+            self._app_logger.debug(
+                "showing_permission_modal",
+                request_id=request_id,
+                title=title,
+                options_count=len(options),
+            )
+
+            self.push_screen(modal)
+
+        except Exception as e:
+            self._app_logger.error(
+                "failed_to_show_permission_modal",
+                request_id=request_id,
+                error=str(e),
+            )
 
     async def on_unmount(self) -> None:
         """Очистка ресурсов при завершении приложения."""

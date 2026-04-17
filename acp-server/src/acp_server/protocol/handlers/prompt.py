@@ -50,6 +50,7 @@ logger = structlog.get_logger()
 def create_prompt_orchestrator(
     tool_registry: ToolRegistry | None = None,
     client_rpc_service: ClientRPCService | None = None,
+    global_policy_manager: GlobalPolicyManager | None = None,
 ) -> PromptOrchestrator:
     """Создает полностью инициализированный PromptOrchestrator со всеми компонентами.
 
@@ -62,6 +63,7 @@ def create_prompt_orchestrator(
     - ClientRPCHandler (Этап 2): управление client RPC запросами
     - ToolRegistry: реестр инструментов для выполнения (опционально)
     - ClientRPCService: сервис для выполнения RPC запросов (опционально)
+    - GlobalPolicyManager: для fallback chain при проверке разрешений (опционально)
 
     Если tool_registry и client_rpc_service не переданы, оркестратор будет создан
     в режиме совместимости без поддержки выполнения встроенных инструментов.
@@ -69,12 +71,13 @@ def create_prompt_orchestrator(
     Args:
         tool_registry: Реестр инструментов для регистрации и выполнения tools (опционально)
         client_rpc_service: Сервис ClientRPC для выполнения инструментов (опционально)
+        global_policy_manager: GlobalPolicyManager для fallback chain (опционально)
 
     Returns:
         PromptOrchestrator: Готовый к использованию оркестратор
 
     Пример использования:
-        orchestrator = create_prompt_orchestrator(registry, rpc_service)
+        orchestrator = create_prompt_orchestrator(registry, rpc_service, global_manager)
         outcome = await orchestrator.handle_prompt(...)
     """
     state_manager = StateManager()
@@ -108,11 +111,13 @@ def create_prompt_orchestrator(
         client_rpc_handler=client_rpc_handler,
         tool_registry=tool_registry,
         client_rpc_service=client_rpc_service,
+        global_policy_manager=global_policy_manager,
     )
 
     logger.debug(
         "PromptOrchestrator created with all components",
         tools_registered=len(tool_registry.list_tools()),
+        has_global_policy_manager=global_policy_manager is not None,
     )
     return orchestrator
 
@@ -209,7 +214,9 @@ async def session_prompt(
                 session_id=session_id,
             )
 
-        orchestrator = create_prompt_orchestrator(tool_registry, client_rpc_service)
+        orchestrator = create_prompt_orchestrator(
+            tool_registry, client_rpc_service, global_manager
+        )
         try:
             outcome = await orchestrator.handle_prompt(
                 request_id=request_id,

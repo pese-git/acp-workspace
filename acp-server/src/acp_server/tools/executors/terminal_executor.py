@@ -114,16 +114,9 @@ class TerminalToolExecutor(ToolExecutor):
                 },
             )
             
-            # Проверка разрешения
-            if self._permission_checker.should_request_permission(
-                session, "execute"
-            ):
-                logger.debug(
-                    "Требуется разрешение для выполнения команды",
-                    extra={"session_id": session.session_id, "command": command},
-                )
-                # Примечание: Здесь должна быть интеграция с PromptOrchestrator
-                # для ожидания разрешения в ask-режиме. На данный момент пропускаем.
+            # Примечание: Проверка разрешений выполняется в
+            # PromptOrchestrator._decide_tool_execution() перед вызовом executor.
+            # Здесь мы только выполняем операцию.
             
             # Вызов ClientRPC для создания терминала
             terminal_id = await self._bridge.create_terminal(

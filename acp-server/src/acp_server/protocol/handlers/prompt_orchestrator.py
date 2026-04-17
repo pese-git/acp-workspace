@@ -27,6 +27,7 @@ from .turn_lifecycle_manager import TurnLifecycleManager
 
 if TYPE_CHECKING:
     from ...agent.orchestrator import AgentOrchestrator
+    from .global_policy_manager import GlobalPolicyManager
 
 # Используем structlog для структурированного логирования
 logger = structlog.get_logger()
@@ -54,6 +55,7 @@ class PromptOrchestrator:
         client_rpc_handler: ClientRPCHandler,
         tool_registry: ToolRegistry,
         client_rpc_service: ClientRPCService | None = None,
+        global_policy_manager: GlobalPolicyManager | None = None,
     ):
         """Инициализирует оркестратор со всеми компонентами.
 
@@ -68,6 +70,7 @@ class PromptOrchestrator:
             client_rpc_handler: Обработчик client RPC запросов
             tool_registry: Реестр инструментов для регистрации tools
             client_rpc_service: Сервис ClientRPC для выполнения инструментов (опционально)
+            global_policy_manager: GlobalPolicyManager для fallback chain (опционально)
         """
         self.state_manager = state_manager
         self.plan_builder = plan_builder
@@ -77,6 +80,8 @@ class PromptOrchestrator:
         self.client_rpc_handler = client_rpc_handler
         self.tool_registry = tool_registry
         self.client_rpc_service = client_rpc_service
+        # Сохранить GlobalPolicyManager для fallback chain в _decide_tool_execution
+        self._global_policy_manager = global_policy_manager
 
         # Content processing (Фаза 2 и Фаза 3)
         self.content_extractor = ContentExtractor()
@@ -114,6 +119,21 @@ class PromptOrchestrator:
             logger.debug(
                 "PromptOrchestrator initialized without tool executors (client_rpc_service is None)"
             )
+
+    def set_global_policy_manager(
+        self, manager: GlobalPolicyManager | None
+    ) -> None:
+        """Установить GlobalPolicyManager после инициализации.
+        
+        Используется для инъекции manager'а в оркестратор, если он был создан
+        после инициализации (например, в ACPProtocol).
+        
+        Args:
+            manager: GlobalPolicyManager для fallback chain или None для отключения
+        """
+        self._global_policy_manager = manager
+        if manager:
+            logger.debug("GlobalPolicyManager injected into PromptOrchestrator")
 
     async def handle_prompt(
         self,
@@ -415,6 +435,13 @@ class PromptOrchestrator:
             tool_calls: Список tool_calls из agent_response
             notifications: Список уведомлений для отправки клиенту
         """
+        logger.info(
+            "processing tool calls through permission flow",
+            session_id=session_id,
+            num_tool_calls=len(tool_calls),
+            tool_names=[getattr(tc, "name", "unknown") for tc in tool_calls],
+        )
+
         for tool_call in tool_calls:
             # Получить информацию о tool call
             tool_name = getattr(tool_call, "name", None)
@@ -444,238 +471,239 @@ class PromptOrchestrator:
                 )
             )
 
-            # Проверить режим выполнения
-            mode = session.config_values.get("mode", "ask")
+            # Определить kind из tool name (например fs/read -> read)
+            tool_kind = "other"
+            if tool_name.startswith("fs/"):
+                tool_kind = "read" if "read" in tool_name else "edit"
+            elif tool_name.startswith("terminal/"):
+                tool_kind = "execute"
 
-            # Проверить разрешения если режим ask
-            should_request_permission = False
-            permission_request_id: JsonRpcId | None = None
-            permission_msg: ACPMessage | None = None
+            # Получить текущий tool call из сессии
+            tool_call_state = session.tool_calls.get(tool_call_id)
+            if tool_call_state is None:
+                logger.warning(
+                    "tool_call_state not found",
+                    session_id=session_id,
+                    tool_call_id=tool_call_id,
+                )
+                continue
 
-            if mode == "ask":
-                # Определить kind из tool name (например fs/read -> read)
-                tool_kind = "other"
-                if tool_name.startswith("fs/"):
-                    tool_kind = "read" if "read" in tool_name else "edit"
-                elif tool_name.startswith("terminal/"):
-                    tool_kind = "execute"
+            # Применить decision logic через fallback chain
+            decision = await self._decide_tool_execution(
+                session=session,
+                tool_kind=tool_kind,
+            )
 
-                # Получить текущий tool call из сессии для request_tool_permission
-                tool_call_state = session.tool_calls.get(tool_call_id)
-                if tool_call_state is None:
-                    logger.warning(
-                        "tool_call_state not found",
-                        session_id=session_id,
-                        tool_call_id=tool_call_id,
+            if decision == "allow":
+                # Выполнить tool - переходим к execution ниже
+                logger.debug(
+                    "tool execution allowed by decision logic",
+                    session_id=session_id,
+                    tool_name=tool_name,
+                    tool_kind=tool_kind,
+                )
+                pass  # Continue to execution below
+            elif decision == "reject":
+                # Отклонить tool
+                logger.debug(
+                    "tool execution rejected by decision logic",
+                    session_id=session_id,
+                    tool_name=tool_name,
+                    tool_kind=tool_kind,
+                )
+                self.tool_call_handler.update_tool_call_status(
+                    session,
+                    tool_call_id,
+                    "failed",
+                )
+                rejection_msg = f"Tool execution rejected by policy for {tool_kind}"
+                notifications.append(
+                    ACPMessage.notification(
+                        "session/update",
+                        {
+                            "sessionId": session_id,
+                            "update": {
+                                "sessionUpdate": "tool_call_update",
+                                "toolCallId": tool_call_id,
+                                "status": "failed",
+                                "content": [
+                                    {
+                                        "type": "content",
+                                        "content": {
+                                            "type": "text",
+                                            "text": rejection_msg,
+                                        },
+                                    }
+                                ],
+                            },
+                        },
                     )
-                    continue
-
-                # Проверить, нужно ли запрашивать разрешение
-                if self.permission_manager.should_request_permission(session, tool_kind):
-                    # Запросить разрешение у пользователя одним RPC-запросом.
-                    permission_msg = self.permission_manager.build_permission_request(
-                        session,
-                        session_id,
-                        tool_call_state.tool_call_id,
-                        tool_call_state.title,
-                        tool_kind,
-                    )
-                    should_request_permission = True
-                    permission_request_id = permission_msg.id
-
-                    logger.debug(
-                        "permission request created for tool",
-                        session_id=session_id,
-                        tool_name=tool_name,
-                        permission_request_id=permission_request_id,
-                    )
-                else:
-                    # Есть запомненное разрешение
-                    remembered = self.permission_manager.get_remembered_permission(
-                        session,
-                        tool_kind,
-                    )
-
-                    if remembered == "reject":
-                        # Отклонение по policy маппим в `failed` для ACP-совместимого статуса.
-                        self.tool_call_handler.update_tool_call_status(
-                            session,
-                            tool_call_id,
-                            "failed",
-                        )
-                        notifications.append(
-                            ACPMessage.notification(
-                                "session/update",
-                                {
-                                    "sessionId": session_id,
-                                    "update": {
-                                        "sessionUpdate": "tool_call_update",
-                                        "toolCallId": tool_call_id,
-                                        "status": "failed",
-                                    },
-                                },
-                            )
-                        )
-                        logger.debug(
-                            "tool cancelled by permission policy",
-                            session_id=session_id,
-                            tool_name=tool_name,
-                            tool_kind=tool_kind,
-                        )
-                        continue
-
-            # Если нужно запросить разрешение - отправить notification и установить статус
-            if (
-                should_request_permission
-                and permission_request_id is not None
-                and permission_msg is not None
-            ):
-                # При ожидании user approval сохраняем исходный `pending`.
+                )
+                continue
+            elif decision == "ask":
+                # Запросить разрешение у пользователя
+                logger.debug(
+                    "permission request created for tool",
+                    session_id=session_id,
+                    tool_name=tool_name,
+                    tool_kind=tool_kind,
+                )
+                permission_msg = self.permission_manager.build_permission_request(
+                    session,
+                    session_id,
+                    tool_call_state.tool_call_id,
+                    tool_call_state.title,
+                    tool_kind,
+                )
                 notifications.append(permission_msg)
-
+                
+                # Перейти в фазу awaiting_permission
+                if session.active_turn:
+                    session.active_turn.phase = "awaiting_permission"
+                    session.active_turn.permission_tool_call_id = tool_call_id
+                
                 logger.debug(
                     "permission request sent to client",
                     session_id=session_id,
                     tool_call_id=tool_call_id,
-                    permission_request_id=permission_request_id,
+                    permission_request_id=permission_msg.id,
                 )
                 continue
 
-            # Выполнить tool если не нужно запрашивать разрешение
-            if not should_request_permission:
-                try:
-                    # Отправить notification о начале выполнения
+            # Выполнить tool (decision == "allow")
+            try:
+                # Отправить notification о начале выполнения
+                self.tool_call_handler.update_tool_call_status(
+                    session,
+                    tool_call_id,
+                    "in_progress",
+                )
+                notifications.append(
+                    self.tool_call_handler.build_tool_update_notification(
+                        session_id=session_id,
+                        tool_call_id=tool_call_id,
+                        status="in_progress",
+                    )
+                )
+
+                # Выполнить tool с передачей session для executors
+                result = await self.tool_registry.execute_tool(
+                    session_id,
+                    tool_name,
+                    tool_arguments,
+                    session=session,
+                )
+
+                # Извлечь content из result
+                extracted_content = await self.content_extractor.extract_from_result(
+                    tool_call_id, result
+                )
+
+                # Валидировать content
+                is_valid, errors = self.content_validator.validate_content_list(
+                    extracted_content.content_items
+                )
+
+                if not is_valid:
+                    logger.warning(
+                        "tool_result_content_validation_failed",
+                        tool_call_id=tool_call_id,
+                        errors=errors
+                    )
+
+                # Сохранить content в tool call state
+                tool_call_state = session.tool_calls.get(tool_call_id)
+                if tool_call_state:
+                    tool_call_state.result_content = extracted_content.content_items
+
+                # Форматировать content для LLM (Фаза 3)
+                provider = session.config_values.get("llm_provider", "openai")
+                formatted_for_llm = self.content_formatter.format_for_llm(
+                    extracted_content,
+                    provider=provider
+                )
+                logger.debug(
+                    "tool_result_formatted_for_llm",
+                    tool_call_id=tool_call_id,
+                    provider=provider,
+                    formatted_keys=list(formatted_for_llm.keys())
+                )
+
+                # Обновить статус tool call
+                if result.success:
                     self.tool_call_handler.update_tool_call_status(
                         session,
                         tool_call_id,
-                        "in_progress",
-                    )
-                    notifications.append(
-                        self.tool_call_handler.build_tool_update_notification(
-                            session_id=session_id,
-                            tool_call_id=tool_call_id,
-                            status="in_progress",
-                        )
-                    )
-
-                    # Выполнить tool с передачей session для executors
-                    result = await self.tool_registry.execute_tool(
-                        session_id,
-                        tool_name,
-                        tool_arguments,
-                        session=session,
-                    )
-
-                    # Извлечь content из result
-                    extracted_content = await self.content_extractor.extract_from_result(
-                        tool_call_id, result
-                    )
-
-                    # Валидировать content
-                    is_valid, errors = self.content_validator.validate_content_list(
-                        extracted_content.content_items
-                    )
-
-                    if not is_valid:
-                        logger.warning(
-                            "tool_result_content_validation_failed",
-                            tool_call_id=tool_call_id,
-                            errors=errors
-                        )
-
-                    # Сохранить content в tool call state
-                    tool_call_state = session.tool_calls.get(tool_call_id)
-                    if tool_call_state:
-                        tool_call_state.result_content = extracted_content.content_items
-
-                    # Форматировать content для LLM (Фаза 3)
-                    provider = session.config_values.get("llm_provider", "openai")
-                    formatted_for_llm = self.content_formatter.format_for_llm(
-                        extracted_content,
-                        provider=provider
-                    )
-                    logger.debug(
-                        "tool_result_formatted_for_llm",
-                        tool_call_id=tool_call_id,
-                        provider=provider,
-                        formatted_keys=list(formatted_for_llm.keys())
-                    )
-
-                    # Обновить статус tool call
-                    if result.success:
-                        self.tool_call_handler.update_tool_call_status(
-                            session,
-                            tool_call_id,
-                            "completed",
-                            content=[
-                                {
-                                    "type": "content",
-                                    "content": {
-                                        "type": "text",
-                                        "text": result.output or "Tool executed successfully",
-                                    },
-                                }
-                            ],
-                        )
-                        status = "completed"
-                    else:
-                        self.tool_call_handler.update_tool_call_status(
-                            session,
-                            tool_call_id,
-                            "failed",
-                        )
-                        status = "failed"
-
-                    # Отправить notification об окончании выполнения
-                    notification_content: list[dict[str, Any]] | None = None
-                    if result.success and result.output:
-                        notification_content = [
+                        "completed",
+                        content=[
                             {
                                 "type": "content",
                                 "content": {
                                     "type": "text",
-                                    "text": result.output,
+                                    "text": result.output or "Tool executed successfully",
                                 },
                             }
-                        ]
-
-                    notifications.append(
-                        self.tool_call_handler.build_tool_update_notification(
-                            session_id=session_id,
-                            tool_call_id=tool_call_id,
-                            status=status,
-                            content=notification_content,
-                        )
+                        ],
                     )
-
-                    logger.debug(
-                        "tool executed successfully",
-                        session_id=session_id,
-                        tool_name=tool_name,
-                        status=status,
-                    )
-
-                except Exception as e:
-                    # Обработать ошибку выполнения
-                    logger.error(
-                        "tool execution failed",
-                        session_id=session_id,
-                        tool_name=tool_name,
-                        error=str(e),
-                    )
-
+                    status = "completed"
+                else:
                     self.tool_call_handler.update_tool_call_status(
                         session,
                         tool_call_id,
                         "failed",
                     )
-                    notifications.append(
-                        self.tool_call_handler.build_tool_update_notification(
-                            session_id=session_id,
-                            tool_call_id=tool_call_id,
-                            status="failed",
-                        )
+                    status = "failed"
+
+                # Отправить notification об окончании выполнения
+                notification_content: list[dict[str, Any]] | None = None
+                if result.success and result.output:
+                    notification_content = [
+                        {
+                            "type": "content",
+                            "content": {
+                                "type": "text",
+                                "text": result.output,
+                            },
+                        }
+                    ]
+
+                notifications.append(
+                    self.tool_call_handler.build_tool_update_notification(
+                        session_id=session_id,
+                        tool_call_id=tool_call_id,
+                        status=status,
+                        content=notification_content,
                     )
+                )
+
+                logger.debug(
+                    "tool executed successfully",
+                    session_id=session_id,
+                    tool_name=tool_name,
+                    status=status,
+                )
+
+            except Exception as e:
+                # Обработать ошибку выполнения
+                logger.error(
+                    "tool execution failed",
+                    session_id=session_id,
+                    tool_name=tool_name,
+                    error=str(e),
+                )
+
+                self.tool_call_handler.update_tool_call_status(
+                    session,
+                    tool_call_id,
+                    "failed",
+                )
+                notifications.append(
+                    self.tool_call_handler.build_tool_update_notification(
+                        session_id=session_id,
+                        tool_call_id=tool_call_id,
+                        status="failed",
+                    )
+                )
 
     def handle_permission_response(
         self,
@@ -747,6 +775,107 @@ class PromptOrchestrator:
         )
 
         return ProtocolOutcome(response=None, notifications=notifications)
+
+    async def _decide_tool_execution(
+        self,
+        session: SessionState,
+        tool_kind: str,
+    ) -> str:
+        """Принимает решение о выполнении tool с fallback chain.
+        
+        Реализует fallback chain для проверки разрешений:
+        1. session.permission_policy[tool_kind] - session-local политика
+        2. global_policy[tool_kind] - глобальная политика (если доступна)
+        3. ask (по умолчанию) - запросить разрешение у пользователя
+        
+        Args:
+            session: Состояние сессии
+            tool_kind: Тип инструмента (read, edit, execute, и т.д.)
+        
+        Returns:
+            'allow' - выполнить инструмент
+            'reject' - отклонить инструмент
+            'ask' - запросить разрешение у пользователя
+        """
+        logger.debug(
+            "checking tool execution decision",
+            session_id=session.session_id,
+            tool_kind=tool_kind,
+        )
+        
+        # Шаг 1: Проверить session-local политику
+        session_policy = session.permission_policy.get(tool_kind)
+        logger.debug(
+            "checking session policy for tool_kind",
+            session_id=session.session_id,
+            tool_kind=tool_kind,
+            session_policy=session_policy,
+        )
+        
+        if session_policy == "allow_always":
+            logger.debug(
+                "decision: allow (session policy)",
+                tool_kind=tool_kind,
+                session_id=session.session_id,
+            )
+            return "allow"
+        if session_policy == "reject_always":
+            logger.debug(
+                "decision: reject (session policy)",
+                tool_kind=tool_kind,
+                session_id=session.session_id,
+            )
+            return "reject"
+        
+        logger.debug(
+            "no session policy found",
+            session_id=session.session_id,
+            tool_kind=tool_kind,
+        )
+        
+        # Шаг 2: Проверить глобальную политику (если менеджер доступен)
+        if self._global_policy_manager is not None:
+            global_policy = await self._global_policy_manager.get_global_policy(tool_kind)
+            logger.debug(
+                "checking global policy for tool_kind",
+                session_id=session.session_id,
+                tool_kind=tool_kind,
+                global_policy=global_policy,
+            )
+            
+            if global_policy == "allow_always":
+                logger.debug(
+                    "decision: allow (global policy)",
+                    tool_kind=tool_kind,
+                    session_id=session.session_id,
+                )
+                return "allow"
+            if global_policy == "reject_always":
+                logger.debug(
+                    "decision: reject (global policy)",
+                    tool_kind=tool_kind,
+                    session_id=session.session_id,
+                )
+                return "reject"
+        else:
+            logger.debug(
+                "global policy manager not available",
+                session_id=session.session_id,
+            )
+        
+        logger.debug(
+            "no global policy found",
+            session_id=session.session_id,
+            tool_kind=tool_kind,
+        )
+        
+        # Шаг 3: По умолчанию - запросить разрешение
+        logger.debug(
+            "decision: ask user for permission",
+            tool_kind=tool_kind,
+            session_id=session.session_id,
+        )
+        return "ask"
 
 
 def _extract_text_preview(prompt: list[dict[str, Any]]) -> str:

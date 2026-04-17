@@ -14,6 +14,7 @@ from typing import Any
 
 import structlog
 
+from acp_client.application.permission_handler import PermissionHandler
 from acp_client.application.session_coordinator import SessionCoordinator
 from acp_client.infrastructure.di_container import ContainerBuilder
 from acp_client.infrastructure.events.bus import EventBus
@@ -32,8 +33,9 @@ class DIBootstrapper:
     1. EventBus - шина событий
     2. TransportService - низкоуровневая коммуникация
     3. SessionRepository - хранилище сессий
-    4. SessionCoordinator - оркестрация операций
-    5. ViewModels - слой представления
+    4. PermissionHandler - обработка permission requests
+    5. SessionCoordinator - оркестрация операций
+    6. ViewModels - слой представления
     """
 
     @staticmethod
@@ -79,6 +81,7 @@ class DIBootstrapper:
             builder.register_singleton(EventBus, event_bus)
 
             # 2. Регистрируем TransportService - низкоуровневая коммуникация
+            # Сначала без permission_handler, добавим позже
             logger.debug("registering_transport_service", host=host, port=port)
             transport_service = ACPTransportService(host=host, port=port)
             builder.register_singleton(ACPTransportService, transport_service)
@@ -104,14 +107,35 @@ class DIBootstrapper:
 
             # 6. Регистрируем SessionCoordinator - оркестрация операций
             # Требует TransportService и SessionRepository
+            # PermissionHandler добавим позже (circular dependency resolution)
             logger.debug("registering_session_coordinator")
             coordinator = SessionCoordinator(
                 transport=transport_service,
                 session_repo=session_repo,
+                permission_handler=None,  # Добавим после создания PermissionHandler
             )
             builder.register_singleton(SessionCoordinator, coordinator)
 
-            # 7. Собираем контейнер и регистрируем ViewModels
+            # 7. Регистрируем PermissionHandler - обработка permission requests
+            # Требует SessionCoordinator и TransportService
+            logger.debug("registering_permission_handler")
+            permission_handler = PermissionHandler(
+                coordinator=coordinator,
+                transport=transport_service,
+                logger=logger,
+            )
+            builder.register_singleton(PermissionHandler, permission_handler)
+
+            # 8. Обновляем зависимости - добавляем PermissionHandler в
+            # SessionCoordinator и TransportService
+            # Это разрешает циклическую зависимость:
+            # - PermissionHandler зависит от SessionCoordinator и TransportService
+            # - SessionCoordinator и TransportService зависят от PermissionHandler
+            logger.debug("updating_permission_handler_dependencies")
+            coordinator._permission_handler = permission_handler
+            transport_service._permission_handler = permission_handler
+
+            # 9. Собираем контейнер и регистрируем ViewModels
             container = builder.build()
 
             logger.debug("registering_view_models")

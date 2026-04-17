@@ -315,6 +315,13 @@ class ACPProtocol:
                 self._sessions,
             )
 
+        if method == "session/request_permission_response":
+            return await self._handle_permission_response(
+                message.id,
+                params,
+                self._sessions,
+            )
+
         if method == "session/set_config_option":
             return config.session_set_config_option(
                 message.id,
@@ -574,3 +581,129 @@ class ACPProtocol:
                 exc_info=True,
             )
             self._global_policy_manager = None
+
+    async def _handle_permission_response(
+        self,
+        request_id: JsonRpcId,
+        params: dict[str, Any],
+        sessions: dict[str, SessionState],
+    ) -> ProtocolOutcome:
+        """Обрабатывает response на session/request_permission от клиента.
+        
+        Логика:
+        1. Найти сессию с активным permission request
+        2. Проверить, не был ли request отменен (late response handling)
+        3. Извлечь решение из response
+        4. Обновить policy если нужно (для allow_always/reject_always)
+        5. Обновить tool call status и отправить notifications
+        
+        Args:
+            request_id: ID permission request
+            params: Параметры (sessionId, result с outcome и optionId)
+            sessions: Словарь активных сессий
+        
+        Returns:
+            ProtocolOutcome с response и notifications
+        """
+        # Найти сессию по permission request ID
+        session = None
+        session_id = ""
+        for sid, session_candidate in sessions.items():
+            if (
+                session_candidate.active_turn
+                and session_candidate.active_turn.permission_request_id == request_id
+            ):
+                session = session_candidate
+                session_id = sid
+                break
+
+        if session is None:
+            # Проверить, был ли request отменен (late response handling)
+            for sid, session_candidate in sessions.items():
+                if request_id in session_candidate.cancelled_permission_requests:
+                    logger.debug(
+                        "ignoring late response on cancelled permission request",
+                        request_id=request_id,
+                        session_id=sid,
+                    )
+                    # Удалить из tombstone
+                    session_candidate.cancelled_permission_requests.discard(request_id)
+                    return ProtocolOutcome(response=ACPMessage.response(request_id, {}))
+
+            # Неизвестный request
+            logger.warning(
+                "permission response for unknown request",
+                request_id=request_id,
+            )
+            return ProtocolOutcome(
+                response=ACPMessage.error_response(
+                    request_id,
+                    code=-32603,
+                    message="Unknown permission request",
+                )
+            )
+
+        # Получить PermissionManager из handlers (инициализируется в prompt.py)
+        from .handlers.permission_manager import PermissionManager
+
+        # Создать временный PermissionManager для извлечения данных
+        permission_manager = PermissionManager()
+
+        result = params.get("result", {})
+        
+        # Извлечь решение из response
+        outcome = permission_manager.extract_permission_outcome(result)
+        option_id = permission_manager.extract_permission_option_id(result)
+
+        if outcome != "selected" or option_id is None:
+            logger.warning(
+                "invalid permission response format",
+                request_id=request_id,
+                session_id=session_id,
+                outcome=outcome,
+            )
+            return ProtocolOutcome(
+                response=ACPMessage.error_response(
+                    request_id,
+                    code=-32603,
+                    message="Invalid permission response",
+                )
+            )
+
+        # Получить tool_call_id из active_turn
+        if session.active_turn is None or session.active_turn.permission_tool_call_id is None:
+            logger.warning(
+                "no permission tool call in active turn",
+                request_id=request_id,
+                session_id=session_id,
+            )
+            return ProtocolOutcome(
+                response=ACPMessage.error_response(
+                    request_id,
+                    code=-32603,
+                    message="No pending tool call",
+                )
+            )
+
+        tool_call_id = session.active_turn.permission_tool_call_id
+
+        # Сохранить policy если нужно (для allow_always/reject_always)
+        acceptance_updates = permission_manager.build_permission_acceptance_updates(
+            session,
+            session_id,
+            tool_call_id,
+            option_id,
+        )
+
+        logger.debug(
+            "permission response handled",
+            request_id=request_id,
+            session_id=session_id,
+            option_id=option_id,
+            tool_call_id=tool_call_id,
+        )
+
+        return ProtocolOutcome(
+            response=ACPMessage.response(request_id, {}),
+            notifications=acceptance_updates,
+        )

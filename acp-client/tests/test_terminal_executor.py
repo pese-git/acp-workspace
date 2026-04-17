@@ -9,6 +9,7 @@
 """
 
 import asyncio
+
 import pytest
 
 from acp_client.infrastructure.services.terminal_executor import (

@@ -100,16 +100,9 @@ class FileSystemToolExecutor(ToolExecutor):
                 extra={"session_id": session.session_id, "path": path},
             )
             
-            # Проверка разрешения
-            if self._permission_checker.should_request_permission(
-                session, "read"
-            ):
-                logger.debug(
-                    "Требуется разрешение для чтения файла",
-                    extra={"session_id": session.session_id, "path": path},
-                )
-                # Примечание: Здесь должна быть интеграция с PromptOrchestrator
-                # для ожидания разрешения в ask-режиме. На данный момент пропускаем.
+            # Примечание: Проверка разрешений выполняется в
+            # PromptOrchestrator._decide_tool_execution() перед вызовом executor.
+            # Здесь мы только выполняем операцию.
             
             # Вызов ClientRPC
             content = await self._bridge.read_file(
@@ -188,16 +181,9 @@ class FileSystemToolExecutor(ToolExecutor):
                 },
             )
             
-            # Проверка разрешения
-            if self._permission_checker.should_request_permission(
-                session, "write"
-            ):
-                logger.debug(
-                    "Требуется разрешение для записи файла",
-                    extra={"session_id": session.session_id, "path": path},
-                )
-                # Примечание: Здесь должна быть интеграция с PromptOrchestrator
-                # для ожидания разрешения в ask-режиме. На данный момент пропускаем.
+            # Примечание: Проверка разрешений выполняется в
+            # PromptOrchestrator._decide_tool_execution() перед вызовом executor.
+            # Здесь мы только выполняем операцию.
             
             # Попытка прочитать старое содержимое для diff
             old_content = await self._bridge.read_file(

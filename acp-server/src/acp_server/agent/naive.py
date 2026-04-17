@@ -129,9 +129,20 @@ class NaiveAgent(LLMAgent):
                     metadata={"iterations": iteration},
                 )
 
-            # Добавить assistant message с tool calls в историю
-            # ВАЖНО: Для OpenAI API assistant message должен содержать tool_calls
-            messages.append(
+            # АРХИТЕКТУРНОЕ ИЗМЕНЕНИЕ (Вариант A - Clean Architecture):
+            # Agent ДЕЛЕГИРУЕТ управление tool calls в PromptOrchestrator.
+            # Согласно SERVER_PERMISSION_INTEGRATION_ARCHITECTURE.md:
+            # - Agent: генерирует tool calls и возвращает их
+            # - PromptOrchestrator: управляет decision flow (allow/reject/ask)
+            # Это позволяет применить permission flow перед выполнением tool.
+            
+            # Обновить историю в контексте
+            if context.session_id not in self._session_histories:
+                self._session_histories[context.session_id] = []
+
+            # Добавить user message и assistant message в историю
+            self._session_histories[context.session_id].extend(messages)
+            self._session_histories[context.session_id].append(
                 LLMMessage(
                     role="assistant",
                     content=response.text,
@@ -139,69 +150,24 @@ class NaiveAgent(LLMAgent):
                 )
             )
 
-            # Выполнить каждый tool
+            # Логирование для отладки
             logger.info(
-                "starting tool execution loop",
+                "llm returned tool calls - delegating execution to PromptOrchestrator",
                 iteration=iteration,
                 num_tool_calls=len(response.tool_calls),
                 tool_names=[tc.name for tc in response.tool_calls],
             )
-            
-            for idx, tool_call in enumerate(response.tool_calls):
-                logger.debug(
-                    "executing tool",
-                    iteration=iteration,
-                    tool_index=idx,
-                    tool_id=tool_call.id,
-                    tool_name=tool_call.name,
-                    tool_arguments=tool_call.arguments,
-                )
-                
-                # Выполнить инструмент
-                result = await self.tools.execute_tool(
-                    context.session_id,
-                    tool_call.name,
-                    tool_call.arguments,
-                    session=context.session,  # Передаём session для tool handlers
-                )
-                
-                logger.info(
-                    "tool execution completed",
-                    iteration=iteration,
-                    tool_index=idx,
-                    tool_name=tool_call.name,
-                    success=result.success,
-                    has_output=bool(result.output),
-                    has_error=bool(result.error),
-                    output_length=len(result.output) if result.output else 0,
-                )
-                
-                if not result.success:
-                    logger.warning(
-                        "tool execution failed",
-                        tool_name=tool_call.name,
-                        error=result.error,
-                    )
 
-                # Добавить результат в историю как tool message
-                # ВАЖНО: Для OpenAI API tool message должен содержать tool_call_id
-                tool_result_text = result.output if result.success else result.error
-                if tool_result_text is None:
-                    tool_result_text = "Инструмент выполнен без вывода"
-
-                messages.append(
-                    LLMMessage(
-                        role="tool",
-                        content=tool_result_text,
-                        tool_call_id=tool_call.id,
-                        name=tool_call.name,
-                    )
-                )
-            
-            logger.info(
-                "tool execution loop completed",
-                iteration=iteration,
-                num_tools_executed=len(response.tool_calls),
+            # Вернуть tool_calls для обработки в PromptOrchestrator
+            # PromptOrchestrator применит _process_tool_calls() которая:
+            # 1. Проверит разрешения (session policy -> global policy -> ask user)
+            # 2. Выполнит tool или отклонит его
+            # 3. Отправит notifications клиенту
+            return AgentResponse(
+                text=response.text,
+                tool_calls=response.tool_calls,
+                stop_reason=response.stop_reason,
+                metadata={"iterations": iteration},
             )
 
         # Достигнут лимит итераций
