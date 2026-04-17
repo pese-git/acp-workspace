@@ -483,6 +483,12 @@ class PermissionHandler:
             # Если callback передан, используем его для показа modal
             # через coordinator.request_permission
             if callback is not None:
+                self._logger.info(
+                    "permission_callback_provided_showing_ui_modal",
+                    request_id=request_id,
+                    session_id=session_id,
+                    tool_call_id=tool_call.toolCallId,
+                )
                 outcome = await self._coordinator.request_permission(
                     request=request,
                     callback=callback,
@@ -491,8 +497,12 @@ class PermissionHandler:
                 # Fallback: показать ошибку логирования и вернуть cancelled
                 # (без callback не можем показать UI)
                 self._logger.warning(
-                    "permission_request_no_callback",
+                    "permission_request_no_callback_returning_cancelled",
                     request_id=request_id,
+                    session_id=session_id,
+                    tool_call_id=tool_call.toolCallId,
+                    tool_name=tool_call.title,
+                    message="UI modal НЕ будет показан - callback отсутствует",
                 )
                 outcome = CancelledPermissionOutcome(outcome="cancelled")
 

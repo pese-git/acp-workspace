@@ -811,6 +811,16 @@ class ACPTransportService(TransportService):
                 tool_call_id=request.params.toolCall.toolCallId,
             )
 
+            # DEBUG: Логируем что callback=None - это корневая причина проблемы
+            self._logger.warning(
+                "permission_callback_is_none_ui_modal_will_not_show",
+                request_id=request.id,
+                session_id=request.params.sessionId,
+                tool_call_id=request.params.toolCall.toolCallId,
+                tool_name=request.params.toolCall.title,
+                message="callback=None приведет к CancelledPermissionOutcome без показа UI modal",
+            )
+
             # Обработка через handler без callback
             # (callback=None приведет к CancelledPermissionOutcome)
             outcome = await self._permission_handler.handle_request(
