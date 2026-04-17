@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 import structlog
@@ -169,7 +170,9 @@ class ACPClientApp(App[None]):
                     root_path=self._cwd,
                 )
             with Vertical(id="main-column"):
-                yield ChatView(self._chat_vm)
+                # Передаем permission_vm в ChatView для встроенного виджета разрешения
+                self._chat_view = ChatView(self._chat_vm, self._permission_vm)
+                yield self._chat_view
                 yield PlanPanel(self._plan_vm)
             yield ToolPanel(self._chat_vm, self._terminal_vm)
         with Vertical(id="bottom"):
@@ -220,6 +223,23 @@ class ACPClientApp(App[None]):
             # Обновляем статус подключения в UI
             self._ui_vm.set_connection_status(ConnectionStatus.CONNECTED)
             self._ui_vm.set_loading(False)
+
+            # Устанавливаем callback для показа permission modal в UI.
+            # Это необходимо, чтобы при получении session/request_permission от сервера
+            # TUI приложение показало модальное окно для выбора разрешения.
+            try:
+                from acp_client.infrastructure.services.acp_transport_service import (
+                    ACPTransportService,
+                )
+
+                transport = self._container.resolve(ACPTransportService)
+                transport.set_permission_callback(self.show_permission_modal)
+                self._app_logger.info("permission_callback_registered_in_transport")
+            except Exception as e:
+                self._app_logger.warning(
+                    "failed_to_set_permission_callback",
+                    error=str(e),
+                )
 
             # После успешного подключения запрашиваем список сессий с сервера,
             # чтобы sidebar отображал сохраненные сессии сразу при старте.
@@ -427,65 +447,73 @@ class ACPClientApp(App[None]):
         request_id: str | int,
         tool_call: PermissionToolCall,
         options: list[PermissionOption],
+        on_choice: Callable[[str | int, str], None],
     ) -> None:
-        """Показывает модальное окно для запроса разрешения.
+        """Показывает встроенный виджет разрешения в ChatView.
 
-        Интегрирует PermissionModal с SessionCoordinator через callback pattern.
+        Заменяет модальное окно на встроенный виджет для лучшей видимости.
+        Интегрирует InlinePermissionWidget с SessionCoordinator через callback pattern.
 
         Args:
             request_id: ID permission request от сервера
             tool_call: Информация о tool call (kind, title, toolCallId)
             options: Доступные опции для выбора (allow_once, reject_once, и т.д.)
+            on_choice: Callback для обработки выбора (request_id, option_id)
         """
+        self._app_logger.debug(
+            "show_permission_modal_called",
+            request_id=request_id,
+            tool_call_kind=tool_call.kind,
+            tool_call_title=tool_call.title,
+            options_count=len(options),
+        )
+
         try:
-            # Получить SessionCoordinator из DI контейнера
-            from acp_client.application.session_coordinator import SessionCoordinator
-
-            coordinator = self._container.resolve(SessionCoordinator)
-
-            # Создать callback для обработки выбора пользователя
-            def on_choice(req_id: str | int, option_id: str) -> None:
-                """Callback вызываемый при выборе в modal.
-
-                Args:
-                    req_id: ID permission request
-                    option_id: ID выбранной опции или "cancelled"
-                """
+            # Показать встроенный виджет в ChatView
+            if hasattr(self, "_chat_view") and self._chat_view is not None:
                 self._app_logger.debug(
-                    "permission_modal_choice_made",
-                    request_id=req_id,
-                    option_id=option_id,
+                    "showing_inline_permission_widget",
+                    request_id=request_id,
+                    tool_call_kind=tool_call.kind,
+                    tool_call_title=tool_call.title,
+                    options_count=len(options),
                 )
-                if option_id == "cancelled":
-                    coordinator.cancel_permission(req_id)
-                else:
-                    coordinator.resolve_permission(req_id, option_id)
-
-            # Создать и показать modal
-            title = f"{tool_call.kind}: {tool_call.title}"
-            modal = PermissionModal(
-                permission_vm=self._permission_vm,
-                request_id=request_id,
-                title=title,
-                options=options,
-                on_choice=on_choice,
-            )
-
-            self._app_logger.debug(
-                "showing_permission_modal",
-                request_id=request_id,
-                title=title,
-                options_count=len(options),
-            )
-
-            self.push_screen(modal)
+                self._chat_view.show_permission_request(
+                    request_id, tool_call, options, on_choice
+                )
+            else:
+                self._app_logger.warning(
+                    "chat_view_not_available_for_permission_widget",
+                    request_id=request_id,
+                    fallback="showing_modal_instead",
+                )
+                # Fallback на модальное окно если ChatView недоступна
+                title = f"{tool_call.kind}: {tool_call.title}"
+                modal = PermissionModal(
+                    permission_vm=self._permission_vm,
+                    request_id=request_id,
+                    title=title,
+                    options=options,
+                    on_choice=on_choice,
+                )
+                self.push_screen(modal)
 
         except Exception as e:
             self._app_logger.error(
-                "failed_to_show_permission_modal",
+                "failed_to_show_permission_widget",
                 request_id=request_id,
                 error=str(e),
+                error_type=type(e).__name__,
             )
+            # Fallback: вызвать on_choice с cancelled при ошибке
+            try:
+                on_choice(request_id, "cancelled")
+            except Exception as fallback_error:
+                self._app_logger.error(
+                    "failed_to_call_on_choice_callback",
+                    request_id=request_id,
+                    error=str(fallback_error),
+                )
 
     async def on_unmount(self) -> None:
         """Очистка ресурсов при завершении приложения."""

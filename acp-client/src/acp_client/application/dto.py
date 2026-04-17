@@ -128,9 +128,6 @@ class PromptCallbacks:
     on_update: Any | None = None
     """Callback при получении обновления сессии."""
 
-    on_permission: Any | None = None
-    """Callback при запросе разрешения."""
-
     on_fs_read: Any | None = None
     """Callback при чтении файла."""
 

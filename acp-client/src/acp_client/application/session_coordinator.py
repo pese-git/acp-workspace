@@ -420,7 +420,6 @@ class SessionCoordinator:
             # Создаем PromptCallbacks из kwargs
             callbacks = PromptCallbacks(
                 on_update=kwargs.get("on_update"),
-                on_permission=kwargs.get("on_permission"),
                 on_fs_read=kwargs.get("on_fs_read"),
                 on_fs_write=kwargs.get("on_fs_write"),
                 on_terminal_create=kwargs.get("on_terminal_create"),

@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import structlog
@@ -17,8 +18,14 @@ from textual.app import ComposeResult
 from textual.containers import Container, VerticalScroll
 from textual.widgets import Static
 
+from acp_client.messages import PermissionOption, PermissionToolCall
+
 if TYPE_CHECKING:
     from acp_client.presentation.chat_view_model import ChatViewModel
+    from acp_client.presentation.permission_view_model import PermissionViewModel
+    from acp_client.tui.components.chat_view_permission_manager import (
+        ChatViewPermissionManager,
+    )
 
 
 class ChatView(VerticalScroll):
@@ -39,17 +46,32 @@ class ChatView(VerticalScroll):
         >>> chat_vm.messages.value = [message1, message2]
     """
 
-    def __init__(self, chat_vm: ChatViewModel) -> None:
+    def __init__(
+        self,
+        chat_vm: ChatViewModel,
+        permission_vm: PermissionViewModel | None = None,
+    ) -> None:
         """Инициализирует ChatView с обязательным ChatViewModel.
 
         Args:
             chat_vm: ChatViewModel для управления состоянием чата
+            permission_vm: Опциональный PermissionViewModel для встроенного виджета разрешения
         """
         super().__init__(id="chat_view")
         self.chat_vm = chat_vm
+        self._permission_vm = permission_vm
         self._mounted = False
         self._content_container: Container | None = None
         self._logger = structlog.get_logger("chat_view")
+
+        # Инициализировать менеджер разрешений если ViewModel доступен
+        self._permission_manager: ChatViewPermissionManager | None = None
+        if permission_vm is not None:
+            from acp_client.tui.components.chat_view_permission_manager import (
+                ChatViewPermissionManager,
+            )
+
+            self._permission_manager = ChatViewPermissionManager(self, permission_vm)
 
         self.chat_vm.messages.subscribe(self._on_messages_changed)
         self.chat_vm.tool_calls.subscribe(self._on_tool_calls_changed)
@@ -276,3 +298,39 @@ class ChatView(VerticalScroll):
             # Отключаем streaming режим и очищаем буфер
             self.chat_vm.is_streaming.value = False
             self.chat_vm.streaming_text.value = ""
+
+    def show_permission_request(
+        self,
+        request_id: str | int,
+        tool_call: PermissionToolCall,
+        options: list[PermissionOption],
+        on_choice: Callable[[str | int, str], None],
+    ) -> None:
+        """Показать встроенный виджет запроса разрешения в чате.
+
+        Интегрирует встроенный виджет разрешения в ChatView.
+        Виджет отображается как часть истории сообщений.
+
+        Args:
+            request_id: ID permission request
+            tool_call: Информация о tool call
+            options: Доступные опции для выбора
+            on_choice: Callback при выборе (request_id, option_id)
+        """
+        if self._permission_manager is not None:
+            self._permission_manager.show_permission_request(
+                request_id, tool_call, options, on_choice
+            )
+        else:
+            self._logger.warning(
+                "permission_manager_not_available",
+                request_id=request_id,
+            )
+
+    def hide_permission_request(self) -> None:
+        """Скрыть и удалить встроенный виджет разрешения.
+
+        Удаляет текущий виджет разрешения из ChatView.
+        """
+        if self._permission_manager is not None:
+            self._permission_manager.hide_permission_request()

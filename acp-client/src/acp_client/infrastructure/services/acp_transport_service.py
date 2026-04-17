@@ -69,6 +69,17 @@ class ACPTransportService(TransportService):
         self.port = port
         self.parser = parser or MessageParser()
         self._permission_handler = permission_handler
+        # Callback для отображения permission modal в UI
+        # Будет установлен через set_permission_callback из TUI App
+        # Сигнатура: (request_id, tool_call, options, on_choice) -> None
+        # Типизация:
+        # Callable[[request_id, tool_call, options, on_choice], None] | None
+        self._permission_callback: (
+            Callable[
+                [str | int, Any, list[Any], Callable[[str | int, str], None]], None
+            ]
+            | None
+        ) = None
         # Инициализируем транспорт для соединения
         self._transport: WebSocketTransport | None = None
         # Сохраняем server capabilities после инициализации
@@ -446,6 +457,28 @@ class ACPTransportService(TransportService):
             raise RuntimeError(msg)
         return self._server_capabilities
 
+    def set_permission_callback(
+        self,
+        callback: Callable[[str | int, Any, list[Any], Callable[[str | int, str], None]], None],
+    ) -> None:
+        """Устанавливает callback для отображения permission modal в UI.
+
+        Callback будет вызван при получении session/request_permission от сервера
+        для показа модального окна пользователю с выбором разрешения.
+
+        Аргументы:
+            callback: Функция с сигнатурой (request_id, tool_call, options, on_choice).
+                     - request_id: ID permission request
+                     - tool_call: Информация о tool call
+                     - options: Доступные опции разрешения
+                     - on_choice: Callback функция (option_id) -> None для обработки выбора
+        """
+        self._permission_callback = callback
+        self._logger.info(
+            "permission_callback_set",
+            callback_name=getattr(callback, "__name__", "unknown"),
+        )
+
     def is_initialized(self) -> bool:
         """Проверяет, была ли выполнена инициализация.
 
@@ -459,7 +492,6 @@ class ACPTransportService(TransportService):
         method: str,
         params: dict[str, Any] | None = None,
         on_update: Callable[[dict[str, Any]], None] | None = None,
-        on_permission: Callable[[dict[str, Any]], str | None] | None = None,
         on_fs_read: Callable[[str], str] | None = None,
         on_fs_write: Callable[[str, str], str | None] | None = None,
         on_terminal_create: Callable[[str], str] | None = None,
@@ -585,17 +617,10 @@ class ACPTransportService(TransportService):
                                 request_id=request_id,
                                 permission_id=permission_data.get("id"),
                             )
-                            # Если есть callback, использовать его;
-                            # иначе использовать PermissionHandler
-                            if on_permission is not None:
-                                await self._handle_permission_request(
-                                    permission_data=permission_data,
-                                    on_permission=on_permission,
-                                )
-                            else:
-                                await self._handle_permission_request_with_handler(
-                                    permission_data,
-                                )
+                            # Всегда обрабатываем через PermissionHandler
+                            await self._handle_permission_request_with_handler(
+                                permission_data,
+                            )
                         except TimeoutError:
                             # Таймаут при ожидании уведомления — нормально.
                             pass
@@ -731,53 +756,6 @@ class ACPTransportService(TransportService):
                     cleanup_request_id: str | int = request_id
                     await self._queues.cleanup_response_queue(cleanup_request_id)
 
-    async def _handle_permission_request(
-        self,
-        *,
-        permission_data: dict[str, Any],
-        on_permission: Callable[[dict[str, Any]], str | None] | None,
-    ) -> None:
-        """Обрабатывает server->client `session/request_permission` и отправляет response."""
-        permission = ACPMessage.from_dict(permission_data)
-        if permission.method != "session/request_permission":
-            return
-
-        self._logger.debug(
-            "tool_lifecycle_permission_callback_start",
-            permission_id=permission.id,
-            has_callback=on_permission is not None,
-        )
-
-        permission_result = on_permission(permission_data) if on_permission is not None else None
-        self._logger.debug(
-            "tool_lifecycle_permission_callback_done",
-            permission_id=permission.id,
-            selected_option=permission_result,
-        )
-        permission_reply = ACPMessage.response(
-            permission.id,
-            {
-                "outcome": (
-                    {
-                        "outcome": "selected",
-                        "optionId": permission_result,
-                    }
-                    if permission_result
-                    else {"outcome": "cancelled"}
-                )
-            },
-        )
-        self._logger.debug(
-            "tool_lifecycle_permission_response_sending",
-            permission_id=permission.id,
-            outcome=permission_reply.result,
-        )
-        await self.send(permission_reply.to_dict())
-        self._logger.debug(
-            "tool_lifecycle_permission_response_sent",
-            permission_id=permission.id,
-        )
-
     async def _handle_permission_request_with_handler(
         self,
         message: dict[str, Any],
@@ -788,10 +766,6 @@ class ACPTransportService(TransportService):
         1. Парсинг request
         2. Обработка через PermissionHandler
         3. Формирование и отправка response
-
-        Примечание: callback=None используется по умолчанию, что приводит к
-        возвращению CancelledPermissionOutcome. TUI App должна переопределить
-        этот метод если требуется интеграция с UI modal.
 
         Args:
             message: JSON-RPC сообщение с permission request
@@ -809,23 +783,14 @@ class ACPTransportService(TransportService):
                 request_id=request.id,
                 session_id=request.params.sessionId,
                 tool_call_id=request.params.toolCall.toolCallId,
+                has_ui_callback=self._permission_callback is not None,
             )
 
-            # DEBUG: Логируем что callback=None - это корневая причина проблемы
-            self._logger.warning(
-                "permission_callback_is_none_ui_modal_will_not_show",
-                request_id=request.id,
-                session_id=request.params.sessionId,
-                tool_call_id=request.params.toolCall.toolCallId,
-                tool_name=request.params.toolCall.title,
-                message="callback=None приведет к CancelledPermissionOutcome без показа UI modal",
-            )
-
-            # Обработка через handler без callback
-            # (callback=None приведет к CancelledPermissionOutcome)
+            # Обработка через handler с callback если он установлен
+            # Если callback=None, PermissionHandler вернет CancelledPermissionOutcome
             outcome = await self._permission_handler.handle_request(
                 request=request,
-                callback=None,
+                callback=self._permission_callback,
             )
 
             self._logger.info(

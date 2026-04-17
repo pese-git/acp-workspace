@@ -116,7 +116,6 @@ class TransportService(ABC):
         method: str,
         params: dict[str, Any] | None = None,
         on_update: Any = None,
-        on_permission: Any = None,
         on_fs_read: Any = None,
         on_fs_write: Any = None,
         on_terminal_create: Any = None,
@@ -131,7 +130,6 @@ class TransportService(ABC):
             method: Метод для вызова
             params: Параметры метода
             on_update: Callback для session/update
-            on_permission: Callback для session/request_permission
             on_fs_read: Callback для fs/read
             on_fs_write: Callback для fs/write
             on_terminal_create: Callback для terminal/create

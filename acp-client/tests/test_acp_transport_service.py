@@ -17,69 +17,24 @@ class TestACPTransportServiceRequestWithCallbacks:
     """Тесты обработки server->client RPC внутри request_with_callbacks."""
 
     @pytest.mark.asyncio
-    async def test_permission_request_with_id_is_handled(self) -> None:
-        """Клиент отвечает на session/request_permission c id и завершает запрос."""
+    async def test_permission_request_routing_via_handler(self) -> None:
+        """Permission requests должны маршрутизироваться через PermissionHandler без on_permission callback."""
+        # Этот тест проверяет что параметр on_permission был удален
+        # и permission requests обрабатываются только через PermissionHandler
         service = ACPTransportService(host="127.0.0.1", port=8765)
-        queues = RoutingQueues()
-        service._queues = queues  # noqa: SLF001 - test setup
-
-        transport = AsyncMock(spec=WebSocketTransport)
-        transport.is_connected.return_value = True
-        sent_messages: list[dict[str, object]] = []
-
-        async def send_str_side_effect(raw_payload: str) -> None:
-            payload = json.loads(raw_payload)
-            sent_messages.append(payload)
-
-            if payload.get("method") != "session/prompt":
-                return
-
-            if not isinstance(payload.get("id"), str | int):
-                return
-            request_id: str | int = payload["id"]
-
-            async def produce_server_messages() -> None:
-                await queues.permission_queue.put(
-                    {
-                        "jsonrpc": "2.0",
-                        "id": "perm-1",
-                        "method": "session/request_permission",
-                        "params": {
-                            "sessionId": "sess-1",
-                            "options": [{"optionId": "allow_once", "kind": "allow_once"}],
-                        },
-                    }
-                )
-                response_queue = await queues.get_or_create_response_queue(request_id)
-                await response_queue.put(
-                    {
-                        "jsonrpc": "2.0",
-                        "id": request_id,
-                        "result": {"status": "ok"},
-                    }
-                )
-
-            asyncio.create_task(produce_server_messages())
-
-        transport.send_str = AsyncMock(side_effect=send_str_side_effect)
-        service._transport = transport  # noqa: SLF001 - test setup
-
-        response = await service.request_with_callbacks(
-            method="session/prompt",
-            params={"sessionId": "sess-1", "prompt": [{"type": "text", "text": "hi"}]},
-            on_permission=lambda _: "allow_once",
-        )
-
-        assert response["result"]["status"] == "ok"
-
-        permission_reply = next(
-            message
-            for message in sent_messages
-            if message.get("id") == "perm-1" and "result" in message
-        )
-        assert permission_reply["result"] == {
-            "outcome": {"outcome": "selected", "optionId": "allow_once"}
-        }
+        
+        # Проверяем что request_with_callbacks не принимает on_permission параметр
+        # Если попытаться передать on_permission, будет TypeError
+        try:
+            # Это должно вызвать TypeError так как параметра на_permission больше нет
+            await service.request_with_callbacks(
+                method="test",
+                on_permission=lambda x: None,  # type: ignore[call-arg]
+            )
+            pytest.fail("Expected TypeError for on_permission parameter")
+        except TypeError as e:
+            # Ожидаемая ошибка - параметр удален
+            assert "on_permission" in str(e) or "unexpected keyword argument" in str(e)
 
     @pytest.mark.asyncio
     async def test_fs_read_request_with_id_is_handled(self) -> None:
@@ -291,3 +246,150 @@ class TestACPTransportServiceRequestWithCallbacks:
             call.args[0] for call in service._logger.warning.call_args_list if call.args
         ]
         assert "tool_lifecycle_notification_failed" in warning_events
+
+
+class TestPermissionCallback:
+    """Тесты для установки и использования permission callback."""
+
+    def test_set_permission_callback_stores_callback(self) -> None:
+        """Метод set_permission_callback должен сохранять callback."""
+        service = ACPTransportService(host="127.0.0.1", port=8765)
+
+        # Создаем mock callback
+        callback = MagicMock()
+
+        # Устанавливаем callback
+        service.set_permission_callback(callback)
+
+        # Проверяем, что callback сохранен
+        assert service._permission_callback is callback  # noqa: SLF001
+
+    def test_set_permission_callback_logs_info_message(self) -> None:
+        """Установка callback должна логировать INFO сообщение."""
+        service = ACPTransportService(host="127.0.0.1", port=8765)
+        service._logger = MagicMock()  # noqa: SLF001
+
+        # Создаем mock callback с именем
+        def my_permission_callback(
+            request_id: str | int, tool_call: object, options: list[object]
+        ) -> None:
+            pass
+
+        # Устанавливаем callback
+        service.set_permission_callback(my_permission_callback)
+
+        # Проверяем логирование
+        service._logger.info.assert_called_once()  # noqa: SLF001
+        call_args = service._logger.info.call_args  # noqa: SLF001
+        assert "permission_callback_set" in call_args[0]
+        assert call_args[1]["callback_name"] == "my_permission_callback"
+
+    @pytest.mark.asyncio
+    async def test_handle_permission_request_with_callback_is_passed_to_handler(
+        self,
+    ) -> None:
+        """Установленный callback должен быть передан в handler.handle_request."""
+        # Создаем mock для PermissionHandler
+        permission_handler = AsyncMock()
+        service = ACPTransportService(
+            host="127.0.0.1",
+            port=8765,
+            permission_handler=permission_handler,
+        )
+
+        # Устанавливаем mock callback
+        callback = MagicMock()
+        service.set_permission_callback(callback)
+
+        # Подготавливаем mock для handle_request
+        from acp_client.application.permission_handler import CancelledPermissionOutcome
+
+        permission_handler.handle_request.return_value = CancelledPermissionOutcome(
+            outcome="cancelled"
+        )
+
+        # Мокируем send, чтобы избежать реальной отправки
+        service.send = AsyncMock()
+
+        # Вызываем _handle_permission_request_with_handler с корректной структурой
+        await service._handle_permission_request_with_handler(
+            {
+                "jsonrpc": "2.0",
+                "id": "perm-1",
+                "method": "session/request_permission",
+                "params": {
+                    "sessionId": "sess-1",
+                    "toolCall": {
+                        "toolCallId": "tc-1",
+                        "kind": "read",
+                        "title": "Read file",
+                    },
+                    "options": [
+                        {
+                            "optionId": "allow_once",
+                            "kind": "allow_once",
+                            "name": "Allow once",
+                        }
+                    ],
+                },
+            }
+        )
+
+        # Проверяем, что handle_request был вызван с нашим callback
+        permission_handler.handle_request.assert_called_once()
+        call_kwargs = permission_handler.handle_request.call_args[1]
+        assert call_kwargs["callback"] is callback
+
+    @pytest.mark.asyncio
+    async def test_handle_permission_request_without_callback_passes_none(
+        self,
+    ) -> None:
+        """Если callback не установлен, handler должен получить None."""
+        # Создаем mock для PermissionHandler
+        permission_handler = AsyncMock()
+        service = ACPTransportService(
+            host="127.0.0.1",
+            port=8765,
+            permission_handler=permission_handler,
+        )
+
+        # НЕ устанавливаем callback - оставляем None
+
+        # Подготавливаем mock для handle_request
+        from acp_client.application.permission_handler import CancelledPermissionOutcome
+
+        permission_handler.handle_request.return_value = CancelledPermissionOutcome(
+            outcome="cancelled"
+        )
+
+        # Мокируем send, чтобы избежать реальной отправки
+        service.send = AsyncMock()
+
+        # Вызываем _handle_permission_request_with_handler с корректной структурой
+        await service._handle_permission_request_with_handler(
+            {
+                "jsonrpc": "2.0",
+                "id": "perm-1",
+                "method": "session/request_permission",
+                "params": {
+                    "sessionId": "sess-1",
+                    "toolCall": {
+                        "toolCallId": "tc-1",
+                        "kind": "read",
+                        "title": "Read file",
+                    },
+                    "options": [
+                        {
+                            "optionId": "allow_once",
+                            "kind": "allow_once",
+                            "name": "Allow once",
+                        }
+                    ],
+                },
+            }
+        )
+
+        # Проверяем, что handle_request был вызван с None callback
+        permission_handler.handle_request.assert_called_once()
+        call_kwargs = permission_handler.handle_request.call_args[1]
+        assert call_kwargs["callback"] is None

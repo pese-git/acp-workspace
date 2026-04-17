@@ -425,25 +425,37 @@ class PermissionHandler:
         self,
         request: RequestPermissionRequest,
         callback: (
-            Callable[[str | int, PermissionToolCall, list[PermissionOption]], None]
+            Callable[
+                [
+                    str | int,
+                    PermissionToolCall,
+                    list[PermissionOption],
+                    Callable[[str | int, str], None],
+                ],
+                None,
+            ]
             | None
         ) = None,
     ) -> PermissionOutcome:
         """Обработать входящий session/request_permission от сервера.
 
-        Выполняет полный цикл:
-        1. Создание PermissionRequest с timeout
-        2. Показ PermissionModal пользователю через callback (если передан)
-        3. Ожидание выбора (или timeout)
-        4. Форматирование и отправка response
-        5. Cleanup
+        Этот метод управляет полным lifecycle запроса разрешения:
+        1. Создает PermissionRequest через _request_manager
+        2. Вызывает callback для показа UI (если предоставлен)
+        3. Ждет результата от пользователя
+        4. Отправляет response на сервер
+        5. Возвращает outcome
 
         Args:
             request: Типизированный RequestPermissionRequest от сервера
             callback: Функция для показа UI modal (опционально)
-                Сигнатура: Callable[[str | int, PermissionToolCall, list[PermissionOption]], None]
-                Вызывается как: callback(request_id, tool_call, options)
-                Если не передан, используется coordinator.request_permission напрямую
+                Сигнатура: Callable[
+                    [str|int, PermissionToolCall, list[PermissionOption], Callable],
+                    None
+                ]
+                Вызывается как: callback(request_id, tool_call, options, on_choice)
+                на_choice: Callable[[str], None] - для обработки выбора
+                пользователя
 
         Returns:
             PermissionOutcome с результатом выбора пользователя
@@ -459,43 +471,89 @@ class PermissionHandler:
             }
             request = parse_request_permission_request(raw_message)
             if request:
-                # Без callback - используется ViewModel
-                outcome = await handler.handle_request(request)
-                
                 # С callback - показывает UI modal через callback
-                def show_modal(req_id, tool_call, options):
-                    app.show_permission_modal(req_id, tool_call, options)
+                def show_modal(req_id, tool_call, options, on_choice):
+                    app.show_permission_modal(req_id, tool_call, options, on_choice)
                 
                 outcome = await handler.handle_request(request, callback=show_modal)
         """
         request_id = request.id
         session_id = request.params.sessionId
         tool_call = request.params.toolCall
+        options = request.params.options
 
         self._logger.info(
             "handling_permission_request",
             request_id=request_id,
             session_id=session_id,
             tool_call_id=tool_call.toolCallId,
+            tool_name=tool_call.title,
+            has_callback=callback is not None,
         )
 
         try:
-            # Если callback передан, используем его для показа modal
-            # через coordinator.request_permission
-            if callback is not None:
+            # Создать PermissionRequest через manager
+            perm_request = self._request_manager.create_request(
+                request_id=request_id,
+                session_id=session_id,
+                tool_call=tool_call,
+                options=options,
+            )
+
+            # Если callback предоставлен, вызвать его для показа UI
+            if callback:
                 self._logger.info(
                     "permission_callback_provided_showing_ui_modal",
                     request_id=request_id,
                     session_id=session_id,
                     tool_call_id=tool_call.toolCallId,
                 )
-                outcome = await self._coordinator.request_permission(
-                    request=request,
-                    callback=callback,
-                )
+
+                def on_choice(
+                    req_id: str | int, option_id: str
+                ) -> None:
+                    """Callback для обработки выбора пользователя.
+                    
+                    Args:
+                        req_id: ID permission request (дублируется для совместимости с интерфейсом)
+                        option_id: ID выбранной опции или "cancelled"
+                    """
+                    self._logger.info(
+                        "permission_choice_received_from_ui",
+                        request_id=req_id,
+                        session_id=session_id,
+                        option_id=option_id,
+                    )
+                    # Найти опцию по ID
+                    selected_option = next(
+                        (opt for opt in options if opt.optionId == option_id),
+                        None
+                    )
+                    if selected_option:
+                        perm_request.resolve_with_option(option_id)
+                    else:
+                        self._logger.warning(
+                            "permission_option_not_found_cancelling",
+                            request_id=req_id,
+                            session_id=session_id,
+                            option_id=option_id,
+                        )
+                        perm_request.resolve_with_cancellation()
+
+                # Вызвать callback для показа UI
+                try:
+                    callback(request_id, tool_call, options, on_choice)
+                except Exception as e:
+                    self._logger.error(
+                        "permission_callback_execution_failed",
+                        request_id=request_id,
+                        session_id=session_id,
+                        error=str(e),
+                        error_type=type(e).__name__,
+                    )
+                    perm_request.resolve_with_cancellation()
             else:
-                # Fallback: показать ошибку логирования и вернуть cancelled
-                # (без callback не можем показать UI)
+                # Нет callback - автоматически отменить
                 self._logger.warning(
                     "permission_request_no_callback_returning_cancelled",
                     request_id=request_id,
@@ -504,12 +562,16 @@ class PermissionHandler:
                     tool_name=tool_call.title,
                     message="UI modal НЕ будет показан - callback отсутствует",
                 )
-                outcome = CancelledPermissionOutcome(outcome="cancelled")
+                perm_request.resolve_with_cancellation()
+
+            # Ждать результата
+            outcome = await perm_request.wait_for_outcome()
 
             self._logger.info(
                 "permission_request_completed",
                 request_id=request_id,
-                outcome=outcome.outcome,
+                session_id=session_id,
+                outcome_type=type(outcome).__name__,
             )
 
         except asyncio.CancelledError:
@@ -517,6 +579,7 @@ class PermissionHandler:
             self._logger.info(
                 "permission_request_cancelled",
                 request_id=request_id,
+                session_id=session_id,
             )
             outcome = CancelledPermissionOutcome(outcome="cancelled")
 
@@ -525,6 +588,7 @@ class PermissionHandler:
             self._logger.error(
                 "permission_request_error",
                 request_id=request_id,
+                session_id=session_id,
                 error=str(e),
                 error_type=type(e).__name__,
             )

@@ -1,11 +1,13 @@
 """Компоненты пользовательского интерфейса TUI."""
 
 from .chat_view import ChatView
+from .chat_view_permission_manager import ChatViewPermissionManager
 from .file_tree import FileTree
 from .file_viewer import FileViewerModal
 from .footer import FooterBar
 from .header import HeaderBar
 from .help_modal import HelpModal
+from .inline_permission_widget import InlinePermissionWidget
 from .permission_modal import PermissionModal
 from .plan_panel import PlanPanel
 from .prompt_input import PromptInput
@@ -28,4 +30,6 @@ __all__ = [
     "TerminalOutputPanel",
     "ToolPanel",
     "PermissionModal",
+    "InlinePermissionWidget",
+    "ChatViewPermissionManager",
 ]
