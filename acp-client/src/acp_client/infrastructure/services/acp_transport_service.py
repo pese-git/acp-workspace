@@ -233,16 +233,55 @@ class ACPTransportService(TransportService):
                 raise RuntimeError(msg) from e
 
         message_id = message.get("id")
-        self._logger.debug("sending_message", message_id=message_id)
+        # Проверяем тип сообщения для лучшего логирования
+        is_response = "result" in message or "error" in message
+        message_type = "response" if is_response else "request"
+        
+        # Для permission response добавляем дополнительный контекст
+        extra_context = {}
+        if is_response and "result" in message:
+            result = message.get("result", {})
+            if "outcome" in result:  # Это permission response
+                extra_context = {
+                    "outcome": result.get("outcome"),
+                    "option_id": result.get("optionId"),
+                }
+        
+        self._logger.debug(
+            "sending_message",
+            message_id=message_id,
+            message_type=message_type,
+            **extra_context,
+        )
 
         try:
             # Преобразуем сообщение в JSON и отправляем через транспорт
             json_message = json.dumps(message)
             assert self._transport is not None
             await self._transport.send_str(json_message)
-            self._logger.debug("message_sent", message_id=message_id)
+            
+            # Логируем успешную отправку с дополнительным контекстом
+            if extra_context:  # Это permission response
+                self._logger.info(
+                    "permission_response_sent_via_transport",
+                    message_id=message_id,
+                    outcome=extra_context.get("outcome"),
+                    option_id=extra_context.get("option_id"),
+                )
+            else:
+                self._logger.debug(
+                    "message_sent",
+                    message_id=message_id,
+                    message_type=message_type,
+                )
         except Exception as e:
-            self._logger.error("send_failed", message_id=message_id, error=str(e))
+            self._logger.error(
+                "send_failed",
+                message_id=message_id,
+                message_type=message_type,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
             msg = f"Failed to send message: {e}"
             raise RuntimeError(msg) from e
 

@@ -114,10 +114,13 @@ class PermissionRequest:
         if not self.future.done():
             outcome = SelectedPermissionOutcome(outcome="selected", optionId=option_id)
             self.future.set_result(outcome)
-            self._logger.debug(
-                "permission_request_resolved",
+            self._logger.info(
+                "permission_option_selected",
                 request_id=self.request_id,
+                session_id=self.session_id,
+                tool_call_id=self.tool_call.toolCallId,
                 option_id=option_id,
+                created_at=self.created_at.isoformat(),
             )
 
     def resolve_with_cancellation(self) -> None:
@@ -131,9 +134,12 @@ class PermissionRequest:
         if not self.future.done():
             outcome = CancelledPermissionOutcome(outcome="cancelled")
             self.future.set_result(outcome)
-            self._logger.debug(
-                "permission_request_cancelled",
+            self._logger.info(
+                "permission_request_user_cancelled",
                 request_id=self.request_id,
+                session_id=self.session_id,
+                tool_call_id=self.tool_call.toolCallId,
+                created_at=self.created_at.isoformat(),
             )
 
     def cancel(self) -> None:
@@ -255,8 +261,12 @@ class PermissionRequestManager:
             request = self._requests.get(request_id)
             if request:
                 self._logger.warning(
-                    "permission_request_timeout",
+                    "permission_request_timeout_expired",
                     request_id=request_id,
+                    session_id=request.session_id,
+                    tool_call_id=request.tool_call.toolCallId,
+                    timeout_seconds=timeout_seconds,
+                    created_at=request.created_at.isoformat(),
                 )
                 request.resolve_with_cancellation()
                 self.remove_request(request_id)
@@ -264,7 +274,7 @@ class PermissionRequestManager:
         except asyncio.CancelledError:
             # Timeout задача была отменена (request разрешился раньше)
             self._logger.debug(
-                "permission_timeout_task_cancelled",
+                "permission_timeout_task_cancelled_early",
                 request_id=request_id,
             )
             pass
@@ -514,18 +524,32 @@ class PermissionHandler:
         try:
             # Отправить response на сервер
             response = self.build_response(request_id, outcome)
+            self._logger.info(
+                "sending_permission_response_to_server",
+                request_id=request_id,
+                session_id=session_id,
+                tool_call_id=tool_call.toolCallId,
+                outcome=outcome.outcome,
+                option_id=getattr(outcome, 'optionId', None),
+            )
             await self._transport.send(response.to_dict())
 
-            self._logger.debug(
-                "permission_response_sent",
+            self._logger.info(
+                "permission_response_sent_successfully",
                 request_id=request_id,
+                session_id=session_id,
+                tool_call_id=tool_call.toolCallId,
+                outcome=outcome.outcome,
             )
 
         except Exception as e:
             self._logger.error(
-                "permission_response_send_error",
+                "permission_response_send_failed",
                 request_id=request_id,
+                session_id=session_id,
+                tool_call_id=tool_call.toolCallId,
                 error=str(e),
+                error_type=type(e).__name__,
             )
 
         finally:

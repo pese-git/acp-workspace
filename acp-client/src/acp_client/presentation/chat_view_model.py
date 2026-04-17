@@ -291,7 +291,58 @@ class ChatViewModel(BaseViewModel):
 
                     self.logger.debug("user_message_chunk_processed", text_length=len(text))
 
-            # Можно добавить обработку других типов: tool_call, plan_update и т.д.
+            # Обработка tool_call - отслеживание статуса выполнения инструмента
+            elif session_update_type == "tool_call":
+                tool_call_id = update.get("toolCallId")
+                tool_title = update.get("title")
+                tool_status = update.get("status")
+                tool_kind = update.get("kind")
+
+                if target_session_id is not None and tool_call_id:
+                    self.logger.info(
+                        "tool_call_status_changed",
+                        session_id=target_session_id,
+                        tool_call_id=tool_call_id,
+                        tool_name=tool_title,
+                        status=tool_status,
+                        kind=tool_kind,
+                    )
+                    
+                    # Добавляем tool call в состояние сессии
+                    state = self._get_or_create_session_state(target_session_id)
+                    tool_call_dict = {
+                        "toolCallId": tool_call_id,
+                        "title": tool_title,
+                        "kind": tool_kind,
+                        "status": tool_status,
+                    }
+                    # Обновляем existing tool call или добавляем новый
+                    state.tool_calls = [
+                        tc if tc.get("toolCallId") != tool_call_id else tool_call_dict
+                        for tc in state.tool_calls
+                    ]
+                    if tool_call_id not in [tc.get("toolCallId") for tc in state.tool_calls]:
+                        state.tool_calls.append(tool_call_dict)
+                    
+                    self._session_states[target_session_id] = state
+                    
+                    # Синхронизируем с UI если это активная сессия
+                    if self._active_session_id == target_session_id:
+                        self.tool_calls.value = list(state.tool_calls)
+
+            elif session_update_type == "tool_call_result":
+                tool_call_id = update.get("toolCallId")
+                result = update.get("result")
+
+                if target_session_id is not None and tool_call_id:
+                    self.logger.info(
+                        "tool_call_result_received",
+                        session_id=target_session_id,
+                        tool_call_id=tool_call_id,
+                        has_result=bool(result),
+                    )
+
+            # Можно добавить обработку других типов: plan_update и т.д.
 
         except Exception as e:
             self.logger.error(

@@ -232,20 +232,30 @@ class SessionCoordinator:
 
             # Вызвать callback для показа UI modal
             # Callback должен показать PermissionModal в TUI
+            self._logger.info(
+                "showing_permission_modal_to_user",
+                request_id=request.id,
+                session_id=request.params.sessionId,
+                tool_call_id=request.params.toolCall.toolCallId,
+                tool_name=request.params.toolCall.title,
+            )
             callback(request.id, request.params.toolCall, request.params.options)
 
-            self._logger.debug(
-                "permission_modal_shown",
-                request_id=request.id,
-            )
-
             # Дождаться результата выбора пользователя или timeout
+            self._logger.debug(
+                "waiting_for_user_permission_choice",
+                request_id=request.id,
+                session_id=request.params.sessionId,
+            )
             outcome = await perm_request.wait_for_outcome()
 
             self._logger.info(
-                "permission_request_outcome_received",
+                "permission_outcome_received_from_user",
                 request_id=request.id,
+                session_id=request.params.sessionId,
+                tool_call_id=request.params.toolCall.toolCallId,
                 outcome=outcome.outcome,
+                option_id=getattr(outcome, 'optionId', None),
             )
 
             return outcome
@@ -297,9 +307,15 @@ class SessionCoordinator:
             request_id: ID запроса
             option_id: ID выбранной опции (allow_once, reject_once, etc.)
         """
+        self._logger.debug(
+            "user_made_permission_choice",
+            request_id=request_id,
+            option_id=option_id,
+        )
+        
         if self._permission_handler is None:
             self._logger.warning(
-                "permission_handler_not_available_resolve",
+                "permission_handler_not_available_for_resolve",
                 request_id=request_id,
             )
             return
@@ -310,18 +326,12 @@ class SessionCoordinator:
 
             if perm_request is None:
                 self._logger.warning(
-                    "permission_request_not_found",
+                    "permission_request_not_found_for_resolve",
                     request_id=request_id,
                 )
                 return
 
             perm_request.resolve_with_option(option_id)
-
-            self._logger.info(
-                "permission_resolved",
-                request_id=request_id,
-                option_id=option_id,
-            )
 
         except Exception as e:
             self._logger.error(
