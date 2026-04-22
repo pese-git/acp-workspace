@@ -17,6 +17,7 @@ from ...tools.base import ToolRegistry
 from ..state import (
     ActiveTurnState,
     PendingClientRequestState,
+    PendingToolExecution,
     PreparedFsClientRequest,
     PromptDirectives,
     ProtocolOutcome,
@@ -1114,6 +1115,10 @@ def build_policy_tool_execution_updates(
 ) -> list[ACPMessage]:
     """Строит lifecycle updates для tool execution после policy-решения.
 
+    При allowed=True отправляет только "in_progress" статус.
+    Реальное выполнение и "completed" статус обрабатываются асинхронно
+    через pending_tool_execution в ProtocolOutcome.
+
     Пример использования:
         updates = build_policy_tool_execution_updates(
             session=state,
@@ -1139,9 +1144,10 @@ def build_policy_tool_execution_updates(
             )
         ]
 
-    notifications: list[ACPMessage] = []
+    # При allowed=True только отмечаем "in_progress".
+    # Реальное выполнение будет запущено асинхронно через pending_tool_execution.
     update_tool_call_status(session, tool_call_id, "in_progress")
-    notifications.append(
+    return [
         ACPMessage.notification(
             "session/update",
             {
@@ -1153,37 +1159,7 @@ def build_policy_tool_execution_updates(
                 },
             },
         )
-    )
-    completed_content = [
-        {
-            "type": "content",
-            "content": {
-                "type": "text",
-                "text": "Tool completed successfully.",
-            },
-        }
     ]
-    update_tool_call_status(
-        session,
-        tool_call_id,
-        "completed",
-        content=completed_content,
-    )
-    notifications.append(
-        ACPMessage.notification(
-            "session/update",
-            {
-                "sessionId": session_id,
-                "update": {
-                    "sessionUpdate": "tool_call_update",
-                    "toolCallId": tool_call_id,
-                    "status": "completed",
-                    "content": completed_content,
-                },
-            },
-        )
-    )
-    return notifications
 
 
 def build_plan_entries(
@@ -2107,6 +2083,8 @@ def resolve_permission_response_impl(
             followup_responses=[cancelled] if cancelled is not None else [],
         )
 
+    # ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Когда permission allowed, отправить notifications
+    # и завершить turn с end_turn. Tool execution будет выполнен внутри session_prompt().
     notifications.extend(
         build_policy_tool_execution_updates(
             session=session,
@@ -2124,8 +2102,20 @@ def resolve_permission_response_impl(
             updated_at=session.updated_at,
         )
     )
-    completed = finalize_active_turn(session=session, stop_reason="end_turn")
+    
+    # ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Не завершаем turn, а сигнализируем о pending tool execution
+    # http_server.py выполнит tool асинхронно и затем завершит turn
+    logger.debug(
+        "permission allowed, scheduling tool execution",
+        session_id=session_id,
+        tool_call_id=tool_call_id,
+    )
+    
     return ProtocolOutcome(
         notifications=notifications,
-        followup_responses=[completed] if completed is not None else [],
+        followup_responses=[],
+        pending_tool_execution=PendingToolExecution(
+            session_id=session_id,
+            tool_call_id=tool_call_id,
+        ),
     )

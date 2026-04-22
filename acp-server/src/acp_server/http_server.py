@@ -363,6 +363,39 @@ class ACPHttpServer:
 
             await _send_outcome(outcome, request_id=request_id)
 
+            # Обработать pending tool execution после permission approval
+            if outcome.pending_tool_execution is not None:
+                pending = outcome.pending_tool_execution
+                conn_logger.info(
+                    "executing pending tool after permission",
+                    session_id=pending.session_id,
+                    tool_call_id=pending.tool_call_id,
+                )
+                # Выполнить tool асинхронно
+                tool_notifications = await protocol.execute_pending_tool(
+                    session_id=pending.session_id,
+                    tool_call_id=pending.tool_call_id,
+                )
+                # Отправить notifications о результате выполнения
+                for notification in tool_notifications:
+                    if not ws.closed:
+                        await ws.send_str(notification.to_json())
+                        conn_logger.debug(
+                            "tool execution notification sent",
+                            method=notification.method,
+                        )
+                
+                # Завершить turn после выполнения tool
+                turn_completion = protocol.complete_active_turn(
+                    pending.session_id, stop_reason="end_turn"
+                )
+                if turn_completion is not None and not ws.closed:
+                    await ws.send_str(turn_completion.to_json())
+                    conn_logger.debug(
+                        "turn completion sent after tool execution",
+                        session_id=pending.session_id,
+                    )
+
             if method_name == "shutdown":
                 conn_logger.info("shutdown requested")
                 await ws.close()
@@ -425,75 +458,59 @@ class ACPHttpServer:
                             payload=_truncate_payload(message.data),
                         )
 
-                        if method_name is None:
-                            outcome = protocol.handle_client_response(acp_request)
-                            conn_logger.info(
-                                "request received",
-                                method=method_name,
-                                request_id=request_id,
-                                session_id=session_id,
+                        if method_name == "initialize":
+                            initialized = True
+                            # Обновляем capabilities после инициализации
+                            if isinstance(acp_request.params, dict):
+                                caps = acp_request.params.get("clientCapabilities", {})
+                                if isinstance(caps, dict):
+                                    client_rpc_service._capabilities = caps
+                                    conn_logger.debug(
+                                        "client_rpc_service capabilities updated",
+                                        capabilities=caps,
+                                    )
+                        elif not initialized:
+                            if acp_request.is_notification:
+                                outcome = ProtocolOutcome()
+                            else:
+                                outcome = ProtocolOutcome(
+                                    response=ACPMessage.error_response(
+                                        acp_request.id,
+                                        code=-32000,
+                                        message="Initialize required before session methods",
+                                    )
+                                )
+                            method_name = None
+                            session_id = None
+                            await _send_outcome(outcome, request_id=request_id)
+                            continue
+                        if isinstance(acp_request.params, dict):
+                            raw_session_id = acp_request.params.get("sessionId")
+                            if isinstance(raw_session_id, str):
+                                session_id = raw_session_id
+                        if method_name == "session/prompt":
+                            prompt_task = asyncio.create_task(
+                                _process_prompt_request_in_background(
+                                    acp_request=acp_request,
+                                    method_name=method_name,
+                                    session_id=session_id,
+                                    request_id=request_id,
+                                )
                             )
-                            await _finalize_outcome_and_send(
-                                method_name=method_name,
-                                session_id=session_id,
+                            prompt_request_tasks.add(prompt_task)
+                            prompt_task.add_done_callback(
+                                lambda finished_task: prompt_request_tasks.discard(
+                                    finished_task
+                                )
+                            )
+                            conn_logger.debug(
+                                "prompt request scheduled in background",
                                 request_id=request_id,
-                                outcome=outcome,
+                                session_id=session_id,
                             )
                             continue
-                        else:
-                            if method_name == "initialize":
-                                initialized = True
-                                # Обновляем capabilities после инициализации
-                                if isinstance(acp_request.params, dict):
-                                    caps = acp_request.params.get("clientCapabilities", {})
-                                    if isinstance(caps, dict):
-                                        client_rpc_service._capabilities = caps
-                                        conn_logger.debug(
-                                            "client_rpc_service capabilities updated",
-                                            capabilities=caps,
-                                        )
-                            elif not initialized:
-                                if acp_request.is_notification:
-                                    outcome = ProtocolOutcome()
-                                else:
-                                    outcome = ProtocolOutcome(
-                                        response=ACPMessage.error_response(
-                                            acp_request.id,
-                                            code=-32000,
-                                            message="Initialize required before session methods",
-                                        )
-                                    )
-                                method_name = None
-                                session_id = None
-                                await _send_outcome(outcome, request_id=request_id)
-                                continue
-                            if isinstance(acp_request.params, dict):
-                                raw_session_id = acp_request.params.get("sessionId")
-                                if isinstance(raw_session_id, str):
-                                    session_id = raw_session_id
-                            if method_name == "session/prompt":
-                                prompt_task = asyncio.create_task(
-                                    _process_prompt_request_in_background(
-                                        acp_request=acp_request,
-                                        method_name=method_name,
-                                        session_id=session_id,
-                                        request_id=request_id,
-                                    )
-                                )
-                                prompt_request_tasks.add(prompt_task)
-                                prompt_task.add_done_callback(
-                                    lambda finished_task: prompt_request_tasks.discard(
-                                        finished_task
-                                    )
-                                )
-                                conn_logger.debug(
-                                    "prompt request scheduled in background",
-                                    request_id=request_id,
-                                    session_id=session_id,
-                                )
-                                continue
 
-                            outcome = await protocol.handle(acp_request)
+                        outcome = await protocol.handle(acp_request)
 
                         # Логируем входящий запрос с методом и сессией
                         conn_logger.info(

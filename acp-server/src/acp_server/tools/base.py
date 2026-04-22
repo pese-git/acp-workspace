@@ -72,6 +72,27 @@ class ToolRegistry(ABC):
         pass
 
     @abstractmethod
+    def get(self, name: str) -> ToolDefinition | None:
+        """Получить определение инструмента по имени.
+        
+        Args:
+            name: Имя инструмента
+            
+        Returns:
+            Определение инструмента или None, если не найден
+        """
+        pass
+
+    @abstractmethod
+    def list_tools(self) -> list[ToolDefinition]:
+        """Получить список всех зарегистрированных инструментов.
+        
+        Returns:
+            Список определений инструментов
+        """
+        pass
+
+    @abstractmethod
     def to_llm_tools(self, tools: list[ToolDefinition]) -> list[dict[str, Any]]:
         """Преобразовать определения инструментов для LLM."""
         pass

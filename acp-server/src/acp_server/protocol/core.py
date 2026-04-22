@@ -181,15 +181,15 @@ class ACPProtocol:
             outcome = protocol.handle(ACPMessage.request("session/list", {}))
         """
 
-        # Сервер принимает только входящие requests/notifications.
+        # ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Если method=None, это response (JSON-RPC 2.0)
+        # Маршрутизируем на handle_client_response() вместо отклонения.
+        # Permission response имеет method=None и id=request_id, и должна быть обработана.
         if message.method is None:
-            return ProtocolOutcome(
-                response=ACPMessage.error_response(
-                    message.id,
-                    code=-32600,
-                    message="Invalid request: unexpected response payload",
-                )
+            logger.debug(
+                "response received, routing to handle_client_response",
+                request_id=message.id,
             )
+            return self.handle_client_response(message)
 
         method = message.method
         params = message.params or {}
@@ -706,4 +706,43 @@ class ACPProtocol:
         return ProtocolOutcome(
             response=ACPMessage.response(request_id, {}),
             notifications=acceptance_updates,
+        )
+
+    async def execute_pending_tool(
+        self,
+        session_id: str,
+        tool_call_id: str,
+    ) -> list[ACPMessage]:
+        """Выполняет pending tool после permission approval.
+        
+        Вызывается из http_server.py после того как permission был одобрен.
+        Создаёт PromptOrchestrator и делегирует ему выполнение.
+        
+        Args:
+            session_id: ID сессии
+            tool_call_id: ID tool call для выполнения
+            
+        Returns:
+            Список notifications для отправки клиенту
+        """
+        session = self._sessions.get(session_id)
+        if session is None:
+            logger.error(
+                "session not found for pending tool execution",
+                session_id=session_id,
+                tool_call_id=tool_call_id,
+            )
+            return []
+        
+        # Создать PromptOrchestrator с зависимостями
+        orchestrator = prompt.create_prompt_orchestrator(
+            tool_registry=self._tool_registry,
+            client_rpc_service=self._client_rpc_service,
+            global_policy_manager=self._global_policy_manager,
+        )
+        
+        return await orchestrator.execute_pending_tool(
+            session=session,
+            session_id=session_id,
+            tool_call_id=tool_call_id,
         )

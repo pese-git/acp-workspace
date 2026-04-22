@@ -588,6 +588,8 @@ class TestPromptOrchestratorToolCallFlow:
     ) -> None:
         """Проверяет, что tool call обрабатывается без TypeError по сигнатуре."""
         session.config_values["mode"] = "auto"
+        # Устанавливаем policy чтобы пропустить permission flow
+        session.permission_policy["other"] = "allow_always"
 
         tool_registry.register_tool(
             name="demo/tool",
@@ -682,7 +684,9 @@ class TestPromptOrchestratorToolCallFlow:
         ]
         assert len(permission_requests) == 1
         assert permission_requests[0].id is not None
-        assert session.active_turn is None
+        # В новом flow turn остается активным в состоянии awaiting_permission
+        assert session.active_turn is not None
+        assert session.active_turn.phase == "awaiting_permission"
 
         statuses: list[str | None] = []
         for notification in outcome.notifications:
@@ -747,7 +751,8 @@ class TestPromptOrchestratorToolCallFlow:
     ) -> None:
         """Проверяет, что reject policy публикуется как failed, а не cancelled."""
         session.config_values["mode"] = "ask"
-        session.permission_policy["read"] = "reject_always"
+        # Устанавливаем reject policy на "other" kind, т.к. tool не найден в registry
+        session.permission_policy["other"] = "reject_always"
 
         agent_orchestrator.process_prompt.return_value = SimpleNamespace(
             text="Permission denied by policy",

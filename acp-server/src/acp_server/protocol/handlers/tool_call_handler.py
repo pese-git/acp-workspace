@@ -83,6 +83,8 @@ class ToolCallHandler:
         *,
         title: str,
         kind: str,
+        tool_name: str | None = None,
+        tool_arguments: dict[str, Any] | None = None,
     ) -> str:
         """Создает новый tool call, возвращает его ID.
 
@@ -94,6 +96,8 @@ class ToolCallHandler:
             title: Название для UI (e.g., "Tool execution")
             kind: Категория tool (read, edit, delete, move, search, execute,
                 think, fetch, switch_mode, other)
+            tool_name: Имя инструмента в реестре для отложенного выполнения
+            tool_arguments: Аргументы для выполнения инструмента
 
         Returns:
             ID вида "call_NNN" (e.g., "call_001", "call_002")
@@ -106,6 +110,8 @@ class ToolCallHandler:
             title=title,
             kind=kind,
             status="pending",
+            tool_name=tool_name,
+            tool_arguments=tool_arguments or {},
         )
         return tool_call_id
 

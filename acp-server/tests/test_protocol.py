@@ -1933,8 +1933,20 @@ async def test_permission_selected_completes_prompt_turn() -> None:
             },
         )
     )
-    assert len(resolved.followup_responses) == 1
-    assert resolved.followup_responses[0].result == {"stopReason": "end_turn"}
+    # После permission approval возвращается pending_tool_execution для async выполнения
+    assert resolved.pending_tool_execution is not None
+    assert resolved.pending_tool_execution.session_id == session_id
+
+    # Выполняем pending tool
+    await protocol.execute_pending_tool(
+        session_id=resolved.pending_tool_execution.session_id,
+        tool_call_id=resolved.pending_tool_execution.tool_call_id,
+    )
+
+    # Завершаем turn
+    turn_completion = protocol.complete_active_turn(session_id, stop_reason="end_turn")
+    assert turn_completion is not None
+    assert turn_completion.result == {"stopReason": "end_turn"}
 
 
 @pytest.mark.asyncio
@@ -2419,8 +2431,20 @@ async def test_permission_allow_always_applies_to_next_tool_call() -> None:
             },
         )
     )
-    assert len(first_resolution.followup_responses) == 1
-    assert first_resolution.followup_responses[0].result == {"stopReason": "end_turn"}
+    # После permission approval возвращается pending_tool_execution для async выполнения
+    assert first_resolution.pending_tool_execution is not None
+    assert first_resolution.pending_tool_execution.session_id == session_id
+
+    # Выполняем pending tool
+    await protocol.execute_pending_tool(
+        session_id=first_resolution.pending_tool_execution.session_id,
+        tool_call_id=first_resolution.pending_tool_execution.tool_call_id,
+    )
+
+    # Завершаем turn
+    turn_completion = protocol.complete_active_turn(session_id, stop_reason="end_turn")
+    assert turn_completion is not None
+    assert turn_completion.result == {"stopReason": "end_turn"}
 
     second_prompt = await protocol.handle(
         ACPMessage.request(
@@ -2543,8 +2567,17 @@ async def test_permission_policy_is_scoped_by_tool_kind() -> None:
             },
         )
     )
-    assert len(resolved.followup_responses) == 1
-    assert resolved.followup_responses[0].result == {"stopReason": "end_turn"}
+    # После permission approval возвращается pending_tool_execution для async выполнения
+    assert resolved.pending_tool_execution is not None
+
+    # Выполняем pending tool и завершаем turn
+    await protocol.execute_pending_tool(
+        session_id=resolved.pending_tool_execution.session_id,
+        tool_call_id=resolved.pending_tool_execution.tool_call_id,
+    )
+    turn_completion = protocol.complete_active_turn(session_id, stop_reason="end_turn")
+    assert turn_completion is not None
+    assert turn_completion.result == {"stopReason": "end_turn"}
 
     same_kind_prompt = await protocol.handle(
         ACPMessage.request(

@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import structlog
 
@@ -113,7 +113,7 @@ class PromptOrchestrator:
 
             logger.debug(
                 "PromptOrchestrator initialized with tool executors",
-                tools_registered=len(tool_registry.list_tools()),
+                tools_registered=len(tool_registry.get_available_tools("")),
             )
         else:
             logger.debug(
@@ -279,23 +279,38 @@ class PromptOrchestrator:
         # Для простоты пока не добавляем план
         # В реальном коде здесь была бы обработка directives
 
-        # Шаг 9: Завершить turn и вернуть стандартный response session/prompt
-        stop_reason = "end_turn"
-        self.turn_lifecycle_manager.finalize_turn(session, stop_reason)
-        self.turn_lifecycle_manager.clear_active_turn(session)
+        # Шаг 9: Завершить turn только если НЕТ pending permission
+        # Согласно протоколу ACP (doc/Agent Client Protocol/protocol/05-Prompt Turn.md),
+        # response на session/prompt должен отправляться ПОСЛЕ завершения всех операций,
+        # включая permission flow. Permission flow происходит ВНУТРИ цикла "Until completion",
+        # и response отправляется только ПОСЛЕ выхода из цикла.
+        if session.active_turn and session.active_turn.phase == "awaiting_permission":
+            # НЕ завершать turn, вернуть ProtocolOutcome без response (deferred)
+            # Turn будет завершен после обработки permission response
+            logger.debug(
+                "turn deferred, awaiting permission response",
+                session_id=session_id,
+                permission_request_id=session.active_turn.permission_request_id,
+            )
+            return ProtocolOutcome(notifications=notifications)
+        else:
+            # Завершить turn как обычно
+            stop_reason = "end_turn"
+            self.turn_lifecycle_manager.finalize_turn(session, stop_reason)
+            self.turn_lifecycle_manager.clear_active_turn(session)
 
-        logger.debug(
-            "prompt handling completed",
-            session_id=session_id,
-            notifications_count=len(notifications),
-        )
+            logger.debug(
+                "prompt handling completed",
+                session_id=session_id,
+                notifications_count=len(notifications),
+            )
 
-        response = (
-            ACPMessage.response(request_id, {"stopReason": stop_reason})
-            if request_id is not None
-            else None
-        )
-        return ProtocolOutcome(response=response, notifications=notifications)
+            response = (
+                ACPMessage.response(request_id, {"stopReason": stop_reason})
+                if request_id is not None
+                else None
+            )
+            return ProtocolOutcome(response=response, notifications=notifications)
 
     def handle_cancel(
         self,
@@ -454,11 +469,26 @@ class PromptOrchestrator:
                 )
                 continue
 
-            # Создать tool call в сессии
+            # Определить kind из ToolDefinition (если зарегистрирован в реестре)
+            tool_kind = "other"
+            tool_definition = self.tool_registry.get(tool_name)
+            if tool_definition is not None:
+                tool_kind = tool_definition.kind
+            else:
+                # Fallback для незарегистрированных tools
+                logger.warning(
+                    "tool not found in registry, using 'other' kind",
+                    session_id=session_id,
+                    tool_name=tool_name,
+                )
+
+            # Создать tool call в сессии с правильным kind и сохранить данные для execution
             tool_call_id = self.tool_call_handler.create_tool_call(
                 session=session,
                 title=tool_name,
-                kind="other",
+                kind=tool_kind,
+                tool_name=tool_name,
+                tool_arguments=tool_arguments,
             )
 
             # Отправить notification о создании tool_call
@@ -467,16 +497,9 @@ class PromptOrchestrator:
                     session_id=session_id,
                     tool_call_id=tool_call_id,
                     title=tool_name,
-                    kind="other",
+                    kind=tool_kind,
                 )
             )
-
-            # Определить kind из tool name (например fs/read -> read)
-            tool_kind = "other"
-            if tool_name.startswith("fs/"):
-                tool_kind = "read" if "read" in tool_name else "edit"
-            elif tool_name.startswith("terminal/"):
-                tool_kind = "execute"
 
             # Получить текущий tool call из сессии
             tool_call_state = session.tool_calls.get(tool_call_id)
@@ -617,7 +640,8 @@ class PromptOrchestrator:
                     tool_call_state.result_content = extracted_content.content_items
 
                 # Форматировать content для LLM (Фаза 3)
-                provider = session.config_values.get("llm_provider", "openai")
+                provider_raw = session.config_values.get("llm_provider", "openai")
+                provider = cast(Literal["openai", "anthropic"], provider_raw)
                 formatted_for_llm = self.content_formatter.format_for_llm(
                     extracted_content,
                     provider=provider
@@ -876,6 +900,154 @@ class PromptOrchestrator:
             session_id=session.session_id,
         )
         return "ask"
+
+    async def execute_pending_tool(
+        self,
+        session: SessionState,
+        session_id: str,
+        tool_call_id: str,
+    ) -> list[ACPMessage]:
+        """Выполняет pending tool после permission approval.
+        
+        Этот метод вызывается из http_server.py когда permission был одобрен.
+        Согласно ACP протоколу (Tool Calls + File System):
+        1. Получает данные tool call из сессии
+        2. Выполняет tool через tool_registry (который вызывает ClientRPC fs/*)
+        3. Отправляет tool_call_update с completed/failed статусом
+        
+        Args:
+            session: Состояние сессии
+            session_id: ID сессии
+            tool_call_id: ID tool call для выполнения
+            
+        Returns:
+            Список notifications (tool_call_update) для отправки клиенту
+        """
+        notifications: list[ACPMessage] = []
+        
+        # Получить tool call state
+        tool_call_state = session.tool_calls.get(tool_call_id)
+        if tool_call_state is None:
+            logger.error(
+                "tool_call_state not found for pending execution",
+                session_id=session_id,
+                tool_call_id=tool_call_id,
+            )
+            return notifications
+        
+        tool_name = tool_call_state.tool_name
+        tool_arguments = tool_call_state.tool_arguments
+        
+        if tool_name is None:
+            logger.error(
+                "tool_name not found in tool_call_state",
+                session_id=session_id,
+                tool_call_id=tool_call_id,
+            )
+            return notifications
+        
+        logger.info(
+            "executing pending tool after permission approval",
+            session_id=session_id,
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
+        )
+        
+        try:
+            # Выполнить tool через tool_registry (вызывает ClientRPC fs/* методы)
+            result = await self.tool_registry.execute_tool(
+                session_id,
+                tool_name,
+                tool_arguments,
+                session=session,
+            )
+            
+            # Извлечь и отформатировать content из result
+            extracted_content = await self.content_extractor.extract_from_result(
+                tool_call_id, result
+            )
+            tool_call_state.result_content = extracted_content.content_items
+            
+            # Форматировать для LLM (Фаза 3 будет использовать это)
+            provider_raw = session.config_values.get("llm_provider", "openai")
+            provider = cast(Literal["openai", "anthropic"], provider_raw)
+            self.content_formatter.format_for_llm(extracted_content, provider=provider)
+            
+            # Сформировать content для notification
+            if result.success:
+                completed_content = [
+                    {
+                        "type": "content",
+                        "content": {
+                            "type": "text",
+                            "text": result.output or "Tool executed successfully",
+                        },
+                    }
+                ]
+                self.tool_call_handler.update_tool_call_status(
+                    session, tool_call_id, "completed", content=completed_content
+                )
+                notifications.append(
+                    self.tool_call_handler.build_tool_update_notification(
+                        session_id=session_id,
+                        tool_call_id=tool_call_id,
+                        status="completed",
+                        content=completed_content,
+                    )
+                )
+            else:
+                error_content = [
+                    {
+                        "type": "content",
+                        "content": {
+                            "type": "text",
+                            "text": result.error or "Tool execution failed",
+                        },
+                    }
+                ]
+                self.tool_call_handler.update_tool_call_status(
+                    session, tool_call_id, "failed", content=error_content
+                )
+                notifications.append(
+                    self.tool_call_handler.build_tool_update_notification(
+                        session_id=session_id,
+                        tool_call_id=tool_call_id,
+                        status="failed",
+                        content=error_content,
+                    )
+                )
+                
+        except Exception as exc:
+            logger.error(
+                "tool execution failed with exception",
+                session_id=session_id,
+                tool_call_id=tool_call_id,
+                tool_name=tool_name,
+                error=str(exc),
+                exc_info=True,
+            )
+            error_content = [
+                {
+                    "type": "content",
+                    "content": {
+                        "type": "text",
+                        "text": f"Tool execution error: {exc}",
+                    },
+                }
+            ]
+            self.tool_call_handler.update_tool_call_status(
+                session, tool_call_id, "failed", content=error_content
+            )
+            notifications.append(
+                self.tool_call_handler.build_tool_update_notification(
+                    session_id=session_id,
+                    tool_call_id=tool_call_id,
+                    status="failed",
+                    content=error_content,
+                )
+            )
+        
+        return notifications
 
 
 def _extract_text_preview(prompt: list[dict[str, Any]]) -> str:

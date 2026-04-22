@@ -92,6 +92,10 @@ class ToolCallState:
     content: list[dict[str, Any]] = field(default_factory=list)
     # Извлеченный content из result tool execution для отправки клиенту.
     result_content: list[dict[str, Any]] = field(default_factory=list)
+    # Имя инструмента для выполнения (соответствует tool_name в registry).
+    tool_name: str | None = None
+    # Аргументы для выполнения инструмента (для отложенного выполнения после permission).
+    tool_arguments: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -198,6 +202,17 @@ class ClientRuntimeCapabilities:
 
 
 @dataclass(slots=True)
+class PendingToolExecution:
+    """Информация о pending tool execution после permission approval.
+    
+    Используется для передачи информации от permission handler к http_server
+    для выполнения реального tool через tool_registry.
+    """
+    session_id: str
+    tool_call_id: str
+
+
+@dataclass(slots=True)
 class ProtocolOutcome:
     """Результат обработки входящего ACP-сообщения.
 
@@ -212,3 +227,5 @@ class ProtocolOutcome:
     notifications: list[ACPMessage] = field(default_factory=list)
     # Дополнительные response-сообщения для отложенных JSON-RPC запросов (WS).
     followup_responses: list[ACPMessage] = field(default_factory=list)
+    # Информация о pending tool execution (если требуется асинхронное выполнение после permission).
+    pending_tool_execution: PendingToolExecution | None = None
