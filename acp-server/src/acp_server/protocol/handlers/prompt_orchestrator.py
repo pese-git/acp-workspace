@@ -21,6 +21,7 @@ from ..state import LLMLoopResult, ProtocolOutcome, SessionState, ToolResult
 from .client_rpc_handler import ClientRPCHandler
 from .permission_manager import PermissionManager
 from .plan_builder import PlanBuilder
+from .replay_manager import ReplayManager
 from .state_manager import StateManager
 from .tool_call_handler import ToolCallHandler
 from .turn_lifecycle_manager import TurnLifecycleManager
@@ -87,6 +88,9 @@ class PromptOrchestrator:
         self.content_extractor = ContentExtractor()
         self.content_validator = ContentValidator()
         self.content_formatter = ContentFormatter()  # Фаза 3: LLM formatting
+
+        # Replay manager для сохранения истории session/update (Этап 6)
+        self.replay_manager = ReplayManager()
 
         # Создать bridge и permission checker для executors только если RPC service доступен
         if client_rpc_service is not None:
@@ -1172,6 +1176,15 @@ class PromptOrchestrator:
                 )
             )
             
+            # Сохранить tool_call в events_history для replay при session/load
+            self.replay_manager.save_tool_call(
+                session=session,
+                tool_call_id=tool_call_id,
+                title=tool_name,
+                kind=tool_kind,
+                status="pending",
+            )
+            
             # Применить decision logic
             decision = await self._decide_tool_execution(session, tool_kind)
             
@@ -1207,15 +1220,23 @@ class PromptOrchestrator:
                 # Отклонить tool
                 self.tool_call_handler.update_tool_call_status(session, tool_call_id, "failed")
                 rejection_msg = f"Tool execution rejected by policy for {tool_kind}"
+                rejection_content = [
+                    {"type": "content", "content": {"type": "text", "text": rejection_msg}}
+                ]
                 notifications.append(
                     self.tool_call_handler.build_tool_update_notification(
                         session_id=session_id,
                         tool_call_id=tool_call_id,
                         status="failed",
-                        content=[
-                            {"type": "content", "content": {"type": "text", "text": rejection_msg}}
-                        ],
+                        content=rejection_content,
                     )
+                )
+                # Сохранить tool_call_update в events_history для replay
+                self.replay_manager.save_tool_call_update(
+                    session=session,
+                    tool_call_id=tool_call_id,
+                    status="failed",
+                    content=rejection_content,
                 )
                 # Добавить error result для LLM
                 tool_results.append(ToolResult(
@@ -1236,6 +1257,12 @@ class PromptOrchestrator:
                         tool_call_id=tool_call_id,
                         status="in_progress",
                     )
+                )
+                # Сохранить in_progress в events_history для replay
+                self.replay_manager.save_tool_call_update(
+                    session=session,
+                    tool_call_id=tool_call_id,
+                    status="in_progress",
                 )
                 
                 # Выполнить tool
@@ -1301,6 +1328,13 @@ class PromptOrchestrator:
                         content=notification_content,
                     )
                 )
+                # Сохранить completed/failed в events_history для replay
+                self.replay_manager.save_tool_call_update(
+                    session=session,
+                    tool_call_id=tool_call_id,
+                    status=status,
+                    content=notification_content,
+                )
                 
                 # Собрать ToolResult для LLM
                 tool_results.append(ToolResult(
@@ -1325,6 +1359,12 @@ class PromptOrchestrator:
                         tool_call_id=tool_call_id,
                         status="failed",
                     )
+                )
+                # Сохранить failed в events_history для replay
+                self.replay_manager.save_tool_call_update(
+                    session=session,
+                    tool_call_id=tool_call_id,
+                    status="failed",
                 )
                 # Добавить error result для LLM
                 tool_results.append(ToolResult(
@@ -1442,6 +1482,13 @@ class PromptOrchestrator:
                         content=completed_content,
                     )
                 )
+                # Сохранить completed в events_history для replay
+                self.replay_manager.save_tool_call_update(
+                    session=session,
+                    tool_call_id=tool_call_id,
+                    status="completed",
+                    content=completed_content,
+                )
                 # Создать ToolResult для LLM loop
                 tool_result = ToolResult(
                     tool_call_id=tool_call_id_from_llm or tool_call_id,
@@ -1469,6 +1516,13 @@ class PromptOrchestrator:
                         status="failed",
                         content=error_content,
                     )
+                )
+                # Сохранить failed в events_history для replay
+                self.replay_manager.save_tool_call_update(
+                    session=session,
+                    tool_call_id=tool_call_id,
+                    status="failed",
+                    content=error_content,
                 )
                 # Создать ToolResult с ошибкой для LLM loop
                 tool_result = ToolResult(
@@ -1506,6 +1560,13 @@ class PromptOrchestrator:
                     status="failed",
                     content=error_content,
                 )
+            )
+            # Сохранить failed в events_history для replay
+            self.replay_manager.save_tool_call_update(
+                session=session,
+                tool_call_id=tool_call_id,
+                status="failed",
+                content=error_content,
             )
             # Создать ToolResult с exception для LLM loop
             tool_result = ToolResult(

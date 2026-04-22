@@ -32,6 +32,7 @@ from .permissions import (
 )
 from .plan_builder import PlanBuilder
 from .prompt_orchestrator import PromptOrchestrator
+from .replay_manager import ReplayManager
 from .session import (
     _serialize_available_commands,
     session_info_notification,
@@ -272,6 +273,15 @@ async def session_prompt(
 
     session.active_turn = ActiveTurnState(prompt_request_id=request_id, session_id=session_id)
 
+    # Создать ReplayManager для сохранения событий в events_history
+    # Это обеспечивает корректный replay при session/load
+    replay_manager = ReplayManager()
+
+    # Сохранить user_message_chunk для каждого блока prompt
+    for block in prompt:
+        if isinstance(block, dict):
+            replay_manager.save_user_message_chunk(session, block)
+
     # Извлекаем первый text-блок для демо-ответа и формирования заголовка сессии.
     text_blocks: list[str] = []
     for block in prompt:
@@ -306,6 +316,8 @@ async def session_prompt(
         },
     )
     notifications.append(update)
+    # Сохранить agent_message_chunk в events_history
+    replay_manager.save_agent_message_chunk(session, {"type": "text", "text": agent_text})
 
     if directives.publish_plan:
         plan_entries = build_plan_entries(
@@ -407,6 +419,14 @@ async def session_prompt(
                     },
                 },
             )
+        )
+        # Сохранить tool_call в events_history для replay
+        replay_manager.save_tool_call(
+            session=session,
+            tool_call_id=tool_call_id,
+            title=tool_title,
+            kind=directives.tool_kind,
+            status="pending",
         )
 
         if session.config_values.get("mode", "ask") == "ask":
