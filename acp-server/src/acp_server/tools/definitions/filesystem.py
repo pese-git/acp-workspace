@@ -96,7 +96,7 @@ class FileSystemToolDefinitions:
                 },
                 "required": ["path", "content"],
             },
-            kind="write",
+            kind="edit",
             requires_permission=True,
         )
 

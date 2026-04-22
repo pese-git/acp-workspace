@@ -91,7 +91,7 @@ class TestFileSystemDefinitions:
         # Assert
         assert isinstance(definition, ToolDefinition)
         assert definition.name == "write_text_file"
-        assert definition.kind == "write"
+        assert definition.kind == "edit"
         assert definition.requires_permission is True
         assert definition.description is not None
 
@@ -148,7 +148,7 @@ class TestFileSystemDefinitions:
         definition = FileSystemToolDefinitions.write_text_file()
         
         # Assert
-        assert definition.kind == "write"
+        assert definition.kind == "edit"
 
     def test_filesystem_both_require_permission(self) -> None:
         """Проверка что обе операции требуют разрешения."""
@@ -457,7 +457,7 @@ class TestToolDefinitionsConsistency:
         # Assert
         for definition in fs_defs + term_defs:
             assert definition.kind is not None
-            assert definition.kind in ["read", "write", "execute", "delete"]
+            assert definition.kind in ["read", "edit", "execute", "delete"]
 
     def test_all_definitions_have_parameters(self) -> None:
         """Все определения имеют параметры."""
@@ -499,15 +499,15 @@ class TestToolDefinitionsConsistency:
             if "properties" in params:
                 assert isinstance(params["properties"], dict)
 
-    def test_filesystem_tools_have_read_write_kinds(self) -> None:
-        """FileSystem инструменты имеют read/write kinds."""
+    def test_filesystem_tools_have_read_edit_kinds(self) -> None:
+        """FileSystem инструменты имеют read/edit kinds."""
         # Act
         read_def = FileSystemToolDefinitions.read_text_file()
         write_def = FileSystemToolDefinitions.write_text_file()
         
         # Assert
         assert read_def.kind == "read"
-        assert write_def.kind == "write"
+        assert write_def.kind == "edit"
 
     def test_terminal_tools_have_execute_read_delete_kinds(self) -> None:
         """Terminal инструменты имеют execute/read/delete kinds."""
