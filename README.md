@@ -47,18 +47,36 @@ make ping-ws
 
 ## Поддерживаемые методы
 
-- `authenticate`
-- `initialize`
-- `session/new`
-- `session/load`
-- `session/list`
-- `session/prompt`
-- `session/cancel`
-- `session/set_config_option`
+### Agent-side методы (Client → Agent)
+
+- `authenticate` — аутентификация клиента
+- `initialize` — инициализация соединения и negotiation capabilities
+- `session/new` — создание новой сессии
+- `session/load` — загрузка существующей сессии
+- `session/list` — список сессий с пагинацией
+- `session/prompt` — отправка промпта агенту
+- `session/cancel` — отмена текущей операции
+- `session/set_config_option` — изменение конфигурации сессии
+- `session/set_mode` — изменение режима сессии (legacy, используйте `configOptions`)
+
+### Client-side методы (Agent → Client)
+
+- `session/request_permission` — запрос разрешения на выполнение операции
+- `fs/read_text_file` — чтение текстового файла
+- `fs/write_text_file` — запись текстового файла
+- `terminal/create` — создание терминала
+- `terminal/output` — получение вывода терминала
+- `terminal/wait_for_exit` — ожидание завершения команды
+- `terminal/kill` — принудительное завершение команды
+- `terminal/release` — освобождение терминала
+
+### Notifications (Agent → Client)
+
+- `session/update` — уведомления о ходе выполнения (tool_call, plan, message chunks и др.)
 
 Профиль реализации в этом репозитории: только ACP over WebSocket (`GET /acp/ws`).
 
-Временные legacy-методы (для обратной совместимости):
+### Legacy-методы (для обратной совместимости)
 
 - `ping`
 - `echo`
