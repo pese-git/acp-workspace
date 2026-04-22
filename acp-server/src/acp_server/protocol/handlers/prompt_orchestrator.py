@@ -926,13 +926,13 @@ class PromptOrchestrator:
             
             # Вызвать LLM
             try:
-                if iteration == 1 and initial_prompt_text is not None:
-                    # Первая итерация с новым промптом
+                if iteration == 1 and initial_prompt_text:
+                    # Первая итерация с новым промптом (непустая строка)
                     agent_response = await agent_orchestrator.process_prompt(
                         session, initial_prompt_text
                     )
                 else:
-                    # Продолжение с tool results
+                    # Продолжение с tool results (пустой промпт или последующие итерации)
                     agent_response = await agent_orchestrator.continue_with_tool_results(
                         session, tool_results or []
                     )
@@ -963,13 +963,16 @@ class PromptOrchestrator:
                 )
             
             agent_response_text = agent_response.text if agent_response else ""
+            has_tool_calls = agent_response and agent_response.tool_calls
             
             # Отправить текстовый ответ если есть
             if agent_response_text:
                 final_text = agent_response_text
                 
-                # Добавить assistant message в историю
-                self.state_manager.add_assistant_message(session, agent_response_text)
+                # Добавить assistant message в историю ТОЛЬКО если нет tool_calls
+                # Если есть tool_calls, assistant message добавится позже с tool_calls
+                if not has_tool_calls:
+                    self.state_manager.add_assistant_message(session, agent_response_text)
                 
                 # Сохранить в events_history
                 self.state_manager.add_event(
@@ -989,7 +992,7 @@ class PromptOrchestrator:
                 )
             
             # Если нет tool_calls - выходим из цикла
-            if not agent_response or not agent_response.tool_calls:
+            if not has_tool_calls:
                 logger.debug(
                     "llm_loop completed - no tool calls",
                     session_id=session_id,
@@ -1007,6 +1010,31 @@ class PromptOrchestrator:
                 session_id=session_id,
                 iteration=iteration,
                 num_tool_calls=len(agent_response.tool_calls),
+            )
+            
+            # ВАЖНО: Сохранить assistant message с tool_calls в историю сессии
+            # Это необходимо для OpenAI API, который требует последовательность:
+            # 1. assistant message с tool_calls
+            # 2. tool messages с результатами
+            # Без этого LLM не знает что инструмент уже запрашивался
+            tool_calls_for_history = [
+                {
+                    "id": tc.id,
+                    "name": tc.name,
+                    "arguments": tc.arguments,
+                }
+                for tc in agent_response.tool_calls
+            ]
+            assistant_msg_with_tools = {
+                "role": "assistant",
+                "text": agent_response_text or "",
+                "tool_calls": tool_calls_for_history,
+            }
+            session.history.append(assistant_msg_with_tools)
+            logger.debug(
+                "assistant_message_with_tool_calls_added_to_history",
+                session_id=session_id,
+                tool_calls_count=len(tool_calls_for_history),
             )
             
             loop_result = await self._process_tool_calls_for_llm_loop(

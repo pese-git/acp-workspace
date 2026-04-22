@@ -149,6 +149,11 @@ class AgentOrchestrator:
         history: list[dict[str, Any]] | list,
     ) -> list[LLMMessage]:
         """Преобразовать историю из SessionState в формат LLMMessage.
+        
+        Поддерживает форматы:
+        - {"role": "user", "text": "..."} или {"role": "user", "content": "..."}
+        - {"role": "assistant", "text": "...", "tool_calls": [...]}
+        - {"role": "tool", "tool_call_id": "...", "content": "..."}
 
         Args:
             history: История сообщений из SessionState
@@ -156,6 +161,8 @@ class AgentOrchestrator:
         Returns:
             Список LLMMessage для отправки в LLM
         """
+        from acp_server.llm.base import LLMToolCall
+        
         messages: list[LLMMessage] = []
 
         for entry in history:
@@ -173,8 +180,43 @@ class AgentOrchestrator:
             content = entry_dict.get("text", "")
             if not content:
                 content = entry_dict.get("content", "")
+            
+            # Обработка tool messages (результаты выполнения tool)
+            if role == "tool":
+                tool_call_id = entry_dict.get("tool_call_id")
+                tool_name = entry_dict.get("name")
+                messages.append(LLMMessage(
+                    role="tool",
+                    content=str(content) if content else "",
+                    tool_call_id=tool_call_id,
+                    name=tool_name,
+                ))
+                continue
+            
+            # Обработка assistant messages с tool_calls
+            tool_calls_data = entry_dict.get("tool_calls")
+            if role == "assistant" and tool_calls_data:
+                # Конвертировать tool_calls в LLMToolCall объекты
+                llm_tool_calls: list[LLMToolCall] = []
+                for tc in tool_calls_data:
+                    if isinstance(tc, dict):
+                        llm_tool_calls.append(LLMToolCall(
+                            id=tc.get("id", ""),
+                            name=tc.get("name", ""),
+                            arguments=tc.get("arguments", {}),
+                        ))
+                    elif hasattr(tc, "id"):
+                        # Уже LLMToolCall объект
+                        llm_tool_calls.append(tc)
+                
+                messages.append(LLMMessage(
+                    role="assistant",
+                    content=str(content) if content else None,
+                    tool_calls=llm_tool_calls if llm_tool_calls else None,
+                ))
+                continue
 
-            # Создать LLMMessage
+            # Создать обычный LLMMessage
             if content:
                 messages.append(LLMMessage(role=role, content=str(content)))
 
