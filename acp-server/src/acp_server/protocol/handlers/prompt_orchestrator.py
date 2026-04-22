@@ -371,6 +371,19 @@ class PromptOrchestrator:
                 session.active_turn.pending_client_request.request_id,
             )
 
+        # Отменяем все pending RPC requests через ClientRPCService
+        # Это немедленно завершит все ожидающие RPC вызовы с ClientRPCCancelledError
+        if self.client_rpc_service is not None:
+            cancelled_rpc_count = self.client_rpc_service.cancel_all_pending_requests(
+                reason="session/cancel requested",
+            )
+            if cancelled_rpc_count > 0:
+                logger.debug(
+                    "cancelled pending RPC requests",
+                    session_id=session_id,
+                    cancelled_count=cancelled_rpc_count,
+                )
+
         # Фиксируем отмену turn с ACP-совместимым stopReason.
         self.turn_lifecycle_manager.finalize_turn(session, "cancelled")
 

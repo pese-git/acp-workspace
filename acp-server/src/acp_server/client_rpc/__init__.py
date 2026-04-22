@@ -61,6 +61,7 @@ from __future__ import annotations
 
 from .exceptions import (
     ClientCapabilityMissingError,
+    ClientRPCCancelledError,
     ClientRPCError,
     ClientRPCResponseError,
     ClientRPCTimeoutError,
@@ -89,6 +90,7 @@ __all__ = [
     # Exceptions
     "ClientRPCError",
     "ClientRPCTimeoutError",
+    "ClientRPCCancelledError",
     "ClientCapabilityMissingError",
     "ClientRPCResponseError",
     # Models - File System

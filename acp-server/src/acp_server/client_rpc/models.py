@@ -6,7 +6,34 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
+from dataclasses import dataclass, field
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
+
+# ===== Internal State Models =====
+
+
+@dataclass
+class PendingRequest:
+    """Ожидающий RPC запрос с поддержкой отмены.
+    
+    Хранит состояние ожидающего RPC запроса, включая Future для получения
+    результата и Event для координированной отмены без timeout.
+    
+    Attributes:
+        future: asyncio.Future для получения результата от клиента
+        cancellation_event: Event для сигнализации об отмене запроса
+        method: Имя вызываемого RPC метода (для логирования/диагностики)
+        created_at: Время создания запроса (Unix timestamp)
+    """
+    
+    future: asyncio.Future[Any]
+    cancellation_event: asyncio.Event = field(default_factory=asyncio.Event)
+    method: str = ""
+    created_at: float = field(default_factory=time.time)
 
 # ===== File System Models =====
 

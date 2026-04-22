@@ -364,37 +364,53 @@ class ACPHttpServer:
             await _send_outcome(outcome, request_id=request_id)
 
             # Обработать pending tool execution после permission approval
+            # ВАЖНО: запускаем в background task чтобы не блокировать receive loop,
+            # иначе RPC response от клиента не будут получены
             if outcome.pending_tool_execution is not None:
                 pending = outcome.pending_tool_execution
                 conn_logger.info(
-                    "executing pending tool after permission",
+                    "scheduling pending tool execution in background",
                     session_id=pending.session_id,
                     tool_call_id=pending.tool_call_id,
                 )
-                # Выполнить tool асинхронно
-                tool_notifications = await protocol.execute_pending_tool(
-                    session_id=pending.session_id,
-                    tool_call_id=pending.tool_call_id,
-                )
-                # Отправить notifications о результате выполнения
-                for notification in tool_notifications:
-                    if not ws.closed:
-                        await ws.send_str(notification.to_json())
-                        conn_logger.debug(
-                            "tool execution notification sent",
-                            method=notification.method,
+
+                async def _execute_tool_in_background() -> None:
+                    """Background task для выполнения tool после permission."""
+                    try:
+                        tool_notifications = await protocol.execute_pending_tool(
+                            session_id=pending.session_id,
+                            tool_call_id=pending.tool_call_id,
                         )
-                
-                # Завершить turn после выполнения tool
-                turn_completion = protocol.complete_active_turn(
-                    pending.session_id, stop_reason="end_turn"
-                )
-                if turn_completion is not None and not ws.closed:
-                    await ws.send_str(turn_completion.to_json())
-                    conn_logger.debug(
-                        "turn completion sent after tool execution",
-                        session_id=pending.session_id,
-                    )
+                        # Отправить notifications о результате выполнения
+                        async with ws_send_lock:
+                            for notification in tool_notifications:
+                                if not ws.closed:
+                                    await ws.send_str(notification.to_json())
+                                    conn_logger.debug(
+                                        "tool execution notification sent",
+                                        method=notification.method,
+                                    )
+
+                            # Завершить turn после выполнения tool
+                            turn_completion = protocol.complete_active_turn(
+                                pending.session_id, stop_reason="end_turn"
+                            )
+                            if turn_completion is not None and not ws.closed:
+                                await ws.send_str(turn_completion.to_json())
+                                conn_logger.debug(
+                                    "turn completion sent after tool execution",
+                                    session_id=pending.session_id,
+                                )
+                    except Exception as exc:
+                        conn_logger.error(
+                            "background tool execution failed",
+                            session_id=pending.session_id,
+                            tool_call_id=pending.tool_call_id,
+                            error=str(exc),
+                        )
+
+                # Запускаем в background, не блокируя receive loop
+                asyncio.create_task(_execute_tool_in_background())
 
             if method_name == "shutdown":
                 conn_logger.info("shutdown requested")
@@ -510,7 +526,15 @@ class ACPHttpServer:
                             )
                             continue
 
-                        outcome = await protocol.handle(acp_request)
+                        # Routing для RPC response от клиента (без method, с result/error)
+                        if method_name is None and acp_request.id is not None:
+                            conn_logger.debug(
+                                "response received, routing to handle_client_response",
+                                request_id=request_id,
+                            )
+                            outcome = protocol.handle_client_response(acp_request)
+                        else:
+                            outcome = await protocol.handle(acp_request)
 
                         # Логируем входящий запрос с методом и сессией
                         conn_logger.info(

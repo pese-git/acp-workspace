@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import uuid
 from collections.abc import Callable
 from typing import Any
@@ -19,11 +20,12 @@ from pydantic import BaseModel
 from ..messages import JsonRpcId
 from .exceptions import (
     ClientCapabilityMissingError,
+    ClientRPCCancelledError,
     ClientRPCError,
     ClientRPCResponseError,
-    ClientRPCTimeoutError,
 )
 from .models import (
+    PendingRequest,
     ReadTextFileRequest,
     ReadTextFileResponse,
     TerminalCreateRequest,
@@ -53,15 +55,14 @@ class ClientRPCService:
     Attributes:
         _send_request: Функция для отправки JSON-RPC request
         _capabilities: Capabilities из initialize response
-        _timeout: Timeout для ожидания ответа (секунды)
-        _pending_requests: Словарь активных requests (request_id -> Future)
+        _pending_requests: Словарь активных requests (request_id -> PendingRequest)
     """
 
     def __init__(
         self,
         send_request_callback: Callable,
         client_capabilities: dict,
-        timeout: float = 30.0,
+        timeout: float | None = None,  # Deprecated: игнорируется
     ) -> None:
         """Инициализировать ClientRPCService.
 
@@ -70,12 +71,12 @@ class ClientRPCService:
                 Ожидается сигнатура: async def send(request: dict) -> None
             client_capabilities: Capabilities из initialize response.
                 Словарь вида {"fs": {"readTextFile": True}, "terminal": True}
-            timeout: Timeout для ожидания ответа (секунды). По умолчанию 30 сек.
+            timeout: DEPRECATED. Параметр игнорируется - RPC теперь ожидают бессрочно.
         """
         self._send_request = send_request_callback
         self._capabilities = client_capabilities
-        self._timeout = timeout
-        self._pending_requests: dict[str, asyncio.Future] = {}
+        # Храним PendingRequest вместо Future для поддержки отмены
+        self._pending_requests: dict[str, PendingRequest] = {}
 
     def _check_capability(self, capability_path: str) -> None:
         """Проверить наличие capability у клиента.
@@ -105,7 +106,11 @@ class ClientRPCService:
         params: dict,
         response_model: type[BaseModel],
     ) -> Any:
-        """Вызвать метод на клиенте и дождаться ответа.
+        """Вызвать метод на клиенте и дождаться ответа без timeout.
+
+        Метод ожидает ответ бессрочно до одного из событий:
+        - Получен ответ от клиента (успешный или с ошибкой)
+        - Запрос отменён через cancellation_event
 
         Args:
             method: Имя метода (например, "fs/read_text_file").
@@ -116,13 +121,19 @@ class ClientRPCService:
             Распарсенный response согласно response_model.
 
         Raises:
-            ClientRPCTimeoutError: Timeout при ожидании ответа.
+            ClientRPCCancelledError: Запрос был отменён.
             ClientRPCResponseError: Ошибка от клиента.
             ClientRPCError: Некорректный ответ от клиента.
         """
         request_id = str(uuid.uuid4())
-        future: asyncio.Future = asyncio.Future()
-        self._pending_requests[request_id] = future
+        
+        # Создаём PendingRequest с cancellation_event для координированной отмены
+        pending_request = PendingRequest(
+            future=asyncio.Future(),
+            cancellation_event=asyncio.Event(),
+            method=method,
+        )
+        self._pending_requests[request_id] = pending_request
 
         try:
             # Отправить JSON-RPC request
@@ -140,16 +151,58 @@ class ClientRPCService:
                 extra={"method": method, "request_id": request_id},
             )
 
-            # Ждать ответ с timeout
-            result = await asyncio.wait_for(future, timeout=self._timeout)
+            # Ждём одно из двух событий: ответ или отмена (без timeout)
+            future_task = asyncio.create_task(
+                self._wrap_future(pending_request.future),
+                name=f"rpc-future-{request_id}",
+            )
+            cancel_task = asyncio.create_task(
+                pending_request.cancellation_event.wait(),
+                name=f"rpc-cancel-{request_id}",
+            )
+
+            done, pending = await asyncio.wait(
+                [future_task, cancel_task],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            # Отменяем оставшуюся задачу
+            for task in pending:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+
+            # Проверяем, был ли запрос отменён
+            if pending_request.cancellation_event.is_set():
+                raise ClientRPCCancelledError(f"RPC вызов {method} был отменён")
+
+            # Если Future завершился с исключением - пробрасываем его
+            if pending_request.future.done():
+                # Получаем исключение или результат
+                exc = pending_request.future.exception()
+                if exc:
+                    raise exc
+                result = pending_request.future.result()
+            else:
+                # Future должен быть done, если мы здесь
+                raise ClientRPCError(f"Unexpected state: future not done for {method}")
 
             # Парсить ответ
             return response_model.model_validate(result)
 
-        except TimeoutError as err:
-            raise ClientRPCTimeoutError(f"Timeout при вызове {method} (>{self._timeout}s)") from err
         finally:
             self._pending_requests.pop(request_id, None)
+
+    async def _wrap_future(self, future: asyncio.Future) -> Any:
+        """Обёртка для ожидания Future как корутины.
+        
+        Args:
+            future: Future для ожидания.
+            
+        Returns:
+            Результат Future.
+        """
+        return await future
 
     def handle_response(self, response: dict) -> None:
         """Обработать ответ от клиента.
@@ -169,11 +222,11 @@ class ClientRPCService:
             )
             return
 
-        future = self._pending_requests[request_id]
+        pending_request = self._pending_requests[request_id]
 
         if "error" in response:
             error = response["error"]
-            future.set_exception(
+            pending_request.future.set_exception(
                 ClientRPCResponseError(
                     code=error.get("code", -1),
                     message=error.get("message", "Unknown error"),
@@ -181,9 +234,18 @@ class ClientRPCService:
                 )
             )
         elif "result" in response:
-            future.set_result(response["result"])
+            pending_request.future.set_result(response["result"])
+            logger.debug(
+                "RPC ответ получен от клиента",
+                extra={
+                    "request_id": request_id,
+                    "method": pending_request.method,
+                },
+            )
         else:
-            future.set_exception(ClientRPCError("Invalid response: missing 'result' or 'error'"))
+            pending_request.future.set_exception(
+                ClientRPCError("Invalid response: missing 'result' or 'error'")
+            )
 
     def has_pending_request(self, request_id: JsonRpcId | None) -> bool:
         """Проверить, ожидает ли сервис ответ для указанного request_id.
@@ -192,38 +254,68 @@ class ClientRPCService:
             if service.has_pending_request("req_1"):
                 ...
         """
-
         if not isinstance(request_id, str):
             return False
-        return request_id in self._pending_requests
+        
+        is_pending = request_id in self._pending_requests
+        if is_pending:
+            logger.debug(
+                "RPC request найден в pending",
+                extra={"request_id": request_id},
+            )
+        return is_pending
 
-    def cancel_all_pending_requests(self, reason: str) -> int:
-        """Отменить все ожидающие RPC-запросы с заданной причиной.
+    def cancel_request(self, request_id: str) -> bool:
+        """Отменить конкретный RPC запрос по его ID.
 
-        Метод используется транспортом при закрытии соединения, чтобы не
-        оставлять зависшие Future в памяти.
+        Устанавливает cancellation_event, что приводит к немедленному
+        завершению ожидания в _call_method с ClientRPCCancelledError.
 
         Args:
-            reason: Текст причины отмены.
+            request_id: ID запроса для отмены.
 
         Returns:
-            Количество запросов, которые были завершены исключением.
+            True если запрос был найден и отменён, False если не найден.
         """
+        if request_id not in self._pending_requests:
+            return False
+        
+        pending_request = self._pending_requests[request_id]
+        pending_request.cancellation_event.set()
+        
+        logger.debug(
+            "RPC запрос отменён",
+            extra={"request_id": request_id, "method": pending_request.method},
+        )
+        return True
 
+    def cancel_all_pending_requests(self, reason: str | None = None) -> int:
+        """Отменить все ожидающие RPC-запросы.
+
+        Метод используется при session/cancel или disconnect, чтобы
+        немедленно завершить все ожидающие RPC вызовы.
+
+        Args:
+            reason: Текст причины отмены (для логирования).
+
+        Returns:
+            Количество отменённых запросов.
+        """
         cancelled_count = 0
-        for request_id, future in list(self._pending_requests.items()):
-            if future.done():
-                self._pending_requests.pop(request_id, None)
+        for _request_id, pending_request in list(self._pending_requests.items()):
+            # Пропускаем уже завершённые
+            if pending_request.future.done():
                 continue
-            future.set_exception(ClientRPCError(reason))
-            self._pending_requests.pop(request_id, None)
+            
+            # Устанавливаем event отмены - _call_method обработает и выбросит исключение
+            pending_request.cancellation_event.set()
             cancelled_count += 1
 
         if cancelled_count > 0:
             logger.info(
                 "pending client RPC requests cancelled",
                 cancelled_count=cancelled_count,
-                reason=reason,
+                reason=reason or "no reason provided",
             )
         return cancelled_count
 

@@ -25,6 +25,16 @@ class ClientRPCTimeoutError(ClientRPCError):
     pass
 
 
+class ClientRPCCancelledError(ClientRPCError):
+    """RPC запрос был отменён.
+    
+    Возникает, когда RPC запрос был явно отменён через cancellation_event,
+    например при session/cancel или disconnect клиента.
+    """
+
+    pass
+
+
 class ClientCapabilityMissingError(ClientRPCError):
     """Клиент не поддерживает требуемую capability.
     

@@ -877,32 +877,46 @@ class ACPTransportService(TransportService):
 
         if rpc_method == "fs/read_text_file":
             path = rpc_params.get("path")
-            self._logger.debug(
-                "tool_lifecycle_callback_start",
+            self._logger.info(
+                "fs_read_rpc_start",
                 rpc_id=notification.id,
-                rpc_method=rpc_method,
                 path=path,
                 has_callback=on_fs_read is not None,
             )
-            content = on_fs_read(path) if on_fs_read is not None and isinstance(path, str) else ""
-            self._logger.debug(
-                "tool_lifecycle_callback_done",
-                rpc_id=notification.id,
-                rpc_method=rpc_method,
-                content_size=len(content),
-            )
-            self._logger.debug(
-                "tool_lifecycle_response_sending",
-                rpc_id=notification.id,
-                rpc_method=rpc_method,
-                result_keys=["content"],
-            )
-            await self.send(ACPMessage.response(notification.id, {"content": content}).to_dict())
-            self._logger.debug(
-                "tool_lifecycle_response_sent",
-                rpc_id=notification.id,
-                rpc_method=rpc_method,
-            )
+            try:
+                content = (
+                    on_fs_read(path) if on_fs_read is not None and isinstance(path, str) else ""
+                )
+                self._logger.info(
+                    "fs_read_rpc_callback_done",
+                    rpc_id=notification.id,
+                    content_size=len(content),
+                )
+                response_msg = ACPMessage.response(notification.id, {"content": content}).to_dict()
+                self._logger.info(
+                    "fs_read_rpc_sending_response",
+                    rpc_id=notification.id,
+                )
+                await self.send(response_msg)
+                self._logger.info(
+                    "fs_read_rpc_response_sent",
+                    rpc_id=notification.id,
+                )
+            except Exception as e:
+                self._logger.error(
+                    "fs_read_rpc_error",
+                    rpc_id=notification.id,
+                    path=path,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                )
+                # Отправляем error response обратно на сервер
+                error_response = {
+                    "jsonrpc": "2.0",
+                    "id": notification.id,
+                    "error": {"code": -32603, "message": str(e)},
+                }
+                await self.send(error_response)
             return
 
         if rpc_method == "fs/write_text_file":

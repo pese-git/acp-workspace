@@ -13,10 +13,9 @@ import pytest
 
 from acp_server.client_rpc import (
     ClientCapabilityMissingError,
-    ClientRPCError,
+    ClientRPCCancelledError,
     ClientRPCResponseError,
     ClientRPCService,
-    ClientRPCTimeoutError,
 )
 
 
@@ -412,12 +411,29 @@ async def test_terminal_capability_missing(rpc_service: ClientRPCService) -> Non
 
 
 @pytest.mark.asyncio
-async def test_timeout_error(rpc_service: ClientRPCService) -> None:
-    """Тест timeout при ожидании ответа."""
-    with pytest.raises(ClientRPCTimeoutError) as exc_info:
-        await rpc_service.read_text_file("sess_123", "/test.txt")
+async def test_request_cancellation(
+    rpc_service: ClientRPCService, mock_send_request: Any
+) -> None:
+    """Тест отмены конкретного RPC запроса через cancel_request."""
+    task = asyncio.create_task(rpc_service.read_text_file("sess_123", "/test.txt"))
 
-    assert "Timeout" in str(exc_info.value)
+    await asyncio.sleep(0.01)
+
+    # Получаем request_id из отправленного запроса
+    request = mock_send_request.sent_requests[0]
+    request_id = request["id"]
+
+    # Отменяем конкретный запрос
+    result = rpc_service.cancel_request(request_id)
+    assert result is True
+
+    # Проверяем, что отмена несуществующего запроса возвращает False
+    result_nonexistent = rpc_service.cancel_request("nonexistent_id")
+    assert result_nonexistent is False
+
+    # Проверяем, что задача завершается с ClientRPCCancelledError
+    with pytest.raises(ClientRPCCancelledError):
+        await task
 
 
 @pytest.mark.asyncio
@@ -432,9 +448,61 @@ async def test_cancel_all_pending_requests_finishes_waiters(
     cancelled_count = rpc_service.cancel_all_pending_requests("connection dropped")
 
     assert cancelled_count == 1
-    with pytest.raises(ClientRPCError) as exc_info:
+    # После рефакторинга запросы отменяются через cancellation_event
+    # и выбрасывают ClientRPCCancelledError
+    with pytest.raises(ClientRPCCancelledError):
         await task
-    assert "connection dropped" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_no_timeout_waiting(
+    rpc_service: ClientRPCService, mock_send_request: Any
+) -> None:
+    """Тест что RPC ожидает бессрочно до получения ответа или отмены.
+    
+    Проверяет, что запрос не завершается по timeout, а ждёт ответа.
+    """
+    task = asyncio.create_task(rpc_service.read_text_file("sess_123", "/test.txt"))
+
+    # Ждём дольше чем старый timeout (1 секунда в fixture)
+    await asyncio.sleep(0.05)
+
+    # Задача всё ещё выполняется (не завершилась по timeout)
+    assert not task.done()
+
+    # Отправляем ответ - запрос должен успешно завершиться
+    request = mock_send_request.sent_requests[0]
+    rpc_service.handle_response(
+        {"jsonrpc": "2.0", "id": request["id"], "result": {"content": "file content"}}
+    )
+
+    content = await task
+    assert content == "file content"
+
+
+@pytest.mark.asyncio
+async def test_cancel_multiple_pending_requests(
+    rpc_service: ClientRPCService, mock_send_request: Any
+) -> None:
+    """Тест отмены нескольких pending запросов одновременно."""
+    # Запускаем несколько запросов
+    task1 = asyncio.create_task(rpc_service.read_text_file("sess_123", "/file1.txt"))
+    task2 = asyncio.create_task(rpc_service.read_text_file("sess_123", "/file2.txt"))
+    task3 = asyncio.create_task(rpc_service.write_text_file("sess_123", "/file3.txt", "content"))
+
+    await asyncio.sleep(0.02)
+
+    # Должны быть 3 pending requests
+    cancelled_count = rpc_service.cancel_all_pending_requests("session cancelled")
+    assert cancelled_count == 3
+
+    # Все задачи должны завершиться с ошибкой отмены
+    with pytest.raises(ClientRPCCancelledError):
+        await task1
+    with pytest.raises(ClientRPCCancelledError):
+        await task2
+    with pytest.raises(ClientRPCCancelledError):
+        await task3
 
 
 @pytest.mark.asyncio
@@ -508,7 +576,7 @@ async def test_invalid_response_no_result_or_error(
     rpc_service: ClientRPCService, mock_send_request: Any
 ) -> None:
     """Тест обработки невалидного response без result/error."""
-    from acp_server.client_rpc import ClientRPCError
+    from acp_server.client_rpc.exceptions import ClientRPCError
 
     task = asyncio.create_task(rpc_service.read_text_file("sess_123", "/test.txt"))
 

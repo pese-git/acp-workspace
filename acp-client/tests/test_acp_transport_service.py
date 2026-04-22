@@ -184,12 +184,15 @@ class TestACPTransportServiceRequestWithCallbacks:
         )
 
         transport.send_str.assert_awaited_once()
+        # Debug events: rpc_received остается debug, остальные перешли в info
         debug_events = [call.args[0] for call in service._logger.debug.call_args_list if call.args]
         assert "tool_lifecycle_rpc_received" in debug_events
-        assert "tool_lifecycle_callback_start" in debug_events
-        assert "tool_lifecycle_callback_done" in debug_events
-        assert "tool_lifecycle_response_sending" in debug_events
-        assert "tool_lifecycle_response_sent" in debug_events
+        # Info events: логи fs_read_rpc_* теперь info уровня для лучшей диагностики
+        info_events = [call.args[0] for call in service._logger.info.call_args_list if call.args]
+        assert "fs_read_rpc_start" in info_events
+        assert "fs_read_rpc_callback_done" in info_events
+        assert "fs_read_rpc_sending_response" in info_events
+        assert "fs_read_rpc_response_sent" in info_events
 
     @pytest.mark.asyncio
     async def test_request_with_callbacks_logs_notification_failure(self) -> None:
@@ -242,10 +245,11 @@ class TestACPTransportServiceRequestWithCallbacks:
         )
 
         assert response["result"]["status"] == "ok"
-        warning_events = [
-            call.args[0] for call in service._logger.warning.call_args_list if call.args
+        # Ошибки в fs/read callback теперь логируются как error с именем fs_read_rpc_error
+        error_events = [
+            call.args[0] for call in service._logger.error.call_args_list if call.args
         ]
-        assert "tool_lifecycle_notification_failed" in warning_events
+        assert "fs_read_rpc_error" in error_events
 
 
 class TestPermissionCallback:
