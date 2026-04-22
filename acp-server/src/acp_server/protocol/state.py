@@ -213,6 +213,55 @@ class PendingToolExecution:
 
 
 @dataclass(slots=True)
+class ToolResult:
+    """Результат выполнения tool для передачи в LLM.
+    
+    Используется в LLM loop для сбора результатов выполнения tool calls
+    и отправки их обратно в LLM для продолжения обработки.
+    
+    Пример использования:
+        result = ToolResult(
+            tool_call_id="call_abc123",
+            tool_name="fs/read_text_file",
+            success=True,
+            output="File contents here...",
+        )
+    """
+    tool_call_id: str
+    tool_name: str
+    success: bool
+    output: str | None = None
+    error: str | None = None
+
+
+@dataclass(slots=True)
+class LLMLoopResult:
+    """Результат выполнения LLM loop.
+    
+    Содержит накопленные notifications, статус завершения и информацию
+    о pending состояниях (permission, tool calls).
+    
+    Пример использования:
+        result = LLMLoopResult(
+            notifications=[...],
+            stop_reason="end_turn",
+            final_text="Here is the answer...",
+        )
+    """
+    notifications: list[Any] = field(default_factory=list)
+    # Причина завершения: "end_turn", "cancelled", "max_iterations", None (deferred)
+    stop_reason: str | None = None
+    # Финальный текстовый ответ от LLM
+    final_text: str | None = None
+    # Флаг ожидания permission response
+    pending_permission: bool = False
+    # Оставшиеся tool calls для обработки после permission
+    pending_tool_calls: list[Any] = field(default_factory=list)
+    # Накопленные ToolResult для передачи в следующую итерацию
+    tool_results: list[ToolResult] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class ProtocolOutcome:
     """Результат обработки входящего ACP-сообщения.
 

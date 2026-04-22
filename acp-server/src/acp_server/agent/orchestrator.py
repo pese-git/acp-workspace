@@ -8,7 +8,7 @@ from acp_server.agent.base import AgentContext, AgentResponse, LLMAgent
 from acp_server.agent.naive import NaiveAgent
 from acp_server.agent.state import OrchestratorConfig
 from acp_server.llm.base import LLMMessage, LLMProvider
-from acp_server.protocol.state import ClientRuntimeCapabilities, SessionState
+from acp_server.protocol.state import ClientRuntimeCapabilities, SessionState, ToolResult
 from acp_server.tools.base import ToolDefinition, ToolRegistry
 
 # Используем structlog для структурированного логирования
@@ -264,3 +264,78 @@ class AgentOrchestrator:
         )
 
         return filtered_tools
+
+    async def continue_with_tool_results(
+        self,
+        session_state: SessionState,
+        tool_results: list[ToolResult],
+    ) -> AgentResponse:
+        """Продолжить обработку после получения tool results.
+        
+        Добавляет tool results в историю сессии и вызывает LLM повторно
+        для получения следующего ответа в LLM loop.
+        
+        Согласно ACP протоколу (05-Prompt Turn.md):
+        "The Agent sends the tool results back to the language model as another request.
+        The cycle returns to step 2, continuing until the language model completes
+        its response without requesting additional tool calls."
+        
+        Args:
+            session_state: Состояние сессии с обновленной историей
+            tool_results: Результаты выполнения tool calls
+            
+        Returns:
+            AgentResponse с текстом ответа и информацией о tool calls
+        """
+        # Добавить tool results в историю сессии для передачи в LLM
+        for result in tool_results:
+            self._add_tool_result_to_history(session_state, result)
+        
+        # Создать контекст агента без нового промпта (продолжение)
+        agent_context = self._create_agent_context(session_state, prompt="")
+        
+        # Вызвать агента для продолжения обработки
+        agent_response = await self.agent.process_prompt(agent_context)
+        
+        logger.info(
+            "agent continued with tool results",
+            session_id=session_state.session_id,
+            tool_results_count=len(tool_results),
+            response_length=len(agent_response.text),
+        )
+        
+        return agent_response
+    
+    def _add_tool_result_to_history(
+        self,
+        session_state: SessionState,
+        tool_result: ToolResult,
+    ) -> None:
+        """Добавить tool result в историю сессии.
+        
+        Формат соответствует OpenAI API для tool responses:
+        {"role": "tool", "tool_call_id": "...", "content": "..."}
+        
+        Args:
+            session_state: Состояние сессии
+            tool_result: Результат выполнения tool
+        """
+        # Формируем content: либо output, либо error
+        content = tool_result.output if tool_result.success else (
+            tool_result.error or "Tool execution failed"
+        )
+        
+        # Добавляем tool result в историю в формате OpenAI API
+        tool_message = {
+            "role": "tool",
+            "tool_call_id": tool_result.tool_call_id,
+            "content": content or "",
+        }
+        session_state.history.append(tool_message)
+        
+        logger.debug(
+            "tool result added to history",
+            session_id=session_state.session_id,
+            tool_call_id=tool_result.tool_call_id,
+            success=tool_result.success,
+        )

@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from acp_server.agent.base import AgentResponse
 from acp_server.llm.base import LLMToolCall
 from acp_server.protocol.handlers.client_rpc_handler import ClientRPCHandler
 from acp_server.protocol.handlers.permission_manager import PermissionManager
@@ -104,9 +105,23 @@ def sessions(session: SessionState) -> dict[str, SessionState]:
 
 @pytest.fixture
 def agent_orchestrator() -> AsyncMock:
-    """Создает mock для AgentOrchestrator."""
+    """Создает mock для AgentOrchestrator.
+    
+    Возвращает AgentResponse вместо SessionState для соответствия
+    новой архитектуре LLM loop.
+    """
     mock = AsyncMock()
-    mock.process_prompt = AsyncMock()
+    # AgentResponse с пустым текстом и без tool calls
+    mock.process_prompt = AsyncMock(return_value=AgentResponse(
+        text="",
+        tool_calls=[],
+        stop_reason="end_turn",
+    ))
+    mock.continue_with_tool_results = AsyncMock(return_value=AgentResponse(
+        text="",
+        tool_calls=[],
+        stop_reason="end_turn",
+    ))
     return mock
 
 
@@ -135,8 +150,6 @@ class TestPromptOrchestratorHandlePrompt:
         agent_orchestrator: AsyncMock,
     ) -> None:
         """Создает active turn при обработке промпта."""
-        agent_orchestrator.process_prompt.return_value = session
-
         prompt = [{"type": "text", "text": "Test prompt"}]
         await orchestrator.handle_prompt(
             "req_1",
@@ -157,8 +170,6 @@ class TestPromptOrchestratorHandlePrompt:
         agent_orchestrator: AsyncMock,
     ) -> None:
         """Обновляет состояние сессии при обработке."""
-        agent_orchestrator.process_prompt.return_value = session
-
         prompt = [{"type": "text", "text": "Test prompt"}]
         await orchestrator.handle_prompt(
             "req_1",
@@ -181,8 +192,6 @@ class TestPromptOrchestratorHandlePrompt:
         agent_orchestrator: AsyncMock,
     ) -> None:
         """Возвращает notifications при обработке."""
-        agent_orchestrator.process_prompt.return_value = session
-
         prompt = [{"type": "text", "text": "Test prompt"}]
         outcome = await orchestrator.handle_prompt(
             "req_1",
@@ -209,8 +218,6 @@ class TestPromptOrchestratorHandlePrompt:
         agent_orchestrator: AsyncMock,
     ) -> None:
         """Обрабатывает пустой промпт."""
-        agent_orchestrator.process_prompt.return_value = session
-
         outcome = await orchestrator.handle_prompt(
             "req_1",
             {"prompt": []},
@@ -256,8 +263,6 @@ class TestPromptOrchestratorHandlePrompt:
         agent_orchestrator: AsyncMock,
     ) -> None:
         """Устанавливает заголовок сессии из первого промпта."""
-        agent_orchestrator.process_prompt.return_value = session
-
         prompt = [{"type": "text", "text": "My test prompt"}]
         await orchestrator.handle_prompt(
             "req_1",
@@ -534,8 +539,6 @@ class TestPromptOrchestratorComponentIntegration:
         agent_orchestrator: AsyncMock,
     ) -> None:
         """StateManager интегрирован в prompt handling."""
-        agent_orchestrator.process_prompt.return_value = session
-
         prompt = [{"type": "text", "text": "Test"}]
         await orchestrator.handle_prompt(
             "req_1",

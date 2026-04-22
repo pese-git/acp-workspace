@@ -17,7 +17,7 @@ from ...tools.base import ToolRegistry
 from ..content.extractor import ContentExtractor
 from ..content.formatter import ContentFormatter
 from ..content.validator import ContentValidator
-from ..state import ProtocolOutcome, SessionState
+from ..state import LLMLoopResult, ProtocolOutcome, SessionState, ToolResult
 from .client_rpc_handler import ClientRPCHandler
 from .permission_manager import PermissionManager
 from .plan_builder import PlanBuilder
@@ -199,61 +199,21 @@ class PromptOrchestrator:
         ack_notification = _build_ack_notification(session_id, text_preview)
         notifications.append(ack_notification)
 
-        # Шаг 5: Обработать через агента и получить ответ
-        agent_response_text = ""
-        agent_response = None
-        try:
-            # Agent Orchestrator теперь возвращает AgentResponse, не SessionState
-            agent_response = await agent_orchestrator.process_prompt(
-                session,
-                prompt_text,
-            )
-            agent_response_text = agent_response.text if agent_response else ""
-        except Exception as e:
-            error_message = f"Agent error: {str(e)}"
-            error_notification = _build_error_notification(session_id, error_message)
-            notifications.append(error_notification)
-            logger.error(
-                "agent processing failed",
-                session_id=session_id,
-                error=str(e),
-            )
+        # Шаг 5: Запустить LLM loop для обработки промпта и tool calls
+        # Согласно ACP протоколу (05-Prompt Turn.md):
+        # "The cycle returns to step 2, continuing until the language model completes
+        # its response without requesting additional tool calls or the turn gets stopped"
+        llm_loop_result = await self._run_llm_loop(
+            session=session,
+            session_id=session_id,
+            agent_orchestrator=agent_orchestrator,
+            initial_prompt_text=prompt_text,
+        )
+        
+        # Добавить notifications из LLM loop
+        notifications.extend(llm_loop_result.notifications)
 
-        # Шаг 6: Добавить ответ ассистента в messages_history и создать события
-        if agent_response_text:
-            # Добавляем assistant message в историю
-            self.state_manager.add_assistant_message(session, agent_response_text)
-
-            # Сохраняем agent_message_chunk в events_history в соответствии со спецификацией ACP
-            # Формат должен соответствовать ContentBlock структуре протокола
-            self.state_manager.add_event(
-                session,
-                {
-                    "type": "session_update",
-                    "update": {
-                        "sessionUpdate": "agent_message_chunk",
-                        "content": {"type": "text", "text": agent_response_text},
-                    },
-                },
-            )
-
-            # Строим notification для отправки клиенту
-            final_notification = _build_agent_response_notification(
-                session_id,
-                agent_response_text,
-            )
-            notifications.append(final_notification)
-
-        # Шаг 6.5: Обработать tool_calls из AgentResponse
-        if agent_response and agent_response.tool_calls:
-            await self._process_tool_calls(
-                session,
-                session_id,
-                agent_response.tool_calls,
-                notifications,
-            )
-
-        # Шаг 7: Отправить session info update
+        # Шаг 6: Отправить session info update
         summary = self.state_manager.get_session_summary(session)
         session_info_notification = _build_session_info_notification(
             session_id,
@@ -274,43 +234,47 @@ class PromptOrchestrator:
             },
         )
 
-        # Шаг 8: Построить plan updates если нужно
+        # Шаг 7: Построить plan updates если нужно
         # Извлечем directives из параметров (если есть)
         # Для простоты пока не добавляем план
         # В реальном коде здесь была бы обработка directives
 
-        # Шаг 9: Завершить turn только если НЕТ pending permission
+        # Шаг 8: Завершить turn на основе результата LLM loop
         # Согласно протоколу ACP (doc/Agent Client Protocol/protocol/05-Prompt Turn.md),
-        # response на session/prompt должен отправляться ПОСЛЕ завершения всех операций,
-        # включая permission flow. Permission flow происходит ВНУТРИ цикла "Until completion",
-        # и response отправляется только ПОСЛЕ выхода из цикла.
-        if session.active_turn and session.active_turn.phase == "awaiting_permission":
-            # НЕ завершать turn, вернуть ProtocolOutcome без response (deferred)
-            # Turn будет завершен после обработки permission response
+        # response на session/prompt должен отправляться ПОСЛЕ завершения всех операций
+        
+        # Если LLM loop deferred для permission - не завершаем turn
+        if llm_loop_result.pending_permission:
             logger.debug(
                 "turn deferred, awaiting permission response",
                 session_id=session_id,
-                permission_request_id=session.active_turn.permission_request_id,
+                permission_request_id=(
+                    session.active_turn.permission_request_id
+                    if session.active_turn else None
+                ),
             )
             return ProtocolOutcome(notifications=notifications)
-        else:
-            # Завершить turn как обычно
-            stop_reason = "end_turn"
-            self.turn_lifecycle_manager.finalize_turn(session, stop_reason)
-            self.turn_lifecycle_manager.clear_active_turn(session)
+        
+        # Определить stop_reason из результата LLM loop
+        stop_reason = llm_loop_result.stop_reason or "end_turn"
+        
+        # Финализировать turn
+        self.turn_lifecycle_manager.finalize_turn(session, stop_reason)
+        self.turn_lifecycle_manager.clear_active_turn(session)
 
-            logger.debug(
-                "prompt handling completed",
-                session_id=session_id,
-                notifications_count=len(notifications),
-            )
+        logger.debug(
+            "prompt handling completed",
+            session_id=session_id,
+            stop_reason=stop_reason,
+            notifications_count=len(notifications),
+        )
 
-            response = (
-                ACPMessage.response(request_id, {"stopReason": stop_reason})
-                if request_id is not None
-                else None
-            )
-            return ProtocolOutcome(response=response, notifications=notifications)
+        response = (
+            ACPMessage.response(request_id, {"stopReason": stop_reason})
+            if request_id is not None
+            else None
+        )
+        return ProtocolOutcome(response=response, notifications=notifications)
 
     def handle_cancel(
         self,
@@ -913,6 +877,435 @@ class PromptOrchestrator:
             session_id=session.session_id,
         )
         return "ask"
+
+    async def _run_llm_loop(
+        self,
+        session: SessionState,
+        session_id: str,
+        agent_orchestrator: AgentOrchestrator,
+        initial_prompt_text: str | None = None,
+        tool_results: list[ToolResult] | None = None,
+    ) -> LLMLoopResult:
+        """Основной цикл LLM для обработки tool calls.
+        
+        Реализует цикл согласно ACP протоколу (05-Prompt Turn.md):
+        "The Agent sends the tool results back to the language model as another request.
+        The cycle returns to step 2, continuing until the language model completes
+        its response without requesting additional tool calls or the turn gets stopped
+        by the Agent or cancelled by the Client."
+        
+        Args:
+            session: Состояние сессии
+            session_id: ID сессии
+            agent_orchestrator: Оркестратор агента для вызова LLM
+            initial_prompt_text: Начальный промпт (None для продолжения)
+            tool_results: Результаты tools для продолжения (None для начала)
+            
+        Returns:
+            LLMLoopResult с notifications и статусом завершения
+        """
+        notifications: list[ACPMessage] = []
+        max_iterations = 10
+        iteration = 0
+        final_text: str | None = None
+        
+        while iteration < max_iterations:
+            iteration += 1
+            
+            # CHECK 1: cancel перед вызовом LLM
+            if self._is_cancel_requested(session):
+                logger.debug(
+                    "llm_loop cancelled before LLM call",
+                    session_id=session_id,
+                    iteration=iteration,
+                )
+                return LLMLoopResult(
+                    notifications=notifications,
+                    stop_reason="cancelled",
+                )
+            
+            # Вызвать LLM
+            try:
+                if iteration == 1 and initial_prompt_text is not None:
+                    # Первая итерация с новым промптом
+                    agent_response = await agent_orchestrator.process_prompt(
+                        session, initial_prompt_text
+                    )
+                else:
+                    # Продолжение с tool results
+                    agent_response = await agent_orchestrator.continue_with_tool_results(
+                        session, tool_results or []
+                    )
+            except Exception as e:
+                error_message = f"Agent error: {str(e)}"
+                notifications.append(_build_error_notification(session_id, error_message))
+                logger.error(
+                    "llm_loop agent processing failed",
+                    session_id=session_id,
+                    iteration=iteration,
+                    error=str(e),
+                )
+                return LLMLoopResult(
+                    notifications=notifications,
+                    stop_reason="end_turn",  # Завершаем turn при ошибке
+                )
+            
+            # CHECK 2: cancel после вызова LLM
+            if self._is_cancel_requested(session):
+                logger.debug(
+                    "llm_loop cancelled after LLM call",
+                    session_id=session_id,
+                    iteration=iteration,
+                )
+                return LLMLoopResult(
+                    notifications=notifications,
+                    stop_reason="cancelled",
+                )
+            
+            agent_response_text = agent_response.text if agent_response else ""
+            
+            # Отправить текстовый ответ если есть
+            if agent_response_text:
+                final_text = agent_response_text
+                
+                # Добавить assistant message в историю
+                self.state_manager.add_assistant_message(session, agent_response_text)
+                
+                # Сохранить в events_history
+                self.state_manager.add_event(
+                    session,
+                    {
+                        "type": "session_update",
+                        "update": {
+                            "sessionUpdate": "agent_message_chunk",
+                            "content": {"type": "text", "text": agent_response_text},
+                        },
+                    },
+                )
+                
+                # Notification для клиента
+                notifications.append(
+                    _build_agent_response_notification(session_id, agent_response_text)
+                )
+            
+            # Если нет tool_calls - выходим из цикла
+            if not agent_response or not agent_response.tool_calls:
+                logger.debug(
+                    "llm_loop completed - no tool calls",
+                    session_id=session_id,
+                    iteration=iteration,
+                )
+                return LLMLoopResult(
+                    notifications=notifications,
+                    stop_reason="end_turn",
+                    final_text=final_text,
+                )
+            
+            # Обработать tool_calls и собрать результаты
+            logger.info(
+                "llm_loop processing tool calls",
+                session_id=session_id,
+                iteration=iteration,
+                num_tool_calls=len(agent_response.tool_calls),
+            )
+            
+            loop_result = await self._process_tool_calls_for_llm_loop(
+                session,
+                session_id,
+                agent_response.tool_calls,
+                notifications,
+            )
+            
+            # Если нужен permission - прерываем loop
+            if loop_result.pending_permission:
+                logger.debug(
+                    "llm_loop deferred for permission",
+                    session_id=session_id,
+                    iteration=iteration,
+                )
+                return LLMLoopResult(
+                    notifications=notifications,
+                    stop_reason=None,  # Turn не завершен
+                    pending_permission=True,
+                    tool_results=loop_result.tool_results,
+                )
+            
+            # Если был cancel - прерываем
+            if self._is_cancel_requested(session):
+                logger.debug(
+                    "llm_loop cancelled during tool processing",
+                    session_id=session_id,
+                    iteration=iteration,
+                )
+                return LLMLoopResult(
+                    notifications=notifications,
+                    stop_reason="cancelled",
+                )
+            
+            # Подготовить tool_results для следующей итерации
+            tool_results = loop_result.tool_results
+        
+        # Достигнут лимит итераций
+        logger.warning(
+            "llm_loop max iterations reached",
+            session_id=session_id,
+            max_iterations=max_iterations,
+        )
+        return LLMLoopResult(
+            notifications=notifications,
+            stop_reason="max_iterations",
+            final_text=final_text,
+        )
+
+    def _is_cancel_requested(self, session: SessionState) -> bool:
+        """Проверяет, был ли запрошен cancel для текущего turn.
+        
+        Args:
+            session: Состояние сессии
+            
+        Returns:
+            True если cancel был запрошен
+        """
+        return (
+            session.active_turn is not None
+            and session.active_turn.cancel_requested
+        )
+
+    async def _process_tool_calls_for_llm_loop(
+        self,
+        session: SessionState,
+        session_id: str,
+        tool_calls: list[Any],
+        notifications: list[ACPMessage],
+    ) -> LLMLoopResult:
+        """Обработать tool_calls для LLM loop.
+        
+        Для каждого tool call:
+        1. Создать tool call state
+        2. Проверить decision (allow/reject/ask)
+        3. Если allow - выполнить и собрать результат
+        4. Если reject - добавить error result
+        5. Если ask - прервать loop для permission request
+        
+        Args:
+            session: Состояние сессии
+            session_id: ID сессии
+            tool_calls: Список tool_calls из AgentResponse
+            notifications: Список для накопления notifications
+            
+        Returns:
+            LLMLoopResult с tool_results и флагом pending_permission
+        """
+        tool_results: list[ToolResult] = []
+        
+        for tool_call in tool_calls:
+            # CHECK: cancel перед каждым tool
+            if self._is_cancel_requested(session):
+                logger.debug(
+                    "tool processing cancelled",
+                    session_id=session_id,
+                )
+                return LLMLoopResult(
+                    tool_results=tool_results,
+                    stop_reason="cancelled",
+                )
+            
+            tool_name = getattr(tool_call, "name", None)
+            tool_arguments = getattr(tool_call, "arguments", {})
+            tool_call_id_from_llm = getattr(tool_call, "id", None)
+            
+            if not tool_name:
+                logger.warning("tool_call has no name", session_id=session_id)
+                continue
+            
+            # Определить kind из ToolDefinition
+            tool_kind = "other"
+            tool_definition = self.tool_registry.get(tool_name)
+            if tool_definition is not None:
+                tool_kind = tool_definition.kind
+            
+            # Создать tool call в сессии
+            tool_call_id = self.tool_call_handler.create_tool_call(
+                session=session,
+                title=tool_name,
+                kind=tool_kind,
+                tool_name=tool_name,
+                tool_arguments=tool_arguments,
+            )
+            
+            # Notification о создании tool_call
+            notifications.append(
+                self.tool_call_handler.build_tool_call_notification(
+                    session_id=session_id,
+                    tool_call_id=tool_call_id,
+                    title=tool_name,
+                    kind=tool_kind,
+                )
+            )
+            
+            # Применить decision logic
+            decision = await self._decide_tool_execution(session, tool_kind)
+            
+            if decision == "ask":
+                # Запросить разрешение - прервать loop
+                tool_call_state = session.tool_calls.get(tool_call_id)
+                if tool_call_state is not None:
+                    permission_msg = self.permission_manager.build_permission_request(
+                        session,
+                        session_id,
+                        tool_call_state.tool_call_id,
+                        tool_call_state.title,
+                        tool_kind,
+                    )
+                    notifications.append(permission_msg)
+                    
+                    # Перейти в фазу awaiting_permission
+                    if session.active_turn:
+                        session.active_turn.phase = "awaiting_permission"
+                        session.active_turn.permission_tool_call_id = tool_call_id
+                
+                logger.debug(
+                    "permission request sent, pausing llm loop",
+                    session_id=session_id,
+                    tool_call_id=tool_call_id,
+                )
+                return LLMLoopResult(
+                    tool_results=tool_results,
+                    pending_permission=True,
+                )
+            
+            if decision == "reject":
+                # Отклонить tool
+                self.tool_call_handler.update_tool_call_status(session, tool_call_id, "failed")
+                rejection_msg = f"Tool execution rejected by policy for {tool_kind}"
+                notifications.append(
+                    self.tool_call_handler.build_tool_update_notification(
+                        session_id=session_id,
+                        tool_call_id=tool_call_id,
+                        status="failed",
+                        content=[
+                            {"type": "content", "content": {"type": "text", "text": rejection_msg}}
+                        ],
+                    )
+                )
+                # Добавить error result для LLM
+                tool_results.append(ToolResult(
+                    tool_call_id=tool_call_id_from_llm or tool_call_id,
+                    tool_name=tool_name,
+                    success=False,
+                    error=rejection_msg,
+                ))
+                continue
+            
+            # decision == "allow" - выполнить tool
+            try:
+                # Notification о начале выполнения
+                self.tool_call_handler.update_tool_call_status(session, tool_call_id, "in_progress")
+                notifications.append(
+                    self.tool_call_handler.build_tool_update_notification(
+                        session_id=session_id,
+                        tool_call_id=tool_call_id,
+                        status="in_progress",
+                    )
+                )
+                
+                # Выполнить tool
+                result = await self.tool_registry.execute_tool(
+                    session_id,
+                    tool_name,
+                    tool_arguments,
+                    session=session,
+                )
+                
+                # Извлечь content
+                extracted_content = await self.content_extractor.extract_from_result(
+                    tool_call_id, result
+                )
+                
+                # Валидировать content
+                is_valid, errors = self.content_validator.validate_content_list(
+                    extracted_content.content_items
+                )
+                if not is_valid:
+                    logger.warning(
+                        "tool_result_content_validation_failed",
+                        tool_call_id=tool_call_id,
+                        errors=errors,
+                    )
+                
+                # Сохранить content в tool call state
+                tool_call_state = session.tool_calls.get(tool_call_id)
+                if tool_call_state:
+                    tool_call_state.result_content = extracted_content.content_items
+                
+                # Форматировать для LLM
+                provider_raw = session.config_values.get("llm_provider", "openai")
+                provider = cast(Literal["openai", "anthropic"], provider_raw)
+                self.content_formatter.format_for_llm(extracted_content, provider=provider)
+                
+                # Обновить статус
+                if result.success:
+                    success_text = result.output or "Success"
+                    success_content = [
+                        {"type": "content", "content": {"type": "text", "text": success_text}}
+                    ]
+                    self.tool_call_handler.update_tool_call_status(
+                        session, tool_call_id, "completed", content=success_content,
+                    )
+                    status = "completed"
+                else:
+                    self.tool_call_handler.update_tool_call_status(session, tool_call_id, "failed")
+                    status = "failed"
+                
+                # Notification об окончании
+                notification_content = None
+                if result.success and result.output:
+                    notification_content = [
+                        {"type": "content", "content": {"type": "text", "text": result.output}}
+                    ]
+                
+                notifications.append(
+                    self.tool_call_handler.build_tool_update_notification(
+                        session_id=session_id,
+                        tool_call_id=tool_call_id,
+                        status=status,
+                        content=notification_content,
+                    )
+                )
+                
+                # Собрать ToolResult для LLM
+                tool_results.append(ToolResult(
+                    tool_call_id=tool_call_id_from_llm or tool_call_id,
+                    tool_name=tool_name,
+                    success=result.success,
+                    output=result.output if result.success else None,
+                    error=result.error if not result.success else None,
+                ))
+                
+            except Exception as e:
+                logger.error(
+                    "tool execution failed",
+                    session_id=session_id,
+                    tool_name=tool_name,
+                    error=str(e),
+                )
+                self.tool_call_handler.update_tool_call_status(session, tool_call_id, "failed")
+                notifications.append(
+                    self.tool_call_handler.build_tool_update_notification(
+                        session_id=session_id,
+                        tool_call_id=tool_call_id,
+                        status="failed",
+                    )
+                )
+                # Добавить error result для LLM
+                tool_results.append(ToolResult(
+                    tool_call_id=tool_call_id_from_llm or tool_call_id,
+                    tool_name=tool_name,
+                    success=False,
+                    error=str(e),
+                ))
+        
+        return LLMLoopResult(tool_results=tool_results)
 
     async def execute_pending_tool(
         self,

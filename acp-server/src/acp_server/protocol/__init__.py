@@ -8,12 +8,14 @@ from .session_factory import SessionFactory
 from .state import (
     ActiveTurnState,
     ClientRuntimeCapabilities,
+    LLMLoopResult,
     PendingClientRequestState,
     PreparedFsClientRequest,
     PromptDirectives,
     ProtocolOutcome,
     SessionState,
     ToolCallState,
+    ToolResult,
 )
 
 __all__ = [
@@ -27,4 +29,6 @@ __all__ = [
     "PendingClientRequestState",
     "PreparedFsClientRequest",
     "ClientRuntimeCapabilities",
+    "ToolResult",
+    "LLMLoopResult",
 ]
