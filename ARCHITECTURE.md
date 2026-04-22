@@ -169,6 +169,13 @@ graph TB
         Queues["RoutingQueues<br/>Распределение"]
         EventBus["EventBus<br/>Pub/Sub система"]
         DI["DIContainer<br/>Dependency Injection"]
+        
+        subgraph AgentRPC["Agent → Client RPC"]
+            FSHandler["FileSystemHandler"]
+            TermHandler["TerminalHandler"]
+            FSExec["FileSystemExecutor"]
+            TermExec["TerminalExecutor"]
+        end
     end
     
     subgraph Domain["Domain Layer"]
@@ -197,6 +204,11 @@ graph TB
     BgLoop --> Router
     Router --> Queues
     Queues --> EventBus
+    
+    Router --> FSHandler
+    Router --> TermHandler
+    FSHandler --> FSExec
+    TermHandler --> TermExec
     
     EventBus --> Entities
     EventBus --> Events
