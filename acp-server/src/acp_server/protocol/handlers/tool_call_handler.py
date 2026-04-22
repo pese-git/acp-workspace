@@ -85,6 +85,7 @@ class ToolCallHandler:
         kind: str,
         tool_name: str | None = None,
         tool_arguments: dict[str, Any] | None = None,
+        tool_call_id_from_llm: str | None = None,
     ) -> str:
         """Создает новый tool call, возвращает его ID.
 
@@ -98,6 +99,7 @@ class ToolCallHandler:
                 think, fetch, switch_mode, other)
             tool_name: Имя инструмента в реестре для отложенного выполнения
             tool_arguments: Аргументы для выполнения инструмента
+            tool_call_id_from_llm: ID tool call из ответа LLM (для связки в истории)
 
         Returns:
             ID вида "call_NNN" (e.g., "call_001", "call_002")
@@ -112,6 +114,7 @@ class ToolCallHandler:
             status="pending",
             tool_name=tool_name,
             tool_arguments=tool_arguments or {},
+            tool_call_id_from_llm=tool_call_id_from_llm,
         )
         return tool_call_id
 

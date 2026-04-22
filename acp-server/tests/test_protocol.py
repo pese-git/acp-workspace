@@ -671,8 +671,10 @@ async def test_runtime_capabilities_are_session_scoped_after_reinitialize() -> N
                 },
             )
         )
-        assert len(permission_result.followup_responses) == 1
-        assert permission_result.followup_responses[0].result == {"stopReason": "end_turn"}
+        # После permission approval возвращается pending_tool_execution
+        # (tool execution и LLM loop выполняются асинхронно в http_server.py)
+        assert permission_result.pending_tool_execution is not None
+        assert permission_result.pending_tool_execution.tool_call_id == "call_001"
     else:
         assert first_prompt.response.result == {"stopReason": "end_turn"}
 

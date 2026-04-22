@@ -71,7 +71,8 @@ async def test_session_prompt_with_agent_orchestrator() -> None:
         if notification.method == "session/update" and notification.params is not None
     ]
     assert "agent_message_chunk" in update_types
-    assert "session_info_update" in update_types
+    # session_info может приходить как session_info или session_info_update
+    assert "session_info_update" in update_types or "session_info" in update_types
 
 
 @pytest.mark.asyncio

@@ -23,6 +23,7 @@ from .handlers import (
 from .session_factory import SessionFactory
 from .state import (
     ClientRuntimeCapabilities,
+    LLMLoopResult,
     ProtocolOutcome,
     SessionState,
 )
@@ -712,18 +713,20 @@ class ACPProtocol:
         self,
         session_id: str,
         tool_call_id: str,
-    ) -> list[ACPMessage]:
-        """Выполняет pending tool после permission approval.
+    ) -> LLMLoopResult:
+        """Выполняет pending tool после permission approval и продолжает LLM loop.
         
         Вызывается из http_server.py после того как permission был одобрен.
         Создаёт PromptOrchestrator и делегирует ему выполнение.
+        Согласно ACP протоколу (05-Prompt Turn.md, Step 6), после выполнения
+        инструмента результат передаётся LLM для продолжения диалога.
         
         Args:
             session_id: ID сессии
             tool_call_id: ID tool call для выполнения
             
         Returns:
-            Список notifications для отправки клиенту
+            LLMLoopResult с notifications, stop_reason и pending_permission флагом
         """
         session = self._sessions.get(session_id)
         if session is None:
@@ -732,7 +735,16 @@ class ACPProtocol:
                 session_id=session_id,
                 tool_call_id=tool_call_id,
             )
-            return []
+            return LLMLoopResult(notifications=[], stop_reason="end_turn")
+        
+        # Проверить наличие agent_orchestrator для LLM loop
+        if self._agent_orchestrator is None:
+            logger.error(
+                "agent_orchestrator not configured for LLM loop",
+                session_id=session_id,
+                tool_call_id=tool_call_id,
+            )
+            return LLMLoopResult(notifications=[], stop_reason="end_turn")
         
         # Создать PromptOrchestrator с зависимостями
         orchestrator = prompt.create_prompt_orchestrator(
@@ -745,4 +757,5 @@ class ACPProtocol:
             session=session,
             session_id=session_id,
             tool_call_id=tool_call_id,
+            agent_orchestrator=self._agent_orchestrator,
         )

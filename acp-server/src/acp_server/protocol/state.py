@@ -96,6 +96,9 @@ class ToolCallState:
     tool_name: str | None = None
     # Аргументы для выполнения инструмента (для отложенного выполнения после permission).
     tool_arguments: dict[str, Any] = field(default_factory=dict)
+    # Идентификатор tool_call из LLM ответа (для связки в истории диалога).
+    # Может отличаться от tool_call_id, который генерируется нами.
+    tool_call_id_from_llm: str | None = None
 
 
 @dataclass(slots=True)

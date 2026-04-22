@@ -1131,6 +1131,7 @@ class PromptOrchestrator:
                 kind=tool_kind,
                 tool_name=tool_name,
                 tool_arguments=tool_arguments,
+                tool_call_id_from_llm=tool_call_id_from_llm,
             )
             
             # Notification о создании tool_call
@@ -1312,24 +1313,28 @@ class PromptOrchestrator:
         session: SessionState,
         session_id: str,
         tool_call_id: str,
-    ) -> list[ACPMessage]:
-        """Выполняет pending tool после permission approval.
+        agent_orchestrator: AgentOrchestrator,
+    ) -> LLMLoopResult:
+        """Выполняет pending tool после permission approval и продолжает LLM loop.
         
         Этот метод вызывается из http_server.py когда permission был одобрен.
-        Согласно ACP протоколу (Tool Calls + File System):
+        Согласно ACP протоколу (05-Prompt Turn.md, Step 6 - Continue Conversation):
         1. Получает данные tool call из сессии
         2. Выполняет tool через tool_registry (который вызывает ClientRPC fs/*)
         3. Отправляет tool_call_update с completed/failed статусом
+        4. Продолжает LLM loop с результатами инструмента
         
         Args:
             session: Состояние сессии
             session_id: ID сессии
             tool_call_id: ID tool call для выполнения
+            agent_orchestrator: Оркестратор агента для LLM loop
             
         Returns:
-            Список notifications (tool_call_update) для отправки клиенту
+            LLMLoopResult с notifications, stop_reason и pending_permission флагом
         """
         notifications: list[ACPMessage] = []
+        tool_result: ToolResult | None = None
         
         # Получить tool call state
         tool_call_state = session.tool_calls.get(tool_call_id)
@@ -1339,10 +1344,15 @@ class PromptOrchestrator:
                 session_id=session_id,
                 tool_call_id=tool_call_id,
             )
-            return notifications
+            return LLMLoopResult(
+                notifications=notifications,
+                stop_reason="end_turn",
+            )
         
         tool_name = tool_call_state.tool_name
         tool_arguments = tool_call_state.tool_arguments
+        # Получить tool_call_id из LLM (если есть) для правильной связки в истории
+        tool_call_id_from_llm = tool_call_state.tool_call_id_from_llm
         
         if tool_name is None:
             logger.error(
@@ -1350,7 +1360,10 @@ class PromptOrchestrator:
                 session_id=session_id,
                 tool_call_id=tool_call_id,
             )
-            return notifications
+            return LLMLoopResult(
+                notifications=notifications,
+                stop_reason="end_turn",
+            )
         
         logger.info(
             "executing pending tool after permission approval",
@@ -1374,12 +1387,12 @@ class PromptOrchestrator:
             )
             tool_call_state.result_content = extracted_content.content_items
             
-            # Форматировать для LLM (Фаза 3 будет использовать это)
+            # Форматировать для LLM
             provider_raw = session.config_values.get("llm_provider", "openai")
             provider = cast(Literal["openai", "anthropic"], provider_raw)
             self.content_formatter.format_for_llm(extracted_content, provider=provider)
             
-            # Сформировать content для notification
+            # Сформировать content для notification и ToolResult
             if result.success:
                 completed_content = [
                     {
@@ -1401,6 +1414,13 @@ class PromptOrchestrator:
                         content=completed_content,
                     )
                 )
+                # Создать ToolResult для LLM loop
+                tool_result = ToolResult(
+                    tool_call_id=tool_call_id_from_llm or tool_call_id,
+                    tool_name=tool_name,
+                    success=True,
+                    output=result.output,
+                )
             else:
                 error_content = [
                     {
@@ -1421,6 +1441,13 @@ class PromptOrchestrator:
                         status="failed",
                         content=error_content,
                     )
+                )
+                # Создать ToolResult с ошибкой для LLM loop
+                tool_result = ToolResult(
+                    tool_call_id=tool_call_id_from_llm or tool_call_id,
+                    tool_name=tool_name,
+                    success=False,
+                    error=result.error,
                 )
                 
         except Exception as exc:
@@ -1452,8 +1479,50 @@ class PromptOrchestrator:
                     content=error_content,
                 )
             )
+            # Создать ToolResult с exception для LLM loop
+            tool_result = ToolResult(
+                tool_call_id=tool_call_id_from_llm or tool_call_id,
+                tool_name=tool_name,
+                success=False,
+                error=str(exc),
+            )
         
-        return notifications
+        # Продолжить LLM loop с результатом выполненного tool
+        # (согласно ACP протоколу 05-Prompt Turn.md, Step 6 - Continue Conversation)
+        if tool_result is not None:
+            logger.info(
+                "continuing LLM loop after pending tool execution",
+                session_id=session_id,
+                tool_call_id=tool_call_id,
+                tool_success=tool_result.success,
+            )
+            
+            # Запустить LLM loop с результатом инструмента
+            llm_loop_result = await self._run_llm_loop(
+                session=session,
+                session_id=session_id,
+                agent_orchestrator=agent_orchestrator,
+                initial_prompt_text="",  # Не нужен текст - используем tool_results
+                tool_results=[tool_result],
+            )
+            
+            # Объединить notifications
+            all_notifications = notifications + llm_loop_result.notifications
+            
+            return LLMLoopResult(
+                notifications=all_notifications,
+                stop_reason=llm_loop_result.stop_reason,
+                final_text=llm_loop_result.final_text,
+                pending_permission=llm_loop_result.pending_permission,
+                pending_tool_calls=llm_loop_result.pending_tool_calls,
+                tool_results=llm_loop_result.tool_results,
+            )
+        
+        # Если tool_result не создан (не должно происходить), завершить turn
+        return LLMLoopResult(
+            notifications=notifications,
+            stop_reason="end_turn",
+        )
 
 
 def _extract_text_preview(prompt: list[dict[str, Any]]) -> str:

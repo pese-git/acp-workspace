@@ -375,31 +375,50 @@ class ACPHttpServer:
                 )
 
                 async def _execute_tool_in_background() -> None:
-                    """Background task для выполнения tool после permission."""
+                    """Background task для выполнения tool после permission.
+                    
+                    Согласно ACP протоколу (05-Prompt Turn.md, Step 6 - Continue Conversation):
+                    После выполнения tool результат передаётся LLM для продолжения диалога.
+                    LLM loop продолжается пока LLM не вернёт ответ без tool calls
+                    или пока не потребуется ещё permission (pending_permission=True).
+                    """
                     try:
-                        tool_notifications = await protocol.execute_pending_tool(
+                        # execute_pending_tool возвращает LLMLoopResult с продолжением LLM loop
+                        llm_result = await protocol.execute_pending_tool(
                             session_id=pending.session_id,
                             tool_call_id=pending.tool_call_id,
                         )
-                        # Отправить notifications о результате выполнения
+                        
+                        # Отправить все notifications из LLM loop
                         async with ws_send_lock:
-                            for notification in tool_notifications:
+                            for notification in llm_result.notifications:
                                 if not ws.closed:
                                     await ws.send_str(notification.to_json())
                                     conn_logger.debug(
-                                        "tool execution notification sent",
+                                        "llm loop notification sent",
                                         method=notification.method,
                                     )
 
-                            # Завершить turn после выполнения tool
+                            # Если есть pending_permission - не завершаем turn
+                            # (turn остаётся в состоянии awaiting_permission)
+                            if llm_result.pending_permission:
+                                conn_logger.debug(
+                                    "llm loop deferred for permission",
+                                    session_id=pending.session_id,
+                                )
+                                return
+                            
+                            # Завершить turn с stop_reason из LLM loop
+                            stop_reason = llm_result.stop_reason or "end_turn"
                             turn_completion = protocol.complete_active_turn(
-                                pending.session_id, stop_reason="end_turn"
+                                pending.session_id, stop_reason=stop_reason
                             )
                             if turn_completion is not None and not ws.closed:
                                 await ws.send_str(turn_completion.to_json())
                                 conn_logger.debug(
-                                    "turn completion sent after tool execution",
+                                    "turn completion sent after llm loop",
                                     session_id=pending.session_id,
+                                    stop_reason=stop_reason,
                                 )
                     except Exception as exc:
                         conn_logger.error(
