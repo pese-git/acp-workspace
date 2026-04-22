@@ -104,5 +104,9 @@ class MessageRouter:
         )
 
     def is_permission_request(self, message: dict[str, Any]) -> bool:
-        """Проверяет, это запрос разрешения."""
-        return message.get("id") is None and message.get("method") == "session/request_permission"
+        """Проверяет, это запрос разрешения.
+
+        Примечание: session/request_permission - это JSON-RPC request с id,
+        отправляемый сервером клиенту и ожидающий response.
+        """
+        return message.get("method") == "session/request_permission"
