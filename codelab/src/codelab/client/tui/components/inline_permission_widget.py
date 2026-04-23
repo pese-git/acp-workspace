@@ -14,7 +14,7 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal
 from textual.widgets import Button, Static
 
-from codelab.shared.messages import PermissionOption, PermissionToolCall
+from codelab.client.messages import PermissionOption, PermissionToolCall
 
 if TYPE_CHECKING:
     from codelab.client.presentation.permission_view_model import PermissionViewModel

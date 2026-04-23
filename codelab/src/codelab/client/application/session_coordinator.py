@@ -12,7 +12,7 @@ from typing import Any
 
 from codelab.client.domain import SessionRepository, TransportService
 from codelab.client.infrastructure.logging_config import get_logger
-from codelab.shared.messages import (
+from codelab.client.messages import (
     CancelledPermissionOutcome,
     PermissionOption,
     PermissionOutcome,

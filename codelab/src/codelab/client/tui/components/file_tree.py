@@ -12,7 +12,7 @@ from rich.text import Text
 from textual.message import Message
 from textual.widget import AwaitRemove
 from textual.widgets import DirectoryTree
-from textual.widgets.directory_tree import DirEntry
+from textual.widgets._directory_tree import DirEntry
 from textual.widgets.tree import TreeNode
 
 if TYPE_CHECKING:

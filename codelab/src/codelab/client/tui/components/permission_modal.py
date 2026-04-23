@@ -11,7 +11,7 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Static
 
-from codelab.shared.messages import PermissionOption
+from codelab.client.messages import PermissionOption
 
 if TYPE_CHECKING:
     from codelab.client.presentation.permission_view_model import PermissionViewModel

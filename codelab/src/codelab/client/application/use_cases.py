@@ -80,7 +80,7 @@ class InitializeUseCase(UseCase):
             self._logger.info("connected_to_server")
 
             # Отправляем initialize запрос к серверу согласно протоколу ACP
-            from codelab.shared.messages import ACPMessage
+            from codelab.client.messages import ACPMessage
 
             # Формируем параметры инициализации согласно требованиям протокола ACP
             # protocolVersion - обязательный параметр
@@ -202,7 +202,7 @@ class CreateSessionUseCase(UseCase):
         )
 
         try:
-            from codelab.shared.messages import ACPMessage
+            from codelab.client.messages import ACPMessage
 
             # Проверка инициализации транспорта
             if not self._transport.is_initialized():
@@ -418,7 +418,7 @@ class LoadSessionUseCase(UseCase):
             on_update=handle_update,
         )
 
-        from codelab.shared.messages import ACPMessage, parse_session_setup_result
+        from codelab.client.messages import ACPMessage, parse_session_setup_result
 
         parsed_response = ACPMessage.from_dict(response_data)
         # Проверяем, что сервер вернул валидный setup-result для session/load.
@@ -570,7 +570,7 @@ class SendPromptUseCase(UseCase):
             )
 
             # Проверяем ошибки в ответе
-            from codelab.shared.messages import ACPMessage
+            from codelab.client.messages import ACPMessage
 
             response = ACPMessage.from_dict(prompt_response)
 
@@ -659,7 +659,7 @@ class ListSessionsUseCase(UseCase):
             params={},
         )
 
-        from codelab.shared.messages import ACPMessage, parse_session_list_result
+        from codelab.client.messages import ACPMessage, parse_session_list_result
 
         parsed_response = ACPMessage.from_dict(response_data)
         parsed_result = parse_session_list_result(parsed_response)

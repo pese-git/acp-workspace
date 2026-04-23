@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
-from codelab.shared.messages import (
+from codelab.client.messages import (
     ACPMessage,
     CancelledPermissionOutcome,
     JsonRpcId,
@@ -461,7 +461,7 @@ class PermissionHandler:
             PermissionOutcome с результатом выбора пользователя
 
         Пример:
-            from codelab.shared.messages import parse_request_permission_request
+            from codelab.client.messages import parse_request_permission_request
             
             raw_message = {
                 "jsonrpc": "2.0",

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 from rich.text import Text
 from textual.widgets import Static
 
-from codelab.shared.messages import ToolCallUpdate
+from codelab.client.messages import ToolCallUpdate
 
 from .terminal_output import TerminalOutputPanel
 

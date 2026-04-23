@@ -13,7 +13,7 @@ from typing import Any
 
 import structlog
 
-from codelab.shared.messages import JsonRpcId
+from codelab.client.messages import JsonRpcId
 
 
 class RoutingQueues:

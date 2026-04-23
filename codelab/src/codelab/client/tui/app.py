@@ -29,7 +29,7 @@ from codelab.client.presentation.terminal_log_view_model import TerminalLogViewM
 from codelab.client.presentation.terminal_view_model import TerminalViewModel
 from codelab.client.presentation.ui_view_model import ConnectionStatus, SidebarTab, UIViewModel
 from codelab.client.tui.navigation import NavigationManager
-from codelab.shared.messages import PermissionOption, PermissionToolCall
+from codelab.client.messages import PermissionOption, PermissionToolCall
 
 from .components import (
     ChatView,

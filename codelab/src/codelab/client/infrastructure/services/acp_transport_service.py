@@ -31,7 +31,7 @@ from codelab.client.infrastructure.services.background_receive_loop import (
 from codelab.client.infrastructure.services.message_router import MessageRouter
 from codelab.client.infrastructure.services.routing_queues import RoutingQueues
 from codelab.client.infrastructure.transport import WebSocketTransport
-from codelab.shared.messages import ACPMessage, RequestPermissionRequest
+from codelab.client.messages import ACPMessage, RequestPermissionRequest
 
 if TYPE_CHECKING:
     from codelab.client.application.permission_handler import PermissionHandler

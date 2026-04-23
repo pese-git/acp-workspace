@@ -18,7 +18,7 @@ from textual.app import ComposeResult
 from textual.containers import Container, VerticalScroll
 from textual.widgets import Static
 
-from codelab.shared.messages import PermissionOption, PermissionToolCall
+from codelab.client.messages import PermissionOption, PermissionToolCall
 
 if TYPE_CHECKING:
     from codelab.client.presentation.chat_view_model import ChatViewModel

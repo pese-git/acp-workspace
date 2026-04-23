@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from textual.widgets import Static
 
-from codelab.shared.messages import PlanUpdate
+from codelab.client.messages import PlanUpdate
 
 if TYPE_CHECKING:
     from codelab.client.presentation.plan_view_model import PlanViewModel
