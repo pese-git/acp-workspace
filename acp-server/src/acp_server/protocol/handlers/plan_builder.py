@@ -61,7 +61,7 @@ class PlanBuilder:
 
         normalized_entries: list[dict[str, str]] = []
         allowed_priorities = {"low", "medium", "high"}
-        allowed_statuses = {"pending", "in_progress", "completed", "cancelled"}
+        allowed_statuses = {"pending", "in_progress", "completed"}
 
         for entry in raw_entries:
             if not isinstance(entry, dict):
@@ -89,17 +89,11 @@ class PlanBuilder:
             if status not in allowed_statuses:
                 status = "pending"
 
-            # Нормализуем description (опциональное поле)
-            description = entry.get("description", "")
-            if not isinstance(description, str):
-                description = ""
-
             normalized_entries.append(
                 {
                     "content": content.strip(),
                     "priority": priority,
                     "status": status,
-                    "description": description.strip(),
                 }
             )
 
@@ -126,30 +120,26 @@ class PlanBuilder:
     ) -> ACPMessage:
         """Строит session/update notification с планом.
 
+        Формат соответствует протоколу ACP (Agent Client Protocol):
+        - sessionUpdate: "plan"
+        - entries: список {content, priority, status}
+
         Args:
             session_id: ID сессии
             plan_entries: Нормализованные entries с content, priority, status
 
         Returns:
-            ACPMessage с типом session/update и planUpdate
+            ACPMessage с типом session/update и plan
         """
-        # Преобразуем entries в формат для notification
-        # Отправляем в формате title + description для клиента
-        formatted_entries = [
-            {
-                "title": entry.get("content", ""),
-                "description": entry.get("description", ""),
-            }
-            for entry in plan_entries
-        ]
-
+        # Используем entries напрямую — они уже в правильном формате ACP
+        # {content, priority, status}
         notification = ACPMessage.notification(
             "session/update",
             {
                 "sessionId": session_id,
                 "update": {
-                    "sessionUpdate": "planUpdate",
-                    "plan": formatted_entries,
+                    "sessionUpdate": "plan",
+                    "entries": plan_entries,
                 },
             },
         )
@@ -157,7 +147,7 @@ class PlanBuilder:
         logger.debug(
             "plan notification built",
             session_id=session_id,
-            plan_entries_count=len(formatted_entries),
+            plan_entries_count=len(plan_entries),
         )
         return notification
 
@@ -243,7 +233,7 @@ def _validate_entry_structure(entry: Any) -> bool:
         return False
 
     # Требуем хотя бы content или title
-    has_title = ("content" in entry or "title" in entry)
+    has_title = "content" in entry or "title" in entry
     if not has_title:
         return False
 

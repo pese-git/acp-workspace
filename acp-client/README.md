@@ -49,6 +49,9 @@ acp-client-tui
 ```bash
 # Запуск TUI через CLI entrypoint
 uv run acp-client --host 127.0.0.1 --port 8000
+
+# Запуск с кастомной директорией истории
+uv run acp-client --host 127.0.0.1 --port 8000 --history-dir ./data/client-history
 ```
 
 ## 🏗️ Архитектура
@@ -139,6 +142,82 @@ acp-client/
 ├── pyproject.toml                 # Зависимости и метаданные
 └── README.md                      # Этот файл
 ```
+
+## Content Types
+
+Клиент поддерживает полный спектр Content типов согласно ACP спецификации:
+
+- **TextContent** - текстовые сообщения
+- **ImageContent** - изображения (base64, PNG, JPEG, GIF, WebP)
+- **AudioContent** - аудиоданные (base64, WAV, MP3, MPEG)
+- **EmbeddedResourceContent** - встроенные ресурсы
+- **ResourceLinkContent** - ссылки на ресурсы
+
+Реализация находится в `src/acp_client/domain/content/` и полностью совместима с серверной реализацией.
+
+Подробнее см. [`doc/architecture/CONTENT_TYPES_ARCHITECTURE.md`](../doc/architecture/CONTENT_TYPES_ARCHITECTURE.md)
+
+## Обработка запросов от агента
+
+Клиент обрабатывает RPC запросы от агента для выполнения операций в локальной среде пользователя.
+
+### File System Handler
+
+Обработка файловых операций:
+
+- **`fs/read_text_file`** — чтение текстовых файлов с поддержкой диапазонов строк
+  - Безопасное чтение с валидацией пути
+  - Защита от path traversal атак
+  - Поддержка start_line и end_line для чтения части файла
+
+- **`fs/write_text_file`** — запись текстовых файлов с контролем создания
+  - Валидация пути и контроля создания новых файлов
+  - Sandbox режим с base_path
+  - Поддержка флагов create и overwrite
+
+**Реализация:**
+- [`FileSystemHandler`](src/acp_client/infrastructure/handlers/file_system_handler.py) — обработчик запросов
+- [`FileSystemExecutor`](src/acp_client/infrastructure/services/file_system_executor.py) — исполнитель операций
+- Асинхронные операции через `aiofiles` для неблокирующего I/O
+
+### Terminal Handler
+
+Управление терминальными процессами:
+
+- **`terminal/create`** — создание терминала и запуск команды
+  - Запуск subprocess с контролем окружения
+  - Поддержка аргументов и рабочей директории
+  - Автоматическая буферизация output
+
+- **`terminal/output`** — получение output терминала
+  - Чтение буферизованного output с лимитом размера
+  - Поддержка skip_bytes для пагинации
+
+- **`terminal/wait_for_exit`** — ожидание завершения процесса
+  - Асинхронное ожидание с таймаутом
+  - Возврат exit code при завершении
+
+- **`terminal/kill`** — принудительное завершение процесса
+  - Отправка сигнала SIGTERM/SIGKILL
+  - Очистка ресурсов процесса
+
+- **`terminal/release`** — освобождение ресурсов терминала
+  - Закрытие потоков ввода/вывода
+  - Удаление из трекера активных терминалов
+
+**Реализация:**
+- [`TerminalHandler`](src/acp_client/infrastructure/handlers/terminal_handler.py) — обработчик запросов
+- [`TerminalExecutor`](src/acp_client/infrastructure/services/terminal_executor.py) — исполнитель операций
+- Жизненный цикл терминала: CREATED → RUNNING → EXITED → RELEASED
+
+### Безопасность
+
+- **Защита от path traversal** — валидация всех путей файлов
+- **Sandbox режим** — ограничение доступа к файлам в пределах base_path
+- **Валидация параметров** — проверка всех входящих параметров
+- **Логирование операций** — structured logging всех операций
+
+Подробнее см. [`doc/architecture/CLIENT_METHODS_ARCHITECTURE.md`](../doc/architecture/CLIENT_METHODS_ARCHITECTURE.md)
 
 ## 🎯 Основные возможности
 
@@ -264,6 +343,28 @@ python -m acp_client.tui --log-level DEBUG
 # JSON логи для production
 python -m acp_client.tui --log-json
 ```
+
+Для диагностики зависаний tool lifecycle добавлены trace-события (уровень `DEBUG`):
+- `tool_lifecycle_notification_received` — клиент получил server->client RPC/notification
+- `tool_lifecycle_rpc_received` — распознан конкретный tool RPC (`fs/*`, `terminal/*`)
+- `tool_lifecycle_callback_start` / `tool_lifecycle_callback_done` — старт/завершение локального callback
+- `tool_lifecycle_response_sending` / `tool_lifecycle_response_sent` — отправка ответа серверу
+- `tool_lifecycle_notification_failed` — ошибка в обработке callback (ключевой сигнал места «затыка»)
+
+## 🗂️ Локальная история чата
+
+Клиент сохраняет локальный кэш истории по умолчанию в `~/.acp-client/history`.
+
+Путь можно переопределить через переменную окружения `ACP_CLIENT_HISTORY_DIR`:
+
+```bash
+export ACP_CLIENT_HISTORY_DIR=./data/client-history
+uv run acp-client --host 127.0.0.1 --port 8000
+```
+
+Также путь можно задать через флаг CLI `--history-dir` (`acp-client` и `acp-client-tui`).
+
+Приоритет путей: `--history-dir`/`history_dir` в коде → `ACP_CLIENT_HISTORY_DIR` → `~/.acp-client/history`.
 
 ## 📋 Требования
 

@@ -20,9 +20,7 @@ class TestSessionCleanup:
         """Проверяет, что активный turn обнуляется при очистке."""
         # Arrange
         session = SessionState(session_id="sess_1", cwd="/tmp", mcp_servers=[])
-        session.active_turn = ActiveTurnState(
-            prompt_request_id="req_1", session_id="sess_1"
-        )
+        session.active_turn = ActiveTurnState(prompt_request_id="req_1", session_id="sess_1")
 
         # Act
         _cleanup_session_state(session)
@@ -34,9 +32,7 @@ class TestSessionCleanup:
         """Проверяет, что active turn отмечается как cancelled перед очисткой."""
         # Arrange
         session = SessionState(session_id="sess_1", cwd="/tmp", mcp_servers=[])
-        active_turn = ActiveTurnState(
-            prompt_request_id="req_1", session_id="sess_1"
-        )
+        active_turn = ActiveTurnState(prompt_request_id="req_1", session_id="sess_1")
         session.active_turn = active_turn
 
         # Act
@@ -176,7 +172,7 @@ class TestSessionCleanup:
         session = SessionState(session_id="sess_1", cwd="/tmp", mcp_servers=[])
         session.cancelled_permission_requests.add("old_perm_1")
         session.cancelled_client_rpc_requests.add("old_rpc_1")
-        
+
         session.active_turn = ActiveTurnState(
             prompt_request_id="req_1",
             session_id="sess_1",
@@ -203,7 +199,7 @@ class TestSessionCleanup:
         """Полный сценарий очистки с активным turn и multiple tool calls."""
         # Arrange
         session = SessionState(session_id="sess_1", cwd="/tmp", mcp_servers=[])
-        
+
         # Добавляем несколько tool calls в разных состояниях
         session.tool_calls = {
             "call_pending_1": ToolCallState(
@@ -225,7 +221,7 @@ class TestSessionCleanup:
                 status="completed",
             ),
         }
-        
+
         # Активный turn с permission и RPC requests
         pending_request = PendingClientRequestState(
             request_id="rpc_req_1",
@@ -250,14 +246,14 @@ class TestSessionCleanup:
         # Assert
         # Active turn должен быть очищен
         assert session.active_turn is None
-        
+
         # Все pending tool calls должны быть отмечены как cancelled
         assert session.tool_calls["call_pending_1"].status == "cancelled"
         assert session.tool_calls["call_pending_2"].status == "cancelled"
-        
+
         # Completed остается без изменений
         assert session.tool_calls["call_completed"].status == "completed"
-        
+
         # Cancelled requests должны быть зафиксированы
         assert "perm_req_1" in session.cancelled_permission_requests
         assert "rpc_req_1" in session.cancelled_client_rpc_requests

@@ -2,10 +2,13 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from acp_server.llm.base import LLMMessage, LLMProvider, LLMToolCall
 from acp_server.tools.base import ToolDefinition, ToolRegistry
+
+if TYPE_CHECKING:
+    from acp_server.protocol.state import SessionState
 
 
 @dataclass
@@ -13,6 +16,7 @@ class AgentContext:
     """Контекст выполнения агента для одного prompt turn."""
 
     session_id: str
+    session: "SessionState"  # Состояние сессии для выполнения инструментов
     prompt: list[dict[str, Any]]  # Содержимое prompt от пользователя
     conversation_history: list[LLMMessage]  # История сообщений для LLM
     available_tools: list[ToolDefinition]  # Инструменты для этого turn
@@ -21,12 +25,25 @@ class AgentContext:
 
 @dataclass
 class AgentResponse:
-    """Ответ агента после обработки prompt."""
+    """Ответ агента после обработки prompt.
+    
+    Attributes:
+        text: Текстовый ответ агента
+        tool_calls: Список вызовов инструментов
+        stop_reason: Причина остановки ("end_turn", "tool_use", "max_tokens", "error")
+        metadata: Дополнительные метаданные
+        plan: План выполнения задач (опционально). Список словарей с полями:
+            - content: Описание задачи
+            - priority: "low" | "medium" | "high"
+            - status: "pending" | "in_progress" | "completed" | "cancelled"
+            - description: Детальное описание (опционально)
+    """
 
     text: str
     tool_calls: list[LLMToolCall]
     stop_reason: str  # "end_turn", "tool_use", "max_tokens", "error"
     metadata: dict[str, Any] = field(default_factory=dict)
+    plan: list[dict[str, str]] | None = None  # План выполнения задач
 
 
 class LLMAgent(ABC):

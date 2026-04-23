@@ -136,9 +136,7 @@ async def test_ws_prompt_with_tool_call_roundtrip() -> None:
                     # Проверяем наличие tool_call notification
                     if (
                         payload.get("method") == "session/update"
-                        and payload.get("params", {})
-                        .get("update", {})
-                        .get("sessionUpdate")
+                        and payload.get("params", {}).get("update", {}).get("sessionUpdate")
                         == "tool_call"
                     ):
                         tool_call_seen = True
@@ -169,12 +167,8 @@ async def test_ws_prompt_with_tool_call_roundtrip() -> None:
 
                 # Все ожидаемые этапы должны быть пройдены
                 assert tool_call_seen, "Tool call notification не найдена"
-                assert (
-                    permission_request_seen
-                ), "Permission request notification не найдена"
-                assert (
-                    prompt_response_received
-                ), "Финальный response на session/prompt не получен"
+                assert permission_request_seen, "Permission request notification не найдена"
+                assert prompt_response_received, "Финальный response на session/prompt не получен"
 
             finally:
                 await ws.close()
@@ -325,9 +319,7 @@ async def test_ws_client_rpc_request_response_roundtrip() -> None:
                         "method": "session/prompt",
                         "params": {
                             "sessionId": session_id,
-                            "prompt": [
-                                {"type": "text", "text": "/fs-read /tmp/test.txt"}
-                            ],
+                            "prompt": [{"type": "text", "text": "/fs-read /tmp/test.txt"}],
                         },
                     }
                 )
@@ -365,9 +357,7 @@ async def test_ws_client_rpc_request_response_roundtrip() -> None:
                         break
 
                 # Проверяем, что получили финальный response
-                assert (
-                    prompt_response_received
-                ), "Финальный response на session/prompt не получен"
+                assert prompt_response_received, "Финальный response на session/prompt не получен"
 
                 # Если RPC был запрошен, это подтверждает работу client RPC
                 # Если нет - тест все равно проходит (сервер может не поддерживать /fs-read)
@@ -464,9 +454,7 @@ async def test_ws_rapid_prompts_no_deadlock() -> None:
                 prompt_responses_received = 0
                 for _ in range(50):
                     try:
-                        payload = await asyncio.wait_for(
-                            ws.receive_json(), timeout=0.5
-                        )
+                        payload = await asyncio.wait_for(ws.receive_json(), timeout=0.5)
                         # Считаем финальные responses на session/prompt
                         if payload.get("id") and payload["id"].startswith("prompt_"):
                             prompt_responses_received += 1
@@ -477,9 +465,9 @@ async def test_ws_rapid_prompts_no_deadlock() -> None:
                         break
 
                 # Должны были получить все 5 responses
-                assert (
-                    prompt_responses_received == 5
-                ), f"Получено {prompt_responses_received}/5 responses на prompts"
+                assert prompt_responses_received == 5, (
+                    f"Получено {prompt_responses_received}/5 responses на prompts"
+                )
 
             finally:
                 await ws.close()
@@ -535,18 +523,16 @@ async def test_ws_message_ordering_notifications_before_response() -> None:
 
                 # Проверяем, что есть session/update notifications перед response
                 update_notifications = [
-                    msg
-                    for msg in messages_received
-                    if msg.get("method") == "session/update"
+                    msg for msg in messages_received if msg.get("method") == "session/update"
                 ]
-                assert (
-                    len(update_notifications) > 0
-                ), "Нет session/update notifications перед response"
+                assert len(update_notifications) > 0, (
+                    "Нет session/update notifications перед response"
+                )
 
                 # Проверяем, что response пришел последним
-                assert (
-                    messages_received[-1].get("id") == "prompt_1"
-                ), "Response должен быть последним сообщением"
+                assert messages_received[-1].get("id") == "prompt_1", (
+                    "Response должен быть последним сообщением"
+                )
 
             finally:
                 await ws.close()

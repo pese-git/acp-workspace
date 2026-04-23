@@ -6,6 +6,400 @@
 
 ## [Unreleased]
 
+### Added
+- **MCP Integration (Stage 8)**: Поддержка Model Context Protocol
+  - Модуль `acp-server/src/acp_server/mcp/` с компонентами:
+    - [`models.py`](acp-server/src/acp_server/mcp/models.py) — Pydantic модели MCP протокола
+    - [`transport.py`](acp-server/src/acp_server/mcp/transport.py) — StdioTransport для запуска MCP серверов
+    - [`client.py`](acp-server/src/acp_server/mcp/client.py) — MCPClient с полным жизненным циклом
+    - [`tool_adapter.py`](acp-server/src/acp_server/mcp/tool_adapter.py) — MCPToolAdapter для интеграции с ToolRegistry
+    - [`manager.py`](acp-server/src/acp_server/mcp/manager.py) — MCPManager для управления несколькими серверами
+  - Поддержка параметра `mcpServers` в `session/new` и `session/load`
+  - 27 unit-тестов для MCP модуля
+
+---
+
+## Этап 5: Advanced Permission Management
+
+### Phase 2: Cross-Session Policy Restoration (2026-04-16) ✅
+
+**Цель:** Обеспечить автоматическое восстановление permission policies при загрузке сессии.
+
+**Реализация:**
+- Проведен архитектурный анализ permission management system
+- Выявлено 4 проблемы (1 HIGH, 2 MEDIUM, 1 LOW)
+- Создана 4-фазная roadmap для Advanced Permission Management
+- Подтверждено: permission policies автоматически восстанавливаются при session/load
+- Добавлены integration тесты для проверки persistence
+
+**Документы:**
+- [`doc/architecture/ADVANCED_PERMISSION_MANAGEMENT_ARCHITECTURE.md`](doc/architecture/ADVANCED_PERMISSION_MANAGEMENT_ARCHITECTURE.md) (~750 строк)
+  * Анализ текущей реализации (SessionState, PermissionManager, Storage)
+  * 4 диаграммы Mermaid (sequence, state, class, gantt)
+  * 3-уровневая storage architecture
+  * 4-фазный план реализации
+- [`doc/architecture/ADVANCED_PERMISSION_MANAGEMENT_ANALYSIS_REPORT.md`](doc/architecture/ADVANCED_PERMISSION_MANAGEMENT_ANALYSIS_REPORT.md) (~480 строк)
+  * Детальный анализ 4 проблем с impact и root cause
+  * Рекомендации по приоритизации
+  * Риски и mitigation strategies
+
+**Тесты:**
+- [`acp-server/tests/test_permission_policy_persistence.py`](acp-server/tests/test_permission_policy_persistence.py) (6 integration тестов)
+  * `test_allow_always_persists_across_save_load`
+  * `test_reject_always_persists_across_save_load`
+  * `test_multiple_permission_policies_persist`
+  * `test_unknown_policy_defaults_to_ask`
+  * `test_empty_permission_policy_loads_correctly`
+  * `test_concurrent_save_load_operations`
+
+**Результаты:**
+- ✅ 51 permission-related тестов PASSED (15 flow + 30 manager + 6 persistence)
+- ✅ 846 unit тестов PASSED (no regressions)
+- ✅ Ruff check: All passed
+- ✅ Backward compatible
+
+**Commits:**
+- `30b210b` - docs(stage5): Архитектура Advanced Permission Management
+- `643034a` - test(stage5-phase2): Add integration tests for permission policy persistence
+
+**Статус:** Phase 2 завершена ✅
+**Следующее:** Phase 3 (Global Policy Management) - Future work
+
+## [Unreleased]
+
+### Added - Этап 4, Фаза 5: E2E Testing Content Integration (2026-04-16)
+
+#### Архитектура
+- Создан архитектурный документ [`doc/architecture/CONTENT_INTEGRATION_E2E_TESTING_ARCHITECTURE.md`](doc/architecture/CONTENT_INTEGRATION_E2E_TESTING_ARCHITECTURE.md)
+- 4 диаграммы Mermaid: Test Flow, Test Sequence, Coverage Matrix, Data Flow
+- Определено 40+ E2E сценариев с приоритетами
+
+#### E2E Test Infrastructure
+- [`acp-server/tests/e2e/conftest.py`](acp-server/tests/e2e/conftest.py) — 9 pytest fixtures для всех типов контента
+- [`acp-server/tests/e2e/helpers.py`](acp-server/tests/e2e/helpers.py) — 6 утилит-функций для проверок
+- [`acp-server/tests/e2e/base_e2e_test.py`](acp-server/tests/e2e/base_e2e_test.py) — базовый класс для E2E тестов
+
+#### E2E Tests (24 теста)
+- [`test_e2e_text_content.py`](acp-server/tests/e2e/test_e2e_text_content.py) — 4 теста для text content
+- [`test_e2e_diff_content.py`](acp-server/tests/e2e/test_e2e_diff_content.py) — 4 теста для diff content
+- [`test_e2e_image_content.py`](acp-server/tests/e2e/test_e2e_image_content.py) — 4 теста для image content
+- [`test_e2e_audio_content.py`](acp-server/tests/e2e/test_e2e_audio_content.py) — 4 теста для audio content
+- [`test_e2e_embedded_content.py`](acp-server/tests/e2e/test_e2e_embedded_content.py) — 4 теста для embedded content
+- [`test_e2e_resource_link_content.py`](acp-server/tests/e2e/test_e2e_resource_link_content.py) — 4 теста для resource_link content
+
+#### Test Coverage
+- Полный цикл: ToolExecutor → ContentExtractor → ContentValidator → ContentFormatter
+- Все 6 типов content: text, diff, image, audio, embedded, resource_link
+- Оба LLM провайдера: OpenAI и Anthropic
+- 100% success rate (24/24 passed)
+
+#### Fixes
+- Добавлены экспорты `TextResource` и `BlobResource` в [`protocol/content/__init__.py`](acp-server/src/acp_server/protocol/content/__init__.py)
+- Исправлены линтинг ошибки в [`test_content_formatting.py`](acp-server/tests/test_content_formatting.py)
+
+### Fixed - Tool Registry Duplication (2026-04-15)
+
+**Исправлена критическая ошибка: агент не имел доступа к зарегистрированным инструментам**
+
+- **Проблема**: `ToolRegistry` создавался в двух разных местах, что привело к тому, что инструменты, зарегистрированные в одном реестре, были недоступны другому.
+- **Решение**: 
+  - Добавлен параметр `tool_registry` в `ACPProtocol.__init__()`
+  - Единый экземпляр `ToolRegistry` создается в `ACPHttpServer` и передается через всю цепочку
+  - Результат: агент теперь получает доступ к инструментам (`num_tools=5` вместо `num_tools=0`)
+
+### Fixed - Client Capabilities Transmission (2026-04-15)
+
+**Исправлена передача capabilities от клиента согласно ACP спецификации**
+
+- acp-client теперь отправляет правильные `clientCapabilities` в `initialize` запросе
+- `AgentOrchestrator` фильтрует инструменты на основе объявленных capabilities
+- Соответствие спецификации: "Clients and Agents MUST treat all capabilities omitted in the initialize request as UNSUPPORTED"
+
+### Added - Этап 4: Prompt Turn Content Integration (Фазы 1-3) (2026-04-16)
+
+**Полная интеграция Content Types с Tool Calls для отправки структурированного контента LLM**
+
+#### Фаза 1: Расширение ToolExecutionResult для Content Support
+
+**Новые возможности:**
+- Добавлено поле `content: list[dict[str, Any]]` в [`ToolExecutionResult`](acp-server/src/acp_server/tools/base.py) для структурированного content
+- [`FileSystemExecutor`](acp-server/src/acp_server/tools/executors/filesystem_executor.py) генерирует text и diff content автоматически
+- [`TerminalExecutor`](acp-server/src/acp_server/tools/executors/terminal_executor.py) генерирует text content с terminal output
+- Backward compatibility: старые executors без content продолжают работать через fallback
+
+**Файлы:**
+- `acp-server/src/acp_server/tools/base.py` - расширен ToolExecutionResult
+- `acp-server/src/acp_server/tools/executors/filesystem_executor.py` - генерация content
+- `acp-server/src/acp_server/tools/executors/terminal_executor.py` - генерация content
+- `acp-server/tests/test_tool_execution_result_content.py` - 18 unit тестов
+
+**Commit:** `0922a29`
+
+#### Фаза 2: Content Extraction и Validation
+
+**Новые модули:**
+- [`ContentExtractor`](acp-server/src/acp_server/protocol/content/extractor.py) - извлечение content из tool results
+- [`ContentValidator`](acp-server/src/acp_server/protocol/content/validator.py) - валидация согласно ACP спецификации
+- Поддержка всех 6 типов content: text, diff, image, audio, embedded, resource_link
+
+**Интеграция:**
+- `acp-server/src/acp_server/protocol/state.py` - добавлено `result_content` в ToolCallState
+- `acp-server/src/acp_server/protocol/handlers/prompt_orchestrator.py` - интеграция extractor/validator
+- `acp-server/tests/test_content_extraction.py` - 29 unit тестов
+
+**Commit:** `0922a29`
+
+#### Фаза 3: Content Formatting для LLM
+
+**Новые возможности:**
+- [`ContentFormatter`](acp-server/src/acp_server/protocol/content/formatter.py) - форматирование в LLM-специфичные форматы
+- Поддержка OpenAI API format: `{"role": "tool", "tool_call_id": "...", "content": "..."}`
+- Поддержка Anthropic API format: `{"role": "user", "content": [{"type": "tool_result", ...}]}`
+- Автоматическое объединение content items разных типов в читаемый текст для LLM
+
+**Интеграция:**
+- `acp-server/src/acp_server/protocol/handlers/prompt_orchestrator.py` - форматирование tool results для LLM
+- Определение провайдера из session config
+- `acp-server/tests/test_content_formatting.py` - 29 unit тестов
+
+**Commit:** `bee5578`
+
+#### Архитектура
+
+**Документация:**
+- [`doc/architecture/PROMPT_TURN_CONTENT_INTEGRATION_ARCHITECTURE.md`](doc/architecture/PROMPT_TURN_CONTENT_INTEGRATION_ARCHITECTURE.md) - полная архитектура (1900+ строк)
+- 4 Mermaid диаграммы: Component, Sequence, Data Flow, Class
+- Детальный implementation plan для всех фаз
+
+**Соответствие протоколу:**
+- [`doc/Agent Client Protocol/protocol/06-Content.md`](doc/Agent Client Protocol/protocol/06-Content.md) - Content Types
+- [`doc/Agent Client Protocol/protocol/08-Tool Calls.md`](doc/Agent Client Protocol/protocol/08-Tool Calls.md) - Tool Calls с content
+
+#### Тестирование
+
+**Статистика:**
+- Новые тесты: 76 (18 + 29 + 29)
+- Все тесты: PASSED ✅
+- Code quality: ruff check PASSED ✅
+- Type checking: PASSED ✅
+- Coverage: 85%+
+
+**Backward Compatibility:**
+- Все существующие тесты продолжают работать
+- Старые executors без content поддержки работают через fallback
+- Нет breaking changes в публичном API
+
+#### Файлы и метрики
+
+| Компонент | Файлы | LOC | Тесты |
+|-----------|-------|-----|-------|
+| Фаза 1 (ToolExecutionResult) | 3 | ~500 | 18 |
+| Фаза 2 (Extractor + Validator) | 2 | ~800 | 29 |
+| Фаза 3 (Formatter) | 1 | ~600 | 29 |
+| Архитектурная документация | 1 | ~1900 | — |
+| **Всего** | **14** | **~2500+** | **76** |
+
+### Added - Этап 3: Tool Calls Integration (2026-04-14)
+
+**Полная реализация встроенных инструментов для взаимодействия с локальной средой**
+
+#### Tool Calls Infrastructure
+- `SimpleToolRegistry` с поддержкой async executors
+- `ToolExecutor` базовый класс для всех executors
+- `ToolExecutionResult` с metadata поддержкой
+
+#### FileSystem Tool Executor
+- `FileSystemToolExecutor` для fs/* операций
+- `fs/read_text_file` с line и limit параметрами
+- `fs/write_text_file` с diff tracking в metadata
+- `ClientRPCBridge` для изоляции RPC вызовов
+
+#### Terminal Tool Executor
+- `TerminalToolExecutor` для terminal/* операций
+- `terminal/create` с env, cwd, output_byte_limit
+- `terminal/wait_for_exit` с exit_code в metadata
+- `terminal/release` для lifecycle management
+
+#### Tool Definitions
+- `FileSystemToolDefinitions` с JSON Schema валидацией
+- `TerminalToolDefinitions` с JSON Schema валидацией
+- Автоматическая регистрация в PromptOrchestrator
+
+#### Permission Flow
+- `PermissionManager.request_tool_permission()` метод
+- Интеграция в `PromptOrchestrator._process_tool_calls()`
+- Поддержка ask/code режимов
+- Permission policy персистентность (allow_always/reject_always)
+
+#### Integration
+- Tool calls обработка в `PromptOrchestrator.handle_prompt()`
+- Async tool execution через `tool_registry.execute_tool()`
+- Session/update notifications для tool call lifecycle
+- Permission request/response flow через WebSocket
+
+#### Tests
+- 27 тестов для FileSystemToolExecutor
+- 1 тест для TerminalToolExecutor
+- 28 тестов для Tool Definitions
+- 12 интеграционных тестов
+- 15 тестов для Permission Flow
+- **Всего: 83 новых теста**
+
+#### Changed
+- `PromptOrchestrator.__init__` теперь принимает `tool_registry` и `client_rpc_service`
+- `create_prompt_orchestrator()` обновлен для регистрации встроенных tools
+- `SimpleToolRegistry.execute_tool()` теперь полностью async с поддержкой metadata
+
+#### Documentation
+- Обновлен `acp-server/README.md` с секцией Tool Calls Integration
+- Обновлен `doc/ACP_IMPLEMENTATION_STATUS.md` со статистикой
+
+### Added - Этап 2: Клиентские методы (File System и Terminal) (2026-04-14)
+
+**Полная реализация клиентских методов для доступа к локальной среде пользователя**
+
+#### Архитектура
+- Создан архитектурный документ [`doc/architecture/CLIENT_METHODS_ARCHITECTURE.md`](doc/architecture/CLIENT_METHODS_ARCHITECTURE.md) (1600+ строк)
+- Исправлено понимание направления вызовов: Agent → Client RPC
+- 6 диаграмм Mermaid (Component, Sequence, State, Class)
+
+#### acp-server: ClientRPCService
+
+- Реализован [`ClientRPCService`](acp-server/src/acp_server/client_rpc/service.py) для инициирования RPC на клиент
+- 12 Pydantic V2 моделей для File System и Terminal методов
+- Иерархия исключений (ClientRPCError, ClientRPCTimeoutError, ClientCapabilityMissingError, ClientRPCResponseError)
+- Проверка clientCapabilities перед вызовами
+- Управление pending requests с timeout
+- 23 unit теста ✅
+
+#### acp-client: Handlers и Executors
+
+**FileSystemExecutor и FileSystemHandler:**
+- Асинхронные операции с файлами (read/write)
+- Валидация путей и защита от path traversal
+- Поддержка диапазонов строк для чтения
+- Sandbox режим с base_path
+- Обработка fs/read_text_file, fs/write_text_file
+- 13 unit тестов на каждый метод ✅
+
+**TerminalExecutor и TerminalHandler:**
+- Управление жизненным циклом процессов
+- Асинхронное чтение output с буферизацией
+- Поддержка лимитов на размер output
+- 5 состояний: CREATED → RUNNING → EXITED → RELEASED
+- Обработка всех 5 terminal методов:
+  - terminal/create (6 тестов)
+  - terminal/output (3 теста)
+  - terminal/wait_for_exit (3 теста)
+  - terminal/kill (3 теста)
+  - terminal/release (3 теста)
+- Итого 18 unit тестов ✅
+
+**Интеграция с DI container:**
+- Регистрация handlers в HandlerRegistry
+- Автоматическое подключение к transport layer
+
+#### Зависимости
+
+- Добавлена `aiofiles>=23.2.0` для асинхронных файловых операций
+
+#### Тестирование
+
+- **82 теста** (23 server + 59 client)
+- Все тесты PASSED ✅
+- Покрытие: валидация, обработка ошибок, edge cases
+- Ruff и pyright проверки пройдены
+
+#### Безопасность
+
+- Защита от path traversal атак
+- Sandbox режим для файловых операций
+- Валидация всех входящих параметров
+- Structured logging всех операций
+
+#### Документация
+
+- **Архитектурный план:** [`doc/architecture/CLIENT_METHODS_ARCHITECTURE.md`](doc/architecture/CLIENT_METHODS_ARCHITECTURE.md) — полная архитектура
+- **Спецификация:** [`doc/Agent Client Protocol/protocol/09-File System.md`](doc/Agent Client Protocol/protocol/09-File System.md) и [`doc/Agent Client Protocol/protocol/10-Terminal.md`](doc/Agent Client Protocol/protocol/10-Terminal.md)
+
+#### Метрики качества
+| Метрика | Значение |
+|---------|----------|
+| acp-server (ClientRPCService) | 4 файла, ~500 LOC, 23 теста ✅ |
+| acp-client (Handlers + Executors) | 6 файлов, ~924 LOC, 59 тестов ✅ |
+| **Всего** | **10 файлов, ~1424 LOC, 82 теста ✅** |
+| ruff check | ✅ 0 ошибок |
+| type check | ✅ 0 ошибок |
+
+### Added - Content Types Implementation (Этап 1) (2026-04-14)
+
+**Полная реализация Content типов согласно ACP спецификации**
+
+#### Реализованные Content типы
+- ✅ **TextContent** — текстовые сообщения
+- ✅ **ImageContent** — изображения (PNG, JPEG, GIF, WebP) с поддержкой base64 кодирования
+- ✅ **AudioContent** — аудиоданные (WAV, MP3, MPEG) с поддержкой base64 кодирования
+- ✅ **EmbeddedResourceContent** — встроенные ресурсы с метаданными
+- ✅ **ResourceLinkContent** — ссылки на ресурсы с типом и uri
+
+#### Архитектура реализации
+- **Структура:** Pydantic dataclasses с валидацией типов
+- **Полиморфизм:** Discriminated union для безопасного типирования
+- **Кодирование:** Base64 для бинарных данных (изображения, аудио)
+- **Совместимость:** Идентичная реализация на server и client сторонах
+
+#### Модули реализации
+
+**acp-server** (`acp-server/src/acp_server/protocol/content/`):
+- `base.py` — базовые классы и интерфейсы
+- `text.py` — TextContent реализация
+- `image.py` — ImageContent реализация с валидацией MIME типов
+- `audio.py` — AudioContent реализация с валидацией MIME типов
+- `embedded.py` — EmbeddedResourceContent реализация
+- `resource_link.py` — ResourceLinkContent реализация
+- `__init__.py` — экспорт публичного API
+
+**acp-client** (`acp-client/src/acp_client/domain/content/`):
+- `base.py` — базовые классы и интерфейсы
+- `text.py` — TextContent реализация
+- `image.py` — ImageContent реализация с валидацией MIME типов
+- `audio.py` — AudioContent реализация с валидацией MIME типов
+- `embedded.py` — EmbeddedResourceContent реализация
+- `resource_link.py` — ResourceLinkContent реализация
+- `__init__.py` — экспорт публичного API
+
+#### Тестирование
+- **Server unit тесты:** 40 тестов
+  - `test_content_base.py` — базовая функциональность
+  - `test_content_text.py` — TextContent
+  - `test_content_image.py` — ImageContent
+  - `test_content_audio.py` — AudioContent
+  - `test_content_embedded.py` — EmbeddedResourceContent
+  - `test_content_resource_link.py` — ResourceLinkContent
+
+- **Client unit тесты:** 40 тестов (аналогичная структура)
+
+- **Integration тесты:** 52 теста
+  - Server integration: 20 тестов (`test_content_integration.py`)
+  - Client integration: 25 тестов (`test_content_integration.py`)
+  - Cross-compatibility: 7 тестов (`test_content_cross_compatibility.py`)
+
+- **Итого:** 132 теста (100% успешность)
+
+#### Документация
+- **Архитектурный план:** [`doc/architecture/CONTENT_TYPES_ARCHITECTURE.md`](doc/architecture/CONTENT_TYPES_ARCHITECTURE.md) — полное описание дизайна и реализации
+- **Спецификация:** [`doc/Agent Client Protocol/protocol/06-Content.md`](doc/Agent Client Protocol/protocol/06-Content.md) — официальная спецификация протокола
+
+#### Метрики качества
+| Метрика | Значение |
+|---------|----------|
+| Unit тесты | 80/80 ✅ |
+| Integration тесты | 52/52 ✅ |
+| Всего тестов | 132/132 ✅ |
+| ruff check | ✅ 0 ошибок |
+| type check | ✅ 0 ошибок |
+| Покрытие | 100% критических путей |
+
 ### Added - ACP Server Phase 1 Critical Refactoring (2026-04-11)
 
 **Критический рефакторинг архитектуры acp-server с целью разрешения проблем модульности, типизации и дублирования кода**

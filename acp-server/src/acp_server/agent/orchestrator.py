@@ -8,8 +8,8 @@ from acp_server.agent.base import AgentContext, AgentResponse, LLMAgent
 from acp_server.agent.naive import NaiveAgent
 from acp_server.agent.state import OrchestratorConfig
 from acp_server.llm.base import LLMMessage, LLMProvider
-from acp_server.protocol.state import SessionState
-from acp_server.tools.base import ToolRegistry
+from acp_server.protocol.state import ClientRuntimeCapabilities, SessionState, ToolResult
+from acp_server.tools.base import ToolDefinition, ToolRegistry
 
 # Используем structlog для структурированного логирования
 logger = structlog.get_logger()
@@ -37,6 +37,10 @@ class AgentOrchestrator:
             config: Конфигурация с LLM provider и tool registry
             llm_provider: Провайдер LLM для запросов
             tool_registry: Реестр инструментов для выполнения
+            
+        Примечание:
+            Встроенные инструменты (fs/*, terminal/*) регистрируются
+            в PromptOrchestrator, где доступен контекст сессии.
         """
         self.config = config
         self.llm_provider = llm_provider
@@ -68,7 +72,7 @@ class AgentOrchestrator:
         - НЕ добавляет assistant message в историю сессии
         - НЕ модифицирует session_state
         - ТОЛЬКО возвращает текст ответа агента
-        
+
         История сообщений обновляется в PromptOrchestrator,
         что обеспечивает централизованное управление сохранением.
 
@@ -114,21 +118,26 @@ class AgentOrchestrator:
             Контекст для агента
         """
         # Получить историю сообщений из SessionState
-        conversation_history = self._convert_to_llm_messages(
-            session_state.history
-        )
+        conversation_history = self._convert_to_llm_messages(session_state.history)
 
         # Преобразовать промпт в формат list[dict]
         prompt_blocks = [{"type": "text", "text": prompt}]
 
         # Получить доступные инструменты для этой сессии
-        available_tools = self.tool_registry.get_available_tools(
-            session_state.session_id
+        all_tools = self.tool_registry.get_available_tools(session_state.session_id)
+
+        # Отфильтровать tools согласно ACP спецификации:
+        # Согласно спецификации, capabilities omitted in the initialize request
+        # считаются UNSUPPORTED
+        available_tools = self._filter_tools_by_capabilities(
+            all_tools,
+            session_state.runtime_capabilities,
         )
 
         # Создать и вернуть AgentContext
         return AgentContext(
             session_id=session_state.session_id,
+            session=session_state,  # Передаём session_state для использования в tool handlers
             prompt=prompt_blocks,
             conversation_history=conversation_history,
             available_tools=available_tools,
@@ -140,6 +149,11 @@ class AgentOrchestrator:
         history: list[dict[str, Any]] | list,
     ) -> list[LLMMessage]:
         """Преобразовать историю из SessionState в формат LLMMessage.
+        
+        Поддерживает форматы:
+        - {"role": "user", "text": "..."} или {"role": "user", "content": "..."}
+        - {"role": "assistant", "text": "...", "tool_calls": [...]}
+        - {"role": "tool", "tool_call_id": "...", "content": "..."}
 
         Args:
             history: История сообщений из SessionState
@@ -147,13 +161,14 @@ class AgentOrchestrator:
         Returns:
             Список LLMMessage для отправки в LLM
         """
+        from acp_server.llm.base import LLMToolCall
+        
         messages: list[LLMMessage] = []
 
         for entry in history:
             # Конвертировать Pydantic модель в dict если необходимо
             entry_dict = (
-                entry if isinstance(entry, dict)
-                else entry.model_dump()  # type: ignore[attr-defined]
+                entry if isinstance(entry, dict) else entry.model_dump()  # type: ignore[attr-defined]
             )
 
             # Определить роль сообщения
@@ -165,8 +180,43 @@ class AgentOrchestrator:
             content = entry_dict.get("text", "")
             if not content:
                 content = entry_dict.get("content", "")
+            
+            # Обработка tool messages (результаты выполнения tool)
+            if role == "tool":
+                tool_call_id = entry_dict.get("tool_call_id")
+                tool_name = entry_dict.get("name")
+                messages.append(LLMMessage(
+                    role="tool",
+                    content=str(content) if content else "",
+                    tool_call_id=tool_call_id,
+                    name=tool_name,
+                ))
+                continue
+            
+            # Обработка assistant messages с tool_calls
+            tool_calls_data = entry_dict.get("tool_calls")
+            if role == "assistant" and tool_calls_data:
+                # Конвертировать tool_calls в LLMToolCall объекты
+                llm_tool_calls: list[LLMToolCall] = []
+                for tc in tool_calls_data:
+                    if isinstance(tc, dict):
+                        llm_tool_calls.append(LLMToolCall(
+                            id=tc.get("id", ""),
+                            name=tc.get("name", ""),
+                            arguments=tc.get("arguments", {}),
+                        ))
+                    elif hasattr(tc, "id"):
+                        # Уже LLMToolCall объект
+                        llm_tool_calls.append(tc)
+                
+                messages.append(LLMMessage(
+                    role="assistant",
+                    content=str(content) if content else None,
+                    tool_calls=llm_tool_calls if llm_tool_calls else None,
+                ))
+                continue
 
-            # Создать LLMMessage
+            # Создать обычный LLMMessage
             if content:
                 messages.append(LLMMessage(role=role, content=str(content)))
 
@@ -187,10 +237,147 @@ class AgentOrchestrator:
         history: list[dict[str, Any]] = []
 
         for msg in messages:
-            history.append({
-                "type": "text",
-                "role": msg.role,
-                "text": msg.content,
-            })
+            history.append(
+                {
+                    "type": "text",
+                    "role": msg.role,
+                    "text": msg.content,
+                }
+            )
 
         return history
+
+    def _filter_tools_by_capabilities(
+        self,
+        tools: list[ToolDefinition],
+        runtime_capabilities: ClientRuntimeCapabilities | None,
+    ) -> list[ToolDefinition]:
+        """Отфильтровать tools согласно ACP спецификации.
+
+        Согласно спецификации, capabilities omitted in the initialize request
+        считаются UNSUPPORTED и не должны быть доступны для использования.
+
+        Args:
+            tools: Все доступные tools
+            runtime_capabilities: Parsed capabilities от клиента
+
+        Returns:
+            Отфильтрованный список tools
+        """
+        if runtime_capabilities is None:
+            # Если capabilities не указаны, возвращаем пустой список tools
+            logger.debug(
+                "runtime_capabilities is None, filtering out all tools",
+            )
+            return []
+
+        # Отфильтровать tools на основе capabilities
+        filtered_tools: list[ToolDefinition] = []
+
+        for tool in tools:
+            # File System tools
+            if (
+                (
+                    tool.name == "fs/read_text_file"
+                    and runtime_capabilities.fs_read
+                )
+                or (
+                    tool.name == "fs/write_text_file"
+                    and runtime_capabilities.fs_write
+                )
+            ):
+                filtered_tools.append(tool)
+            # Terminal tools
+            elif tool.name.startswith("terminal/"):
+                if runtime_capabilities.terminal:
+                    filtered_tools.append(tool)
+            # Другие tools пропускаем
+            else:
+                # Пока не зарегистрировано других tools
+                pass
+
+        logger.debug(
+            "tools filtered by capabilities",
+            total_tools=len(tools),
+            filtered_tools=len(filtered_tools),
+            fs_read=runtime_capabilities.fs_read,
+            fs_write=runtime_capabilities.fs_write,
+            terminal=runtime_capabilities.terminal,
+        )
+
+        return filtered_tools
+
+    async def continue_with_tool_results(
+        self,
+        session_state: SessionState,
+        tool_results: list[ToolResult],
+    ) -> AgentResponse:
+        """Продолжить обработку после получения tool results.
+        
+        Добавляет tool results в историю сессии и вызывает LLM повторно
+        для получения следующего ответа в LLM loop.
+        
+        Согласно ACP протоколу (05-Prompt Turn.md):
+        "The Agent sends the tool results back to the language model as another request.
+        The cycle returns to step 2, continuing until the language model completes
+        its response without requesting additional tool calls."
+        
+        Args:
+            session_state: Состояние сессии с обновленной историей
+            tool_results: Результаты выполнения tool calls
+            
+        Returns:
+            AgentResponse с текстом ответа и информацией о tool calls
+        """
+        # Добавить tool results в историю сессии для передачи в LLM
+        for result in tool_results:
+            self._add_tool_result_to_history(session_state, result)
+        
+        # Создать контекст агента без нового промпта (продолжение)
+        agent_context = self._create_agent_context(session_state, prompt="")
+        
+        # Вызвать агента для продолжения обработки
+        agent_response = await self.agent.process_prompt(agent_context)
+        
+        logger.info(
+            "agent continued with tool results",
+            session_id=session_state.session_id,
+            tool_results_count=len(tool_results),
+            response_length=len(agent_response.text),
+        )
+        
+        return agent_response
+    
+    def _add_tool_result_to_history(
+        self,
+        session_state: SessionState,
+        tool_result: ToolResult,
+    ) -> None:
+        """Добавить tool result в историю сессии.
+        
+        Формат соответствует OpenAI API для tool responses:
+        {"role": "tool", "tool_call_id": "...", "content": "..."}
+        
+        Args:
+            session_state: Состояние сессии
+            tool_result: Результат выполнения tool
+        """
+        # Формируем content: либо output, либо error
+        content = tool_result.output if tool_result.success else (
+            tool_result.error or "Tool execution failed"
+        )
+        
+        # Добавляем tool result в историю в формате OpenAI API
+        tool_message = {
+            "role": "tool",
+            "tool_call_id": tool_result.tool_call_id,
+            "content": content or "",
+        }
+        session_state.history.append(tool_message)
+        
+        logger.debug(
+            "tool result added to history",
+            session_id=session_state.session_id,
+            tool_call_id=tool_result.tool_call_id,
+            success=tool_result.success,
+        )

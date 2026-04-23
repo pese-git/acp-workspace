@@ -147,6 +147,9 @@ def test_create_agent_context_simple(
     context = orchestrator._create_agent_context(session_state, prompt)
 
     assert context.session_id == "test-session-1"
+    # Проверяем что session передается в контекст
+    assert context.session is session_state
+    assert context.session.session_id == "test-session-1"
     assert context.prompt == [{"type": "text", "text": "Hello, agent!"}]
     assert context.conversation_history == []
     assert len(context.available_tools) >= 0  # Может быть 0 если нет инструментов
@@ -169,6 +172,8 @@ def test_create_agent_context_with_history(
         "Second message",
     )
 
+    # Проверяем что session передается в контекст
+    assert context.session is session_state
     assert len(context.conversation_history) == 2
     assert context.conversation_history[0].role == "user"
     assert context.conversation_history[0].content == "First message"
@@ -185,6 +190,8 @@ def test_create_agent_context_with_config(
 
     context = orchestrator._create_agent_context(session_state, "Test")
 
+    # Проверяем что session передается в контекст
+    assert context.session is session_state
     assert context.config == {"option1": "value1", "option2": "value2"}
 
 

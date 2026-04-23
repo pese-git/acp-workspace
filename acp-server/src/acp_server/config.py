@@ -15,7 +15,7 @@
 Пример использования:
     config = AppConfig()
     print(config.llm.model)
-    
+
     # С переменными окружения:
     export ACP_LLM_PROVIDER=openai
     export ACP_LLM_MODEL=gpt-4-turbo
@@ -48,9 +48,7 @@ class LLMConfig(BaseModel):
     temperature: float = Field(
         default_factory=lambda: float(os.getenv("ACP_LLM_TEMPERATURE", "0.7"))
     )
-    max_tokens: int = Field(
-        default_factory=lambda: int(os.getenv("ACP_LLM_MAX_TOKENS", "8192"))
-    )
+    max_tokens: int = Field(default_factory=lambda: int(os.getenv("ACP_LLM_MAX_TOKENS", "8192")))
 
 
 class AgentConfig(BaseModel):
@@ -65,7 +63,14 @@ class AgentConfig(BaseModel):
             "ACP_SYSTEM_PROMPT",
             (
                 "Ты помощник, который помогает пользователю выполнять различные задачи. "
-                "Используй доступные инструменты для решения задач."
+                "Используй доступные инструменты для решения задач.\n\n"
+                "При решении сложных задач создавай план выполнения "
+                "с помощью инструмента update_plan:\n"
+                "- Разбивай задачу на логические шаги\n"
+                "- Указывай priority: high (критично), medium (стандартно), low (отложить)\n"
+                "- Начальный status: pending, затем in_progress, completed по завершении\n"
+                "- Обновляй план по мере выполнения, отправляя полный список entries\n"
+                "- Вызывай update_plan в начале сложной задачи и при изменении статуса"
             ),
         )
     )
@@ -81,7 +86,7 @@ class AppConfig(BaseModel):
         config = AppConfig()
         print(config.llm.model)
         print(config.agent.system_prompt)
-        
+
         # С переменными окружения:
         export ACP_LLM_PROVIDER=openai
         config = AppConfig()

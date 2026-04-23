@@ -7,7 +7,7 @@
 Пример использования:
     logger = setup_logging(level="INFO", json_format=False)
     logger.info("server started", port=8080)
-    
+
     # С сохранением логов в файл
     logger = setup_logging(level="DEBUG", json_format=False, log_file="default")
 """
@@ -24,7 +24,7 @@ import structlog
 
 def get_acp_server_dir() -> Path:
     """Получить директорию ~/.acp-server с автоматическим созданием.
-    
+
     Returns:
         Path: Путь к директории ~/.acp-server
     """
@@ -35,7 +35,7 @@ def get_acp_server_dir() -> Path:
 
 def get_logs_dir() -> Path:
     """Получить директорию ~/.acp-server/logs с автоматическим созданием.
-    
+
     Returns:
         Path: Путь к директории ~/.acp-server/logs
     """
@@ -65,7 +65,7 @@ def setup_logging(
     Пример использования:
         logger = setup_logging(level="DEBUG", json_format=False)
         logger.info("application started")
-        
+
         # С сохранением логов в файл
         logger = setup_logging(level="DEBUG", json_format=True, log_file="default")
     """
@@ -109,10 +109,10 @@ def setup_logging(
 
     # Конфигурируем обработчики логирования
     handlers: list[logging.Handler] = []
-    
+
     # Всегда добавляем обработчик для вывода в консоль
     handlers.append(logging.StreamHandler(sys.stdout))
-    
+
     # Добавляем файловый обработчик, если указан путь
     if file_path:
         # Используем RotatingFileHandler для ротации файлов

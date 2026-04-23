@@ -8,6 +8,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+import structlog
+
+from ..mcp import MCPManager, MCPManagerError
+from ..mcp.models import MCPServerConfig
 from ..messages import ACPMessage, JsonRpcId
 from ..storage import SessionStorage
 from .handlers import (
@@ -21,12 +25,19 @@ from .handlers import (
 from .session_factory import SessionFactory
 from .state import (
     ClientRuntimeCapabilities,
+    LLMLoopResult,
     ProtocolOutcome,
     SessionState,
 )
 
 if TYPE_CHECKING:
     from ..agent.orchestrator import AgentOrchestrator
+    from ..client_rpc.service import ClientRPCService
+    from ..tools.base import ToolRegistry
+    from .handlers.global_policy_manager import GlobalPolicyManager
+
+
+logger = structlog.get_logger()
 
 
 class ACPProtocol:
@@ -47,6 +58,8 @@ class ACPProtocol:
         auth_api_key: str | None = None,
         storage: SessionStorage | None = None,
         agent_orchestrator: AgentOrchestrator | None = None,
+        client_rpc_service: ClientRPCService | None = None,
+        tool_registry: ToolRegistry | None = None,
     ) -> None:
         """Инициализирует протокол и хранилище сессий.
 
@@ -55,6 +68,8 @@ class ACPProtocol:
             auth_api_key: API ключ для аутентификации.
             storage: Хранилище сессий (по умолчанию InMemoryStorage).
             agent_orchestrator: Оркестратор LLM-агента для обработки prompts (опционально).
+            client_rpc_service: Сервис ClientRPC для выполнения инструментов (опционально).
+            tool_registry: Реестр инструментов для регистрации и выполнения tools (опционально).
 
         Пример использования:
             protocol = ACPProtocol()
@@ -77,6 +92,15 @@ class ACPProtocol:
 
         # Оркестратор LLM-агента для обработки prompt-turns через агента
         self._agent_orchestrator = agent_orchestrator
+
+        # Сервис ClientRPC для выполнения встроенных инструментов
+        self._client_rpc_service = client_rpc_service
+
+        # Реестр инструментов для регистрации и выполнения tools
+        self._tool_registry = tool_registry
+
+        # GlobalPolicyManager для fallback chain в permission checks
+        self._global_policy_manager: GlobalPolicyManager | None = None
 
         # Последние capabilities, согласованные через initialize.
         # Для in-memory demo-сервера это достаточно; по мере роста можно
@@ -160,15 +184,15 @@ class ACPProtocol:
             outcome = protocol.handle(ACPMessage.request("session/list", {}))
         """
 
-        # Сервер принимает только входящие requests/notifications.
+        # ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Если method=None, это response (JSON-RPC 2.0)
+        # Маршрутизируем на handle_client_response() вместо отклонения.
+        # Permission response имеет method=None и id=request_id, и должна быть обработана.
         if message.method is None:
-            return ProtocolOutcome(
-                response=ACPMessage.error_response(
-                    message.id,
-                    code=-32600,
-                    message="Invalid request: unexpected response payload",
-                )
+            logger.debug(
+                "response received, routing to handle_client_response",
+                request_id=message.id,
             )
+            return self.handle_client_response(message)
 
         method = message.method
         params = message.params or {}
@@ -188,6 +212,14 @@ class ACPProtocol:
                 self._runtime_capabilities = auth.parse_client_runtime_capabilities(
                     client_capabilities
                 )
+            
+            # Инициализируем GlobalPolicyManager для fallback chain
+            if self._global_policy_manager is None:
+                # Вопрос: как инициализировать асинхронный менеджер в синхронном контексте?
+                # Решение: не инициализируем здесь, а передаем None (graceful degradation)
+                # GlobalPolicyManager требует async инициализации и singleton pattern
+                logger.debug("GlobalPolicyManager will be initialized on demand")
+            
             return ProtocolOutcome(response=response)
 
         if method == "authenticate":
@@ -230,6 +262,12 @@ class ACPProtocol:
                         runtime_capabilities=self._runtime_capabilities,
                         session_id=session_id,
                     )
+                    
+                    # Инициализация MCP серверов если они указаны в параметрах
+                    mcp_servers = params.get("mcpServers", [])
+                    if mcp_servers and isinstance(mcp_servers, list):
+                        await self._initialize_mcp_servers(session_state, mcp_servers)
+                    
                     await self._storage.save_session(session_state)
                     # Обновляем внутренний кэш для синхронной работы handlers
                     self._sessions[session_id] = session_state
@@ -243,6 +281,14 @@ class ACPProtocol:
                 session_obj = await self._get_session_for_runtime(session_id)
                 if session_obj is not None:
                     session_obj.runtime_capabilities = self._runtime_capabilities
+                    
+                    # Инициализация MCP серверов если они указаны при загрузке сессии
+                    # Согласно спецификации ACP (03-Session Setup.md), mcpServers
+                    # передаются при session/load для переподключения к MCP серверам
+                    mcp_servers = params.get("mcpServers", [])
+                    if mcp_servers and isinstance(mcp_servers, list):
+                        await self._initialize_mcp_servers(session_obj, mcp_servers)
+                        
             return session.session_load(
                 message.id,
                 params,
@@ -274,10 +320,20 @@ class ACPProtocol:
                 self._config_specs,
                 agent_orchestrator=self._agent_orchestrator,
                 storage=self._storage,
+                tool_registry=self._tool_registry,
+                client_rpc_service=self._client_rpc_service,
+                global_manager=self._global_policy_manager,
             )
 
         if method == "session/cancel":
             return prompt.session_cancel(
+                message.id,
+                params,
+                self._sessions,
+            )
+
+        if method == "session/request_permission_response":
+            return await self._handle_permission_response(
                 message.id,
                 params,
                 self._sessions,
@@ -370,6 +426,19 @@ class ACPProtocol:
         )
         if resolved_client_rpc is not None:
             return resolved_client_rpc
+
+        if self._client_rpc_service is not None and self._client_rpc_service.has_pending_request(
+            message.id
+        ):
+            # Пробрасываем response в ClientRPCService для async-ожиданий,
+            # используемых tool executors (filesystem/terminal).
+            logger.debug(
+                "forwarding client response to client_rpc_service",
+                request_id=message.id,
+                has_error=message.error is not None,
+            )
+            self._client_rpc_service.handle_response(message.to_dict())
+            return ProtocolOutcome()
 
         if permissions.consume_cancelled_client_rpc_response(message.id, self._sessions):
             # Late response на отмененный agent->client RPC считаем no-op.
@@ -475,3 +544,319 @@ class ACPProtocol:
             if next_cursor is None:
                 break
             cursor = next_cursor
+
+    async def cancel_active_turns_on_disconnect(self) -> int:
+        """Отменяет все активные turn в рамках текущего протокольного инстанса.
+
+        Используется транспортом при разрыве соединения клиента. Метод
+        обеспечивает ACP-инвариант остановки in-flight turn и освобождение
+        внутренних ожиданий без отправки сетевых сообщений.
+
+        Returns:
+            Количество сессий, в которых активный turn был отменен.
+        """
+
+        cancelled_count = 0
+        for session_id, session_state in list(self._sessions.items()):
+            if session_state.active_turn is None:
+                continue
+
+            prompt.session_cancel(
+                request_id=None,
+                params={"sessionId": session_id},
+                sessions=self._sessions,
+            )
+            cancelled_count += 1
+
+            try:
+                await self._storage.save_session(self._sessions[session_id])
+            except Exception:
+                # Ошибка персистентности не должна блокировать cleanup при disconnect.
+                continue
+
+        return cancelled_count
+
+    async def initialize_global_policy_manager(self) -> None:
+        """Инициализировать GlobalPolicyManager для fallback на global policies.
+
+        Graceful degradation: если инициализация не удалась, продолжаем без global policies.
+
+        Пример использования:
+            await protocol.initialize_global_policy_manager()
+        """
+        try:
+            from .handlers.global_policy_manager import GlobalPolicyManager
+
+            self._global_policy_manager = await GlobalPolicyManager.get_instance()
+            await self._global_policy_manager.initialize()
+
+            logger.info("GlobalPolicyManager initialized successfully")
+        except Exception as e:
+            logger.warning(
+                "Failed to initialize GlobalPolicyManager, continuing without global policies",
+                error=str(e),
+                exc_info=True,
+            )
+            self._global_policy_manager = None
+
+    async def _handle_permission_response(
+        self,
+        request_id: JsonRpcId,
+        params: dict[str, Any],
+        sessions: dict[str, SessionState],
+    ) -> ProtocolOutcome:
+        """Обрабатывает response на session/request_permission от клиента.
+        
+        Логика:
+        1. Найти сессию с активным permission request
+        2. Проверить, не был ли request отменен (late response handling)
+        3. Извлечь решение из response
+        4. Обновить policy если нужно (для allow_always/reject_always)
+        5. Обновить tool call status и отправить notifications
+        
+        Args:
+            request_id: ID permission request
+            params: Параметры (sessionId, result с outcome и optionId)
+            sessions: Словарь активных сессий
+        
+        Returns:
+            ProtocolOutcome с response и notifications
+        """
+        # Найти сессию по permission request ID
+        session = None
+        session_id = ""
+        for sid, session_candidate in sessions.items():
+            if (
+                session_candidate.active_turn
+                and session_candidate.active_turn.permission_request_id == request_id
+            ):
+                session = session_candidate
+                session_id = sid
+                break
+
+        if session is None:
+            # Проверить, был ли request отменен (late response handling)
+            for sid, session_candidate in sessions.items():
+                if request_id in session_candidate.cancelled_permission_requests:
+                    logger.debug(
+                        "ignoring late response on cancelled permission request",
+                        request_id=request_id,
+                        session_id=sid,
+                    )
+                    # Удалить из tombstone
+                    session_candidate.cancelled_permission_requests.discard(request_id)
+                    return ProtocolOutcome(response=ACPMessage.response(request_id, {}))
+
+            # Неизвестный request
+            logger.warning(
+                "permission response for unknown request",
+                request_id=request_id,
+            )
+            return ProtocolOutcome(
+                response=ACPMessage.error_response(
+                    request_id,
+                    code=-32603,
+                    message="Unknown permission request",
+                )
+            )
+
+        # Получить PermissionManager из handlers (инициализируется в prompt.py)
+        from .handlers.permission_manager import PermissionManager
+
+        # Создать временный PermissionManager для извлечения данных
+        permission_manager = PermissionManager()
+
+        result = params.get("result", {})
+        
+        # Извлечь решение из response
+        outcome = permission_manager.extract_permission_outcome(result)
+        option_id = permission_manager.extract_permission_option_id(result)
+
+        if outcome != "selected" or option_id is None:
+            logger.warning(
+                "invalid permission response format",
+                request_id=request_id,
+                session_id=session_id,
+                outcome=outcome,
+            )
+            return ProtocolOutcome(
+                response=ACPMessage.error_response(
+                    request_id,
+                    code=-32603,
+                    message="Invalid permission response",
+                )
+            )
+
+        # Получить tool_call_id из active_turn
+        if session.active_turn is None or session.active_turn.permission_tool_call_id is None:
+            logger.warning(
+                "no permission tool call in active turn",
+                request_id=request_id,
+                session_id=session_id,
+            )
+            return ProtocolOutcome(
+                response=ACPMessage.error_response(
+                    request_id,
+                    code=-32603,
+                    message="No pending tool call",
+                )
+            )
+
+        tool_call_id = session.active_turn.permission_tool_call_id
+
+        # Сохранить policy если нужно (для allow_always/reject_always)
+        acceptance_updates = permission_manager.build_permission_acceptance_updates(
+            session,
+            session_id,
+            tool_call_id,
+            option_id,
+        )
+
+        logger.debug(
+            "permission response handled",
+            request_id=request_id,
+            session_id=session_id,
+            option_id=option_id,
+            tool_call_id=tool_call_id,
+        )
+
+        return ProtocolOutcome(
+            response=ACPMessage.response(request_id, {}),
+            notifications=acceptance_updates,
+        )
+
+    async def execute_pending_tool(
+        self,
+        session_id: str,
+        tool_call_id: str,
+    ) -> LLMLoopResult:
+        """Выполняет pending tool после permission approval и продолжает LLM loop.
+        
+        Вызывается из http_server.py после того как permission был одобрен.
+        Создаёт PromptOrchestrator и делегирует ему выполнение.
+        Согласно ACP протоколу (05-Prompt Turn.md, Step 6), после выполнения
+        инструмента результат передаётся LLM для продолжения диалога.
+        
+        Args:
+            session_id: ID сессии
+            tool_call_id: ID tool call для выполнения
+            
+        Returns:
+            LLMLoopResult с notifications, stop_reason и pending_permission флагом
+        """
+        session = self._sessions.get(session_id)
+        if session is None:
+            logger.error(
+                "session not found for pending tool execution",
+                session_id=session_id,
+                tool_call_id=tool_call_id,
+            )
+            return LLMLoopResult(notifications=[], stop_reason="end_turn")
+        
+        # Проверить наличие agent_orchestrator для LLM loop
+        if self._agent_orchestrator is None:
+            logger.error(
+                "agent_orchestrator not configured for LLM loop",
+                session_id=session_id,
+                tool_call_id=tool_call_id,
+            )
+            return LLMLoopResult(notifications=[], stop_reason="end_turn")
+        
+        # Создать PromptOrchestrator с зависимостями
+        orchestrator = prompt.create_prompt_orchestrator(
+            tool_registry=self._tool_registry,
+            client_rpc_service=self._client_rpc_service,
+            global_policy_manager=self._global_policy_manager,
+        )
+        
+        return await orchestrator.execute_pending_tool(
+            session=session,
+            session_id=session_id,
+            tool_call_id=tool_call_id,
+            agent_orchestrator=self._agent_orchestrator,
+        )
+
+    async def _initialize_mcp_servers(
+        self,
+        session_state: SessionState,
+        mcp_servers: list[dict[str, Any]],
+    ) -> None:
+        """Инициализирует MCP серверы для сессии.
+        
+        Создаёт MCPManager, подключается к каждому MCP серверу,
+        получает инструменты и регистрирует их в ToolRegistry.
+        
+        Args:
+            session_state: Состояние сессии для сохранения MCPManager.
+            mcp_servers: Список конфигураций MCP серверов из параметров session/new.
+        
+        Примечание:
+            При ошибке подключения к серверу, ошибка логируется,
+            но не прерывает инициализацию других серверов (graceful degradation).
+        """
+        if not mcp_servers:
+            return
+        
+        # Создаём MCPManager для этой сессии
+        mcp_manager = MCPManager(session_state.session_id)
+        session_state.mcp_manager = mcp_manager
+        
+        for server_config_dict in mcp_servers:
+            # Пропускаем невалидные конфигурации
+            if not isinstance(server_config_dict, dict):
+                logger.warning(
+                    "invalid mcp server config, skipping",
+                    session_id=session_state.session_id,
+                    config=server_config_dict,
+                )
+                continue
+            
+            # Проверяем обязательные поля
+            name = server_config_dict.get("name")
+            command = server_config_dict.get("command")
+            if not name or not command:
+                logger.warning(
+                    "mcp server config missing name or command",
+                    session_id=session_state.session_id,
+                    config=server_config_dict,
+                )
+                continue
+            
+            try:
+                # Преобразуем dict в MCPServerConfig
+                config = MCPServerConfig(
+                    name=name,
+                    command=command,
+                    args=server_config_dict.get("args", []),
+                    env=server_config_dict.get("env", []),
+                )
+                
+                # Добавляем сервер и получаем список инструментов
+                # MCP инструменты НЕ регистрируются в глобальном ToolRegistry,
+                # т.к. они привязаны к сессии. Доступ к ним через session_state.mcp_manager.
+                tool_definitions = await mcp_manager.add_server(config)
+                
+                logger.info(
+                    "mcp server initialized",
+                    session_id=session_state.session_id,
+                    server=name,
+                    tools_count=len(tool_definitions),
+                    tool_names=[td.name for td in tool_definitions],
+                )
+                
+            except MCPManagerError as e:
+                # Graceful degradation: логируем ошибку, но продолжаем
+                logger.error(
+                    "failed to initialize mcp server",
+                    session_id=session_state.session_id,
+                    server=name,
+                    error=str(e),
+                )
+            except Exception as e:
+                # Непредвиденные ошибки также логируем без прерывания
+                logger.exception(
+                    "unexpected error initializing mcp server",
+                    session_id=session_state.session_id,
+                    server=name,
+                    error=str(e),
+                )

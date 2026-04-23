@@ -11,10 +11,13 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from ...client_rpc.service import ClientRPCService
 from ...messages import ACPMessage, JsonRpcId
+from ...tools.base import ToolRegistry
 from ..state import (
     ActiveTurnState,
     PendingClientRequestState,
+    PendingToolExecution,
     PreparedFsClientRequest,
     PromptDirectives,
     ProtocolOutcome,
@@ -29,6 +32,7 @@ from .permissions import (
 )
 from .plan_builder import PlanBuilder
 from .prompt_orchestrator import PromptOrchestrator
+from .replay_manager import ReplayManager
 from .session import (
     _serialize_available_commands,
     session_info_notification,
@@ -39,14 +43,19 @@ from .turn_lifecycle_manager import TurnLifecycleManager
 
 if TYPE_CHECKING:
     from ...agent.orchestrator import AgentOrchestrator
+    from .global_policy_manager import GlobalPolicyManager
 
 # Используем structlog для структурированного логирования
 logger = structlog.get_logger()
 
 
-def create_prompt_orchestrator() -> PromptOrchestrator:
+def create_prompt_orchestrator(
+    tool_registry: ToolRegistry | None = None,
+    client_rpc_service: ClientRPCService | None = None,
+    global_policy_manager: GlobalPolicyManager | None = None,
+) -> PromptOrchestrator:
     """Создает полностью инициализированный PromptOrchestrator со всеми компонентами.
-    
+
     Инициирует и собирает все необходимые компоненты:
     - StateManager: управление состоянием сессии
     - PlanBuilder: построение планов
@@ -54,12 +63,23 @@ def create_prompt_orchestrator() -> PromptOrchestrator:
     - ToolCallHandler (Этап 2): управление tool calls
     - PermissionManager (Этап 2): управление разрешениями
     - ClientRPCHandler (Этап 2): управление client RPC запросами
-    
+    - ToolRegistry: реестр инструментов для выполнения (опционально)
+    - ClientRPCService: сервис для выполнения RPC запросов (опционально)
+    - GlobalPolicyManager: для fallback chain при проверке разрешений (опционально)
+
+    Если tool_registry и client_rpc_service не переданы, оркестратор будет создан
+    в режиме совместимости без поддержки выполнения встроенных инструментов.
+
+    Args:
+        tool_registry: Реестр инструментов для регистрации и выполнения tools (опционально)
+        client_rpc_service: Сервис ClientRPC для выполнения инструментов (опционально)
+        global_policy_manager: GlobalPolicyManager для fallback chain (опционально)
+
     Returns:
         PromptOrchestrator: Готовый к использованию оркестратор
-        
+
     Пример использования:
-        orchestrator = create_prompt_orchestrator()
+        orchestrator = create_prompt_orchestrator(registry, rpc_service, global_manager)
         outcome = await orchestrator.handle_prompt(...)
     """
     state_manager = StateManager()
@@ -68,7 +88,22 @@ def create_prompt_orchestrator() -> PromptOrchestrator:
     tool_call_handler = ToolCallHandler()
     permission_manager = PermissionManager()
     client_rpc_handler = ClientRPCHandler()
-    
+
+    # Если tool_registry или client_rpc_service не переданы, создать dummy instances
+    if tool_registry is None:
+        from acp_server.tools.registry import SimpleToolRegistry
+
+        tool_registry = SimpleToolRegistry()
+
+    if client_rpc_service is None:
+        # Создать minimal ClientRPCService для совместимости
+        # В реальном коде это должно быть передано из ACPProtocol
+        logger.warning("client_rpc_service not provided, using None for compatibility")
+        # Для совместимости с session_cancel, который не нуждается в RPC
+        client_rpc_service = None  # type: ignore[assignment]
+    else:
+        logger.info("client_rpc_service provided")
+
     orchestrator = PromptOrchestrator(
         state_manager=state_manager,
         plan_builder=plan_builder,
@@ -76,224 +111,17 @@ def create_prompt_orchestrator() -> PromptOrchestrator:
         tool_call_handler=tool_call_handler,
         permission_manager=permission_manager,
         client_rpc_handler=client_rpc_handler,
-    )
-    
-    logger.debug("PromptOrchestrator created with all components")
-    return orchestrator
-
-
-async def _handle_with_agent(
-    request_id: JsonRpcId | None,
-    params: dict[str, Any],
-    session: SessionState,
-    sessions: dict[str, SessionState],
-    agent_orchestrator: AgentOrchestrator,
-    storage: Any | None = None,
-) -> ProtocolOutcome:
-    """Обрабатывает промпт через LLM-агента.
-
-    Извлекает текст из prompt blocks, передает агенту для обработки,
-    и формирует результат в виде ProtocolOutcome с notifications.
-    После обработки промпта сессия сохраняется в storage для персистентности истории.
-
-    Args:
-        request_id: ID запроса для response
-        params: Параметры запроса (должны содержать prompt array)
-        session: Состояние текущей сессии
-        sessions: Словарь всех сессий
-        agent_orchestrator: Оркестратор для обработки промпта
-        storage: SessionStorage для сохранения состояния (опционально)
-
-    Returns:
-        ProtocolOutcome с результатами обработки через агента
-    """
-    session_id = session.session_id
-    prompt = params.get("prompt", [])
-
-    # Установить активный turn
-    session.active_turn = ActiveTurnState(prompt_request_id=request_id, session_id=session_id)
-
-    # Извлечь текст из prompt blocks
-    text_blocks: list[str] = []
-    for block in prompt:
-        if (
-            isinstance(block, dict)
-            and block.get("type") == "text"
-            and isinstance(block.get("text"), str)
-        ):
-            text_blocks.append(block["text"])
-
-    prompt_text = "\n".join(text_blocks) if text_blocks else ""
-    text_preview = text_blocks[0] if text_blocks else "Prompt received"
-
-    # Уведомления для транспорта
-    notifications: list[ACPMessage] = []
-
-    # Отправить сообщение подтверждения
-    ack_message = f"Processing with agent: {text_preview[:80]}"
-    notifications.append(
-        ACPMessage.notification(
-            "session/update",
-            {
-                "sessionId": session_id,
-                "update": {
-                    "sessionUpdate": "agent_message_chunk",
-                    "content": {
-                        "type": "text",
-                        "text": ack_message,
-                    },
-                },
-            },
-        )
+        tool_registry=tool_registry,
+        client_rpc_service=client_rpc_service,
+        global_policy_manager=global_policy_manager,
     )
 
-    # Обработать промпт через агента
-    try:
-        # Агент обновит состояние сессии
-        updated_session = await agent_orchestrator.process_prompt(session, prompt_text)
-        # Обновить сессию в словаре
-        sessions[session_id] = updated_session
-        session = updated_session
-    except Exception as e:
-        # На случай ошибок в агенте, отправить error message
-        error_message = f"Agent error: {str(e)}"
-        notifications.append(
-            ACPMessage.notification(
-                "session/update",
-                {
-                    "sessionId": session_id,
-                    "update": {
-                        "sessionUpdate": "agent_message_chunk",
-                        "content": {
-                            "type": "text",
-                            "text": error_message,
-                        },
-                    },
-                },
-            )
-        )
-
-    # Добавить промпт и ответ в историю сессии
-    session.history.append({"role": "user", "content": prompt})
-    session.updated_at = datetime.now(UTC).isoformat()
-
-    # Установить заголовок сессии, если его еще нет
-    if session.title is None and text_preview:
-        session.title = text_preview.strip()[:80]
-
-    # Отправить notification об обновлении session info
-    notifications.append(
-        session_info_notification(
-            session_id=session_id,
-            title=session.title,
-            updated_at=session.updated_at,
-        )
-    )
-
-    # Отправить notification об обновлении доступных команд
-    notifications.append(
-        ACPMessage.notification(
-            "session/update",
-            {
-                "sessionId": session_id,
-                "update": {
-                    "sessionUpdate": "available_commands_update",
-                    "availableCommands": _serialize_available_commands(
-                        session.available_commands
-                    ),
-                },
-            },
-        )
-    )
-
-    # Завершить turn и отправить response
-    session.active_turn = None
-    stop_reason = "end_turn"
-
-    # Логирование и отправка финального ответа ассистента из истории.
-    #
-    # В orchestrator-ветке первый chunk является техническим ACK,
-    # а фактический ответ LLM сохраняется в session.history.
-    # Чтобы клиент мог отобразить реальный ответ в ChatView,
-    # публикуем дополнительный agent_message_chunk с этим текстом.
-    final_assistant_text: str | None = None
-    for history_entry in reversed(session.history):
-        if isinstance(history_entry, dict) and history_entry.get("role") == "assistant":
-            assistant_text = history_entry.get("text", "")
-            if isinstance(assistant_text, str) and assistant_text:
-                final_assistant_text = assistant_text
-            logger.info(
-                "final assistant response in session history",
-                session_id=session_id,
-                message_length=len(assistant_text),
-            )
-            logger.debug(
-                "final assistant response content",
-                content=assistant_text[:200],
-            )
-            break
-
-    if final_assistant_text is not None:
-        notifications.append(
-            ACPMessage.notification(
-                "session/update",
-                {
-                    "sessionId": session_id,
-                    "update": {
-                        "sessionUpdate": "agent_message_chunk",
-                        "content": {
-                            "type": "text",
-                            "text": final_assistant_text,
-                        },
-                    },
-                },
-            )
-        )
-
-    # Логирование содержимого отправляемых сообщений
-    for notification in notifications:
-        if notification.method == "session/update":
-            notif_params = notification.params
-            if (
-                isinstance(notif_params, dict)
-                and "update" in notif_params
-                and isinstance(notif_params["update"], dict)
-                and notif_params["update"].get("sessionUpdate") == "agent_message_chunk"
-            ):
-                # Логирование agent_message_chunk с содержимым ответа
-                content = notif_params["update"].get("content", {})
-                if isinstance(content, dict) and content.get("type") == "text":
-                    message_text = content.get("text", "")
-                    logger.debug(
-                        "agent message chunk being sent",
-                        content=message_text[:200],
-                    )
-
-    # Логирование отправки ответа клиенту
-    logger.info(
-        "sending response to client",
-        session_id=session_id,
-        stop_reason=stop_reason,
-        num_notifications=len(notifications),
-    )
     logger.debug(
-        "response details",
-        request_id=str(request_id) if request_id else None,
-        session_title=session.title,
+        "PromptOrchestrator created with all components",
+        tools_registered=len(tool_registry.list_tools()),
+        has_global_policy_manager=global_policy_manager is not None,
     )
-
-    # Сохраняем сессию в storage для персистентности истории после обработки агентом
-    if storage is not None:
-        try:
-            await storage.save_session(session)
-            logger.debug("session_saved_after_agent_processing", session_id=session_id)
-        except Exception as e:
-            logger.error("failed_to_save_session_after_agent_processing", error=str(e))
-
-    return ProtocolOutcome(
-        response=ACPMessage.response(request_id, {"stopReason": stop_reason}),
-        notifications=notifications,
-    )
+    return orchestrator
 
 
 async def session_prompt(
@@ -303,11 +131,14 @@ async def session_prompt(
     config_specs: dict[str, dict[str, Any]],
     agent_orchestrator: AgentOrchestrator | None = None,
     storage: Any | None = None,
+    tool_registry: ToolRegistry | None = None,
+    client_rpc_service: ClientRPCService | None = None,
+    global_manager: GlobalPolicyManager | None = None,
 ) -> ProtocolOutcome:
     """Обрабатывает пользовательский prompt-turn через PromptOrchestrator.
 
     Этап 5: Глубокая интеграция оркестратора.
-    
+
     Метод валидирует контент и делегирует обработку PromptOrchestrator,
     который управляет всеми компонентами (StateManager, PlanBuilder,
     TurnLifecycleManager, ToolCallHandler, PermissionManager, ClientRPCHandler).
@@ -324,6 +155,8 @@ async def session_prompt(
         config_specs: Спецификации конфигурационных опций (не используется в orchestrator)
         agent_orchestrator: Оркестратор агента для обработки через LLM (опционально)
         storage: SessionStorage для сохранения состояния (опционально)
+        tool_registry: Реестр инструментов для выполнения (опционально)
+        client_rpc_service: Сервис ClientRPC для выполнения инструментов (опционально)
 
     Returns:
         ProtocolOutcome с notifications и response
@@ -371,10 +204,21 @@ async def session_prompt(
         return ProtocolOutcome(response=content_error)
 
     # === ЭТАП 2: Обработка через PromptOrchestrator ===
-    
+
     # Если передан agent_orchestrator, использовать оркестратор для полной обработки
     if agent_orchestrator is not None:
-        orchestrator = create_prompt_orchestrator()
+        # Создать оркестратор с доступными параметрами
+        # tool_registry и client_rpc_service опциональны для совместимости
+        if tool_registry is None or client_rpc_service is None:
+            logger.warning(
+                "tool_registry or client_rpc_service not provided, "
+                "tool execution will not be available",
+                session_id=session_id,
+            )
+
+        orchestrator = create_prompt_orchestrator(
+            tool_registry, client_rpc_service, global_manager
+        )
         try:
             outcome = await orchestrator.handle_prompt(
                 request_id=request_id,
@@ -388,7 +232,7 @@ async def session_prompt(
                 session_id=session_id,
                 notifications_count=len(outcome.notifications),
             )
-            
+
             # Сохраняем сессию в storage после обработки оркестратором
             if storage is not None:
                 try:
@@ -402,7 +246,7 @@ async def session_prompt(
                         "failed_to_save_session_after_orchestrator_processing",
                         error=str(e),
                     )
-            
+
             return outcome
         except Exception as e:
             logger.error(
@@ -428,6 +272,15 @@ async def session_prompt(
         )
 
     session.active_turn = ActiveTurnState(prompt_request_id=request_id, session_id=session_id)
+
+    # Создать ReplayManager для сохранения событий в events_history
+    # Это обеспечивает корректный replay при session/load
+    replay_manager = ReplayManager()
+
+    # Сохранить user_message_chunk для каждого блока prompt
+    for block in prompt:
+        if isinstance(block, dict):
+            replay_manager.save_user_message_chunk(session, block)
 
     # Извлекаем первый text-блок для демо-ответа и формирования заголовка сессии.
     text_blocks: list[str] = []
@@ -463,6 +316,8 @@ async def session_prompt(
         },
     )
     notifications.append(update)
+    # Сохранить agent_message_chunk в events_history
+    replay_manager.save_agent_message_chunk(session, {"type": "text", "text": agent_text})
 
     if directives.publish_plan:
         plan_entries = build_plan_entries(
@@ -565,11 +420,20 @@ async def session_prompt(
                 },
             )
         )
+        # Сохранить tool_call в events_history для replay
+        replay_manager.save_tool_call(
+            session=session,
+            tool_call_id=tool_call_id,
+            title=tool_title,
+            kind=directives.tool_kind,
+            status="pending",
+        )
 
         if session.config_values.get("mode", "ask") == "ask":
-            remembered_permission = resolve_remembered_permission_decision(
+            remembered_permission = await resolve_remembered_permission_decision(
                 session=session,
                 tool_kind=directives.tool_kind,
+                global_manager=global_manager,
             )
             if remembered_permission == "allow":
                 notifications.extend(
@@ -673,9 +537,7 @@ async def session_prompt(
                 "sessionId": session_id,
                 "update": {
                     "sessionUpdate": "available_commands_update",
-                    "availableCommands": _serialize_available_commands(
-                        session.available_commands
-                    ),
+                    "availableCommands": _serialize_available_commands(session.available_commands),
                 },
             },
         )
@@ -692,7 +554,7 @@ async def session_prompt(
         # Финальный response будет отправлен позже (автозавершение или cancel).
         if directives.keep_tool_pending and should_run_tool_flow:
             session.active_turn.phase = "waiting_tool_completion"
-        
+
         # Сохраняем сессию в storage для персистентности истории даже при deferred completion
         if storage is not None:
             try:
@@ -700,7 +562,7 @@ async def session_prompt(
                 logger.debug("session_saved_after_prompt_deferred", session_id=session_id)
             except Exception as e:
                 logger.error("failed_to_save_session_after_prompt_deferred", error=str(e))
-        
+
         return ProtocolOutcome(response=None, notifications=notifications)
 
     outcome = ProtocolOutcome(
@@ -708,7 +570,7 @@ async def session_prompt(
         notifications=notifications,
     )
     session.active_turn = None
-    
+
     # Сохраняем сессию в storage для персистентности истории
     if storage is not None:
         try:
@@ -716,7 +578,7 @@ async def session_prompt(
             logger.debug("session_saved_after_prompt", session_id=session_id)
         except Exception as e:
             logger.error("failed_to_save_session_after_prompt", error=str(e))
-    
+
     return outcome
 
 
@@ -748,7 +610,7 @@ def session_cancel(
     """
 
     session_id = params.get("sessionId")
-    
+
     # Проверить, что sessionId передан и сессия существует
     if not isinstance(session_id, str) or session_id not in sessions:
         # Если sessionId невалиден или сессия не найдена, вернуть пустой результат
@@ -758,9 +620,13 @@ def session_cancel(
             response=ACPMessage.response(request_id, None),
             notifications=[],
         )
-    
+
     session = sessions[session_id]
-    
+    active_turn_before_cancel = session.active_turn
+    deferred_prompt_request_id: JsonRpcId | None = None
+    if active_turn_before_cancel is not None:
+        deferred_prompt_request_id = active_turn_before_cancel.prompt_request_id
+
     # === ЭТАП 1: Использовать PromptOrchestrator для обработки отмены ===
     orchestrator = create_prompt_orchestrator()
     try:
@@ -775,7 +641,26 @@ def session_cancel(
             session_id=session_id,
             notifications_count=len(outcome.notifications),
         )
-        return outcome
+        followup_responses = list(outcome.followup_responses)
+        if deferred_prompt_request_id is not None and not any(
+            response.id == deferred_prompt_request_id for response in followup_responses
+        ):
+            followup_responses.append(
+                ACPMessage.response(
+                    deferred_prompt_request_id,
+                    {"stopReason": "cancelled"},
+                )
+            )
+
+        cancel_response = outcome.response
+        if request_id is not None and cancel_response is None:
+            cancel_response = ACPMessage.response(request_id, None)
+
+        return ProtocolOutcome(
+            response=cancel_response,
+            notifications=outcome.notifications,
+            followup_responses=followup_responses,
+        )
     except Exception as e:
         logger.error(
             "orchestrator handle_cancel failed",
@@ -1250,6 +1135,10 @@ def build_policy_tool_execution_updates(
 ) -> list[ACPMessage]:
     """Строит lifecycle updates для tool execution после policy-решения.
 
+    При allowed=True отправляет только "in_progress" статус.
+    Реальное выполнение и "completed" статус обрабатываются асинхронно
+    через pending_tool_execution в ProtocolOutcome.
+
     Пример использования:
         updates = build_policy_tool_execution_updates(
             session=state,
@@ -1275,9 +1164,10 @@ def build_policy_tool_execution_updates(
             )
         ]
 
-    notifications: list[ACPMessage] = []
+    # При allowed=True только отмечаем "in_progress".
+    # Реальное выполнение будет запущено асинхронно через pending_tool_execution.
     update_tool_call_status(session, tool_call_id, "in_progress")
-    notifications.append(
+    return [
         ACPMessage.notification(
             "session/update",
             {
@@ -1289,37 +1179,7 @@ def build_policy_tool_execution_updates(
                 },
             },
         )
-    )
-    completed_content = [
-        {
-            "type": "content",
-            "content": {
-                "type": "text",
-                "text": "Tool completed successfully.",
-            },
-        }
     ]
-    update_tool_call_status(
-        session,
-        tool_call_id,
-        "completed",
-        content=completed_content,
-    )
-    notifications.append(
-        ACPMessage.notification(
-            "session/update",
-            {
-                "sessionId": session_id,
-                "update": {
-                    "sessionUpdate": "tool_call_update",
-                    "toolCallId": tool_call_id,
-                    "status": "completed",
-                    "content": completed_content,
-                },
-            },
-        )
-    )
-    return notifications
 
 
 def build_plan_entries(
@@ -2243,6 +2103,8 @@ def resolve_permission_response_impl(
             followup_responses=[cancelled] if cancelled is not None else [],
         )
 
+    # ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Когда permission allowed, отправить notifications
+    # и завершить turn с end_turn. Tool execution будет выполнен внутри session_prompt().
     notifications.extend(
         build_policy_tool_execution_updates(
             session=session,
@@ -2260,8 +2122,20 @@ def resolve_permission_response_impl(
             updated_at=session.updated_at,
         )
     )
-    completed = finalize_active_turn(session=session, stop_reason="end_turn")
+    
+    # ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Не завершаем turn, а сигнализируем о pending tool execution
+    # http_server.py выполнит tool асинхронно и затем завершит turn
+    logger.debug(
+        "permission allowed, scheduling tool execution",
+        session_id=session_id,
+        tool_call_id=tool_call_id,
+    )
+    
     return ProtocolOutcome(
         notifications=notifications,
-        followup_responses=[completed] if completed is not None else [],
+        followup_responses=[],
+        pending_tool_execution=PendingToolExecution(
+            session_id=session_id,
+            tool_call_id=tool_call_id,
+        ),
     )

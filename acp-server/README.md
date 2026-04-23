@@ -148,7 +148,158 @@ uv run acp-server --log-level DEBUG --log-json
 - **request received** — входящий ACP запрос (method, request_id, session_id)
 - **request parse error** — ошибка парсинга запроса (request_id, error, traceback)
 - **deferred prompt completed** — завершение отложенного prompt (connection_id, session_id)
+
+## MCP Support
+
+Сервер поддерживает подключение [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) серверов через параметр `mcpServers` в `session/new` и `session/load`.
+
+### Конфигурация MCP серверов
+
+```json
+{
+  "method": "session/new",
+  "params": {
+    "mcpServers": {
+      "filesystem": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/directory"]
+      },
+      "database": {
+        "command": "/usr/local/bin/mcp-postgres",
+        "args": ["--connection-string", "postgresql://..."],
+        "env": {
+          "POSTGRES_PASSWORD": "secret"
+        }
+      }
+    }
+  }
+}
+```
+
+### Как это работает
+
+1. При создании сессии ACP сервер запускает указанные MCP серверы как subprocess
+2. Выполняет MCP handshake (initialize) и получает список доступных tools
+3. MCP tools регистрируются в ToolRegistry с namespace `mcp:{server_name}:{tool_name}`
+4. LLM может вызывать MCP tools как обычные инструменты
+5. При завершении сессии MCP процессы корректно завершаются
+
+### Архитектура MCP интеграции
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         ACP Server                              │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │                     ToolRegistry                          │  │
+│  │  ┌─────────────────┐  ┌─────────────────────────────────┐│  │
+│  │  │  Built-in Tools │  │        MCP Tools                 ││  │
+│  │  │  - fs/read      │  │  - mcp:filesystem:read_file     ││  │
+│  │  │  - terminal/run │  │  - mcp:database:query           ││  │
+│  │  └─────────────────┘  └─────────────────────────────────┘│  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                              │                                  │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │                      MCPManager                           │  │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐   │  │
+│  │  │  MCPClient   │  │  MCPClient   │  │  MCPClient   │   │  │
+│  │  │  (filesystem)│  │  (database)  │  │  (custom)    │   │  │
+│  │  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘   │  │
+│  └─────────┼─────────────────┼─────────────────┼────────────┘  │
+└────────────┼─────────────────┼─────────────────┼────────────────┘
+             │ stdio           │ stdio           │ stdio
+     ┌───────▼───────┐ ┌───────▼───────┐ ┌───────▼───────┐
+     │  MCP Server   │ │  MCP Server   │ │  MCP Server   │
+     │  (filesystem) │ │  (postgres)   │ │  (custom)     │
+     └───────────────┘ └───────────────┘ └───────────────┘
+```
+
+### Модуль MCP
+
+Реализация находится в `src/acp_server/mcp/`:
+
+| Файл | Описание |
+|------|----------|
+| `models.py` | Pydantic модели MCP протокола |
+| `transport.py` | StdioTransport для stdio коммуникации |
+| `client.py` | MCPClient — клиент для MCP сервера |
+| `tool_adapter.py` | Адаптер MCP tools → ToolDefinition |
+| `manager.py` | MCPManager — управление несколькими серверами |
 - **deferred prompt cancelled** — отмена отложенного prompt (connection_id, session_id)
+
+## Content Types
+
+Сервер поддерживает следующие типы контента согласно ACP спецификации:
+
+- **TextContent** - текстовые сообщения
+- **ImageContent** - изображения (base64, PNG, JPEG, GIF, WebP)
+- **AudioContent** - аудиоданные (base64, WAV, MP3, MPEG)
+- **EmbeddedResourceContent** - встроенные ресурсы
+- **ResourceLinkContent** - ссылки на ресурсы
+
+Реализация использует Pydantic dataclasses с валидацией и discriminated union для полиморфизма.
+
+Подробнее см. [`doc/architecture/CONTENT_TYPES_ARCHITECTURE.md`](../../doc/architecture/CONTENT_TYPES_ARCHITECTURE.md)
+
+## Клиентские методы (Agent → Client RPC)
+
+Агент может вызывать методы на клиенте для доступа к локальной среде пользователя.
+
+### ClientRPCService
+
+Сервис для инициирования RPC вызовов на клиенте:
+
+```python
+from acp_server.client_rpc import ClientRPCService
+
+# Создать сервис
+rpc_service = ClientRPCService(
+    send_request_callback=transport.send,
+    client_capabilities=client_caps,
+    timeout=30.0
+)
+
+# Прочитать файл на клиенте
+content = await rpc_service.read_text_file(
+    session_id="sess_123",
+    path="/path/to/file.txt"
+)
+
+# Создать терминал на клиенте
+terminal_id = await rpc_service.create_terminal(
+    session_id="sess_123",
+    command="npm",
+    args=["test"]
+)
+
+# Получить output терминала
+output = await rpc_service.terminal_output(
+    session_id="sess_123",
+    terminal_id=terminal_id,
+    max_bytes=10000
+)
+```
+
+### Поддерживаемые методы
+
+#### File System
+- `read_text_file(path, start_line, end_line)` — чтение текстовых файлов с поддержкой диапазонов строк
+- `write_text_file(path, content, create, overwrite)` — запись текстовых файлов с контролем создания
+
+#### Terminal
+- `create_terminal(command, args, cwd)` — создание терминала и запуск команды
+- `terminal_output(terminal_id, max_bytes)` — получение output терминала
+- `wait_for_exit(terminal_id)` — ожидание завершения процесса
+- `kill_terminal(terminal_id)` — принудительное завершение процесса
+- `release_terminal(terminal_id)` — освобождение ресурсов терминала
+
+### Особенности
+
+- **Проверка возможностей:** Сервис проверяет `clientCapabilities` перед вызовом каждого метода
+- **Управление timeout:** Автоматическое управление ожидающими запросами с таймаутом
+- **Обработка ошибок:** Специализированные исключения для различных типов ошибок
+- **Безопасность:** Валидация всех параметров перед отправкой на клиент
+
+Подробнее см. [`doc/architecture/CLIENT_METHODS_ARCHITECTURE.md`](../../doc/architecture/CLIENT_METHODS_ARCHITECTURE.md)
 
 ## ACP методы
 
@@ -177,6 +328,8 @@ uv run acp-server --log-level DEBUG --log-json
 - Для WS-оркестрации также поддерживаются structured overrides через `_meta.promptDirectives`.
 - Legacy marker-триггеры (`[plan]`, `[tool]`, `[tool-pending]`) больше не обрабатываются.
 - Если turn отменяется методом `session/cancel`, исходный `session/prompt` завершается с `stopReason: "cancelled"`.
+- При разрыве WebSocket соединения сервер автоматически отменяет все активные turn этой
+  connection (auto-cancel on disconnect), чтобы не оставлять зависшие in-flight операции.
 
 ### Поведение `authenticate`
 
@@ -329,6 +482,256 @@ acp-server/src/acp_server/
 │       ├── memory.py         # InMemoryStorage
 │       └── json_file.py      # JsonFileStorage
 └── # Остальные модули...
+```
+
+## Content Integration в Tool Calls
+
+Начиная с Этапа 4, tool execution results поддерживают структурированный content для отправки клиенту и LLM.
+
+### Архитектура
+
+```
+ToolExecutor → ToolExecutionResult (с content)
+    ↓
+ContentExtractor → ExtractedContent
+    ↓
+ContentValidator → валидация согласно ACP
+    ↓
+ContentFormatter → OpenAI/Anthropic format
+    ↓
+LLM Provider
+```
+
+### Поддерживаемые Content Types
+
+- **text** - текстовый контент
+- **diff** - изменения в файлах (unified diff format)
+- **image** - изображения (base64)
+- **audio** - аудио файлы (base64)
+- **embedded** - вложенный контент
+- **resource_link** - ссылки на ресурсы
+
+### Пример использования
+
+```python
+from acp_server.tools.base import ToolExecutionResult
+
+# Tool executor генерирует content
+result = ToolExecutionResult(
+    success=True,
+    output="File written successfully",
+    content=[
+        {"type": "text", "text": "Successfully wrote file"},
+        {"type": "diff", "path": "file.py", "diff": "+new line\n-old line"}
+    ]
+)
+
+# Content автоматически извлекается, валидируется и форматируется для LLM
+```
+
+### Компоненты
+
+- **[`ContentExtractor`](src/acp_server/protocol/content/extractor.py)** - извлечение content из результатов инструментов
+- **[`ContentValidator`](src/acp_server/protocol/content/validator.py)** - валидация согласно ACP спецификации
+- **[`ContentFormatter`](src/acp_server/protocol/content/formatter.py)** - форматирование для OpenAI и Anthropic API
+
+### Документация
+
+- [Архитектура Content Integration](../../doc/architecture/PROMPT_TURN_CONTENT_INTEGRATION_ARCHITECTURE.md)
+- [Спецификация Content Types](../../doc/Agent%20Client%20Protocol/protocol/06-Content.md)
+- [Tool Calls спецификация](../../doc/Agent%20Client%20Protocol/protocol/08-Tool%20Calls.md)
+
+### E2E Testing
+
+Полный набор E2E тестов для Content Integration находится в `tests/e2e/`:
+
+```bash
+# Запустить все E2E тесты
+cd acp-server && uv run python -m pytest tests/e2e/ -v
+
+# Запустить тесты для конкретного типа контента
+uv run python -m pytest tests/e2e/test_e2e_text_content.py -v
+```
+
+**Покрытие:**
+- 24 E2E теста
+- Все 6 типов content (text, diff, image, audio, embedded, resource_link)
+- Оба LLM провайдера (OpenAI, Anthropic)
+- Полный цикл: Extraction → Validation → Formatting
+
+**Архитектура тестов:**
+- [`doc/architecture/CONTENT_INTEGRATION_E2E_TESTING_ARCHITECTURE.md`](../doc/architecture/CONTENT_INTEGRATION_E2E_TESTING_ARCHITECTURE.md)
+
+## Tool Calls Integration
+
+ACP сервер поддерживает встроенные инструменты для взаимодействия с локальной средой клиента:
+
+### Файловая система (fs/*)
+
+- **fs/read_text_file** - Чтение текстовых файлов
+  - Параметры: `path`, `line` (опционально), `limit` (опционально)
+  - Requires permission: `read`
+  
+- **fs/write_text_file** - Запись текстовых файлов
+  - Параметры: `path`, `content`
+  - Metadata: `diff` (unified diff формат)
+  - Requires permission: `write`
+
+### Терминал (terminal/*)
+
+- **terminal/create** - Создание терминала и выполнение команды
+  - Параметры: `command`, `args`, `env`, `cwd`, `output_byte_limit`
+  - Metadata: `terminal_id`
+  - Requires permission: `execute`
+  
+- **terminal/wait_for_exit** - Ожидание завершения процесса
+  - Параметры: `terminal_id`
+  - Metadata: `exit_code`
+  
+- **terminal/release** - Освобождение терминала
+  - Параметры: `terminal_id`
+
+### Permission Flow
+
+В режиме `mode: "ask"` сервер запрашивает разрешение перед выполнением инструментов:
+
+1. Агент возвращает tool calls в response
+2. Сервер отправляет `session/request_permission` notification
+3. Клиент отвечает через `session/respond_to_permission`
+4. Сервер выполняет или отклоняет tool call
+
+Поддерживаемые опции разрешений:
+- `allow_once` - Разрешить один раз
+- `allow_always` - Разрешить всегда (сохраняется в policy)
+- `reject_once` - Отклонить один раз
+- `reject_always` - Отклонить всегда (сохраняется в policy)
+
+### Примеры использования
+
+См. тесты в:
+- `tests/test_fs_executors.py`
+- `tests/test_terminal_executors.py`
+- `tests/test_tool_integration.py`
+
+### Тестирование
+
+Подробное руководство по тестированию Tool Calls см. в [`doc/TOOL_CALLS_TESTING_GUIDE.md`](../doc/TOOL_CALLS_TESTING_GUIDE.md).
+
+## Permission Management
+
+ACP Server реализует комплексную систему управления разрешениями с автоматическим persistence.
+
+### Возможности
+
+**Session-Level Permissions:**
+- `allow_once` - Разрешение для одного tool call
+- `allow_always` - Разрешение для всех tool calls данного типа в сессии
+- `reject_once` - Отклонение одного tool call
+- `reject_always` - Отклонение всех tool calls данного типа в сессии
+
+**Cross-Session Persistence:**
+- Permission policies автоматически сохраняются при session save
+- Policies автоматически восстанавливаются при session load
+- No user re-prompts для already granted permissions
+- Backward compatible с существующими сессиями
+
+### Архитектура
+
+**Компоненты:**
+- [`SessionState.permission_policy`](src/acp_server/protocol/state.py) - Хранение policies (Dict[str, str])
+- [`PermissionManager`](src/acp_server/protocol/handlers/permissions.py) - Decision logic
+- [`JsonFileStorage`](src/acp_server/storage/json_file.py) - Serialization/deserialization
+- [`resolve_remembered_permission_decision()`](src/acp_server/protocol/handlers/permissions.py) - Policy lookup
+
+**Persistence Flow:**
+```
+User grants permission → SessionState.permission_policy["read"] = "allow_always"
+                      ↓
+                   session/save → JsonFileStorage → JSON file
+                      ↓
+                   session/load → _deserialize_session() → policy restored
+                      ↓
+                   resolve_remembered_permission_decision() → returns "allow"
+```
+
+### Тестирование
+
+**51 permission-related тестов:**
+- 15 flow tests ([`tests/test_permission_flow.py`](tests/test_permission_flow.py))
+- 30 manager tests ([`tests/test_permission_manager.py`](tests/test_permission_manager.py))
+- 6 persistence tests ([`tests/test_permission_policy_persistence.py`](tests/test_permission_policy_persistence.py))
+
+**Запуск тестов:**
+```bash
+# Все permission тесты
+uv run python -m pytest tests/test_permission*.py -v
+
+# Только persistence тесты
+uv run python -m pytest tests/test_permission_policy_persistence.py -v
+```
+
+### Документация
+
+**Архитектурные документы:**
+- [`doc/architecture/ADVANCED_PERMISSION_MANAGEMENT_ARCHITECTURE.md`](../doc/architecture/ADVANCED_PERMISSION_MANAGEMENT_ARCHITECTURE.md) - Полная архитектура с 4 диаграммами Mermaid
+- [`doc/architecture/ADVANCED_PERMISSION_MANAGEMENT_ANALYSIS_REPORT.md`](../doc/architecture/ADVANCED_PERMISSION_MANAGEMENT_ANALYSIS_REPORT.md) - Анализ проблем и roadmap
+
+**Протокол:**
+- [`doc/Agent Client Protocol/protocol/05-Prompt Turn.md`](../doc/Agent%20Client%20Protocol/protocol/05-Prompt%20Turn.md) - Permission request/response flow
+
+## Планирование задач (Agent Plan)
+
+Агент поддерживает создание планов выполнения через инструмент `update_plan`.
+
+### Как это работает
+
+1. Агент получает сложную задачу
+2. Вызывает `update_plan` с планом выполнения
+3. План отображается в UI клиента
+4. По мере выполнения агент обновляет статусы задач
+
+### Тестирование flow планирования
+
+**1. Запустить сервер:**
+```bash
+cd acp-server
+cp .env.example .env  # настроить API ключ
+uv run acp-server --log-level DEBUG
+```
+
+**2. Запустить клиент (в другом терминале):**
+```bash
+cd acp-client
+uv run python -m acp_client.tui
+```
+
+**3. Отправить задачу для инициирования плана:**
+```
+Создай структуру проекта для REST API на FastAPI с файлами main.py, routes.py, models.py
+```
+
+Агент должен вызвать `update_plan` и план появится в панели.
+
+### Формат плана
+
+```json
+{
+  "entries": [
+    {"content": "Создать main.py", "priority": "high", "status": "pending"},
+    {"content": "Создать routes.py", "priority": "medium", "status": "pending"},
+    {"content": "Создать models.py", "priority": "medium", "status": "pending"}
+  ]
+}
+```
+
+**Поля:**
+- `priority`: `high`, `medium`, `low`
+- `status`: `pending`, `in_progress`, `completed`, `cancelled`
+
+### Unit тесты
+
+```bash
+uv run python -m pytest tests/test_plan*.py -v
 ```
 
 ## Проверки

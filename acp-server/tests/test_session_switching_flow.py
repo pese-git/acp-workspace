@@ -214,9 +214,7 @@ async def test_session_switching_three_way_flow() -> None:
                 "session/prompt",
                 {
                     "sessionId": session_id,
-                    "prompt": [
-                        {"type": "text", "text": f"Message from session {i}"}
-                    ],
+                    "prompt": [{"type": "text", "text": f"Message from session {i}"}],
                 },
             )
         )
@@ -268,17 +266,13 @@ async def test_session_switching_different_cwd_contexts() -> None:
 
     # Создаем SESSION_1 с одним cwd
     created_1 = await protocol.handle(
-        ACPMessage.request(
-            "session/new", {"cwd": "/tmp/project1", "mcpServers": []}
-        )
+        ACPMessage.request("session/new", {"cwd": "/tmp/project1", "mcpServers": []})
     )
     session_1_id = created_1.response.result["sessionId"]
 
     # Создаем SESSION_2 с другим cwd
     created_2 = await protocol.handle(
-        ACPMessage.request(
-            "session/new", {"cwd": "/tmp/project2", "mcpServers": []}
-        )
+        ACPMessage.request("session/new", {"cwd": "/tmp/project2", "mcpServers": []})
     )
     session_2_id = created_2.response.result["sessionId"]
 

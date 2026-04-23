@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 import structlog
@@ -18,6 +19,7 @@ from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 
 from acp_client.infrastructure.di_bootstrapper import DIBootstrapper
+from acp_client.messages import PermissionOption, PermissionToolCall
 from acp_client.presentation.chat_view_model import ChatViewModel
 from acp_client.presentation.file_viewer_view_model import FileViewerViewModel
 from acp_client.presentation.filesystem_view_model import FileSystemViewModel
@@ -35,6 +37,7 @@ from .components import (
     FooterBar,
     HeaderBar,
     HelpModal,
+    PermissionModal,
     PlanPanel,
     PromptInput,
     Sidebar,
@@ -70,7 +73,14 @@ class ACPClientApp(App[None]):
 
     CSS_PATH = str(Path(__file__).with_name("styles") / "app.tcss")
 
-    def __init__(self, *, host: str, port: int, cwd: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        host: str,
+        port: int,
+        cwd: str | None = None,
+        history_dir: str | None = None,
+    ) -> None:
         """Инициализирует приложение с Clean Architecture.
 
         Все компоненты инициализируются через DI контейнер.
@@ -79,6 +89,7 @@ class ACPClientApp(App[None]):
             host: Адрес сервера ACP
             port: Порт сервера ACP
             cwd: Путь к проекту (если None, используется текущая рабочая директория)
+            history_dir: Путь к директории локальной истории чата (опционально)
         """
         super().__init__()
         self._host = host
@@ -108,6 +119,7 @@ class ACPClientApp(App[None]):
                 host=host,
                 port=port,
                 cwd=cwd,
+                history_dir=history_dir,
                 logger=self._app_logger,
             )
             self._app_logger.info("di_container_built_successfully", cwd=cwd)
@@ -158,7 +170,9 @@ class ACPClientApp(App[None]):
                     root_path=self._cwd,
                 )
             with Vertical(id="main-column"):
-                yield ChatView(self._chat_vm)
+                # Передаем permission_vm в ChatView для встроенного виджета разрешения
+                self._chat_view = ChatView(self._chat_vm, self._permission_vm)
+                yield self._chat_view
                 yield PlanPanel(self._plan_vm)
             yield ToolPanel(self._chat_vm, self._terminal_vm)
         with Vertical(id="bottom"):
@@ -209,6 +223,23 @@ class ACPClientApp(App[None]):
             # Обновляем статус подключения в UI
             self._ui_vm.set_connection_status(ConnectionStatus.CONNECTED)
             self._ui_vm.set_loading(False)
+
+            # Устанавливаем callback для показа permission modal в UI.
+            # Это необходимо, чтобы при получении session/request_permission от сервера
+            # TUI приложение показало модальное окно для выбора разрешения.
+            try:
+                from acp_client.infrastructure.services.acp_transport_service import (
+                    ACPTransportService,
+                )
+
+                transport = self._container.resolve(ACPTransportService)
+                transport.set_permission_callback(self.show_permission_modal)
+                self._app_logger.info("permission_callback_registered_in_transport")
+            except Exception as e:
+                self._app_logger.warning(
+                    "failed_to_set_permission_callback",
+                    error=str(e),
+                )
 
             # После успешного подключения запрашиваем список сессий с сервера,
             # чтобы sidebar отображал сохраненные сессии сразу при старте.
@@ -411,6 +442,79 @@ class ACPClientApp(App[None]):
                     error=str(error),
                 )
 
+    def show_permission_modal(
+        self,
+        request_id: str | int,
+        tool_call: PermissionToolCall,
+        options: list[PermissionOption],
+        on_choice: Callable[[str | int, str], None],
+    ) -> None:
+        """Показывает встроенный виджет разрешения в ChatView.
+
+        Заменяет модальное окно на встроенный виджет для лучшей видимости.
+        Интегрирует InlinePermissionWidget с SessionCoordinator через callback pattern.
+
+        Args:
+            request_id: ID permission request от сервера
+            tool_call: Информация о tool call (kind, title, toolCallId)
+            options: Доступные опции для выбора (allow_once, reject_once, и т.д.)
+            on_choice: Callback для обработки выбора (request_id, option_id)
+        """
+        self._app_logger.debug(
+            "show_permission_modal_called",
+            request_id=request_id,
+            tool_call_kind=tool_call.kind,
+            tool_call_title=tool_call.title,
+            options_count=len(options),
+        )
+
+        try:
+            # Показать встроенный виджет в ChatView
+            if hasattr(self, "_chat_view") and self._chat_view is not None:
+                self._app_logger.debug(
+                    "showing_inline_permission_widget",
+                    request_id=request_id,
+                    tool_call_kind=tool_call.kind,
+                    tool_call_title=tool_call.title,
+                    options_count=len(options),
+                )
+                self._chat_view.show_permission_request(
+                    request_id, tool_call, options, on_choice
+                )
+            else:
+                self._app_logger.warning(
+                    "chat_view_not_available_for_permission_widget",
+                    request_id=request_id,
+                    fallback="showing_modal_instead",
+                )
+                # Fallback на модальное окно если ChatView недоступна
+                title = f"{tool_call.kind}: {tool_call.title}"
+                modal = PermissionModal(
+                    permission_vm=self._permission_vm,
+                    request_id=request_id,
+                    title=title,
+                    options=options,
+                    on_choice=on_choice,
+                )
+                self.push_screen(modal)
+
+        except Exception as e:
+            self._app_logger.error(
+                "failed_to_show_permission_widget",
+                request_id=request_id,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            # Fallback: вызвать on_choice с cancelled при ошибке
+            try:
+                on_choice(request_id, "cancelled")
+            except Exception as fallback_error:
+                self._app_logger.error(
+                    "failed_to_call_on_choice_callback",
+                    request_id=request_id,
+                    error=str(fallback_error),
+                )
+
     async def on_unmount(self) -> None:
         """Очистка ресурсов при завершении приложения."""
         self._app_logger.info("app_unmounting")
@@ -442,6 +546,7 @@ def run_tui_app(
     host: str | None = None,
     port: int | None = None,
     cwd: str | None = None,
+    history_dir: str | None = None,
 ) -> None:
     """Запускает TUI приложение с параметрами подключения и рабочей директории.
 
@@ -449,7 +554,8 @@ def run_tui_app(
         host: Адрес сервера ACP (если None, используется значение по умолчанию)
         port: Порт сервера ACP (если None, используется значение по умолчанию)
         cwd: Путь к проекту (если None, используется текущая рабочая директория)
+        history_dir: Путь к директории локальной истории чата (опционально)
     """
     resolved_host, resolved_port = resolve_tui_connection(host=host, port=port)
-    app = ACPClientApp(host=resolved_host, port=resolved_port, cwd=cwd)
+    app = ACPClientApp(host=resolved_host, port=resolved_port, cwd=cwd, history_dir=history_dir)
     app.run()

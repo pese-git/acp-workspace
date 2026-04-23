@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -19,11 +19,31 @@ class ToolDefinition:
 
 @dataclass
 class ToolExecutionResult:
-    """Результат выполнения инструмента."""
+    """Результат выполнения инструмента.
+    
+    Атрибуты:
+        success: Успешно ли выполнен инструмент
+        output: Текстовый вывод инструмента (опционально)
+        error: Сообщение об ошибке при неудачном выполнении (опционально)
+        metadata: Дополнительные метаданные для специфичных инструментов (опционально)
+        content: Структурированный content для отправки клиенту и LLM согласно ACP Content Types
+    
+    Примеры использования metadata:
+        - terminal_id для terminal/create: {"terminal_id": "term_xyz789"}
+        - diff для fs/write_text_file: {"diff": "--- old\\n+++ new\\n..."}
+        - file_size для fs/read_text_file: {"file_size": 1024, "lines": 50}
+    
+    Примеры использования content:
+        - text content: [{"type": "text", "text": "..."}]
+        - diff content: [{"type": "diff", "path": "file.py", "diff": "..."}]
+        - image content: [{"type": "image", "data": "...", "format": "png"}]
+    """
 
     success: bool
     output: str | None = None
     error: str | None = None
+    metadata: dict[str, Any] | None = None
+    content: list[dict[str, Any]] = field(default_factory=list)
 
 
 class ToolRegistry(ABC):
@@ -52,6 +72,27 @@ class ToolRegistry(ABC):
         pass
 
     @abstractmethod
+    def get(self, name: str) -> ToolDefinition | None:
+        """Получить определение инструмента по имени.
+        
+        Args:
+            name: Имя инструмента
+            
+        Returns:
+            Определение инструмента или None, если не найден
+        """
+        pass
+
+    @abstractmethod
+    def list_tools(self) -> list[ToolDefinition]:
+        """Получить список всех зарегистрированных инструментов.
+        
+        Returns:
+            Список определений инструментов
+        """
+        pass
+
+    @abstractmethod
     def to_llm_tools(self, tools: list[ToolDefinition]) -> list[dict[str, Any]]:
         """Преобразовать определения инструментов для LLM."""
         pass
@@ -62,6 +103,7 @@ class ToolRegistry(ABC):
         session_id: str,
         tool_name: str,
         arguments: dict[str, Any],
+        session: Any = None,
     ) -> ToolExecutionResult:
         """Выполнить инструмент."""
         pass

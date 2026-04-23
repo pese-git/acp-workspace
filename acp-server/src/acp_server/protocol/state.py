@@ -6,6 +6,7 @@ tool calls, и других компонентов протокола.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -55,10 +56,20 @@ class SessionState:
     # Поздние ответы на такие запросы должны игнорироваться детерминированно.
     cancelled_client_rpc_requests: set[JsonRpcId] = field(default_factory=set)
     # Runtime-capabilities клиента, зафиксированные для этой сессии.
+    # Используется для фильтрации доступных tools согласно спецификации ACP:
+    # "Clients and Agents MUST treat all capabilities omitted in the
+    # initialize request as UNSUPPORTED"
+    # Структура: {fs_read: bool, fs_write: bool, terminal: bool}
     runtime_capabilities: ClientRuntimeCapabilities | None = None
     # История событий: session/update, permission requests и т.д.
     # Используется для полного восстановления истории при перезагрузке сессии.
     events_history: list[dict[str, Any]] = field(default_factory=list)
+    # Ожидающие asyncio.Future для permission requests (request_id -> Future).
+    # Используется для асинхронного ожидания ответов пользователя на запросы разрешений.
+    pending_permission_requests: dict[JsonRpcId, asyncio.Future] = field(default_factory=dict)
+    # MCPManager для управления подключёнными MCP серверами.
+    # Используется для интеграции с внешними MCP серверами и их инструментами.
+    mcp_manager: Any = None
 
 
 @dataclass(slots=True)
@@ -82,6 +93,15 @@ class ToolCallState:
     status: str
     # Контент, возвращенный при завершении (если есть).
     content: list[dict[str, Any]] = field(default_factory=list)
+    # Извлеченный content из result tool execution для отправки клиенту.
+    result_content: list[dict[str, Any]] = field(default_factory=list)
+    # Имя инструмента для выполнения (соответствует tool_name в registry).
+    tool_name: str | None = None
+    # Аргументы для выполнения инструмента (для отложенного выполнения после permission).
+    tool_arguments: dict[str, Any] = field(default_factory=dict)
+    # Идентификатор tool_call из LLM ответа (для связки в истории диалога).
+    # Может отличаться от tool_call_id, который генерируется нами.
+    tool_call_id_from_llm: str | None = None
 
 
 @dataclass(slots=True)
@@ -188,6 +208,66 @@ class ClientRuntimeCapabilities:
 
 
 @dataclass(slots=True)
+class PendingToolExecution:
+    """Информация о pending tool execution после permission approval.
+    
+    Используется для передачи информации от permission handler к http_server
+    для выполнения реального tool через tool_registry.
+    """
+    session_id: str
+    tool_call_id: str
+
+
+@dataclass(slots=True)
+class ToolResult:
+    """Результат выполнения tool для передачи в LLM.
+    
+    Используется в LLM loop для сбора результатов выполнения tool calls
+    и отправки их обратно в LLM для продолжения обработки.
+    
+    Пример использования:
+        result = ToolResult(
+            tool_call_id="call_abc123",
+            tool_name="fs/read_text_file",
+            success=True,
+            output="File contents here...",
+        )
+    """
+    tool_call_id: str
+    tool_name: str
+    success: bool
+    output: str | None = None
+    error: str | None = None
+
+
+@dataclass(slots=True)
+class LLMLoopResult:
+    """Результат выполнения LLM loop.
+    
+    Содержит накопленные notifications, статус завершения и информацию
+    о pending состояниях (permission, tool calls).
+    
+    Пример использования:
+        result = LLMLoopResult(
+            notifications=[...],
+            stop_reason="end_turn",
+            final_text="Here is the answer...",
+        )
+    """
+    notifications: list[Any] = field(default_factory=list)
+    # Причина завершения: "end_turn", "cancelled", "max_iterations", None (deferred)
+    stop_reason: str | None = None
+    # Финальный текстовый ответ от LLM
+    final_text: str | None = None
+    # Флаг ожидания permission response
+    pending_permission: bool = False
+    # Оставшиеся tool calls для обработки после permission
+    pending_tool_calls: list[Any] = field(default_factory=list)
+    # Накопленные ToolResult для передачи в следующую итерацию
+    tool_results: list[ToolResult] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class ProtocolOutcome:
     """Результат обработки входящего ACP-сообщения.
 
@@ -202,3 +282,5 @@ class ProtocolOutcome:
     notifications: list[ACPMessage] = field(default_factory=list)
     # Дополнительные response-сообщения для отложенных JSON-RPC запросов (WS).
     followup_responses: list[ACPMessage] = field(default_factory=list)
+    # Информация о pending tool execution (если требуется асинхронное выполнение после permission).
+    pending_tool_execution: PendingToolExecution | None = None

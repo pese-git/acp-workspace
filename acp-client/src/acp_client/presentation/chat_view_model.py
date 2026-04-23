@@ -8,6 +8,7 @@
 """
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -73,6 +74,9 @@ class ChatViewModel(BaseViewModel):
         event_bus: Any | None = None,
         logger: Any | None = None,
         history_dir: Path | str | None = None,
+        fs_executor: Any | None = None,  # FileSystemExecutor
+        terminal_executor: Any | None = None,  # TerminalExecutor
+        plan_vm: Any | None = None,  # PlanViewModel для обработки plan updates
     ) -> None:
         """Инициализировать ChatViewModel.
 
@@ -81,15 +85,26 @@ class ChatViewModel(BaseViewModel):
             event_bus: EventBus для публикации/подписки на события
             logger: Logger для логирования
             history_dir: Директория локального persistence истории
-                (по умолчанию ~/.acp-client/history)
+                (приоритет: аргумент history_dir -> ACP_CLIENT_HISTORY_DIR -> ~/.acp-client/history)
+            fs_executor: FileSystemExecutor для обработки fs/* callbacks (синхронно)
+            terminal_executor: TerminalExecutor для обработки terminal/* callbacks (синхронно)
+            plan_vm: PlanViewModel для обработки plan updates из session/update
         """
         super().__init__(event_bus, logger)
         self.coordinator = coordinator
+        self._fs_executor = fs_executor
+        self._terminal_executor = terminal_executor
+        self._plan_vm = plan_vm
 
         # Локальный storage истории нужен для восстановления UI без network roundtrip.
-        resolved_history_dir = (
-            Path.home() / ".acp-client" / "history" if history_dir is None else Path(history_dir)
-        )
+        # Порядок приоритета: явный аргумент -> переменная окружения -> путь по умолчанию.
+        env_history_dir = os.getenv("ACP_CLIENT_HISTORY_DIR")
+        if history_dir is not None:
+            resolved_history_dir = Path(history_dir)
+        elif env_history_dir:
+            resolved_history_dir = Path(env_history_dir)
+        else:
+            resolved_history_dir = Path.home() / ".acp-client" / "history"
         self._history_dir = resolved_history_dir
         try:
             self._history_dir.mkdir(parents=True, exist_ok=True)
@@ -162,7 +177,13 @@ class ChatViewModel(BaseViewModel):
             # Отправить prompt через coordinator с callback для обработки обновлений
             # SessionCoordinator должен обработать updates и опубликовать события
             await self.coordinator.send_prompt(
-                session_id, prompt_text, on_update=self._handle_session_update, **kwargs
+                session_id,
+                prompt_text,
+                on_update=self._handle_session_update,
+                on_fs_read=self._handle_fs_read,
+                on_fs_write=self._handle_fs_write,
+                on_terminal_execute=self._handle_terminal_execute,
+                **kwargs,
             )
 
             # Гарантированное добавление streaming текста в историю после завершения
@@ -273,7 +294,84 @@ class ChatViewModel(BaseViewModel):
 
                     self.logger.debug("user_message_chunk_processed", text_length=len(text))
 
-            # Можно добавить обработку других типов: tool_call, plan_update и т.д.
+            # Обработка tool_call - отслеживание статуса выполнения инструмента
+            elif session_update_type == "tool_call":
+                tool_call_id = update.get("toolCallId")
+                tool_title = update.get("title")
+                tool_status = update.get("status")
+                tool_kind = update.get("kind")
+
+                if target_session_id is not None and tool_call_id:
+                    self.logger.info(
+                        "tool_call_status_changed",
+                        session_id=target_session_id,
+                        tool_call_id=tool_call_id,
+                        tool_name=tool_title,
+                        status=tool_status,
+                        kind=tool_kind,
+                    )
+                    
+                    # Добавляем tool call в состояние сессии
+                    state = self._get_or_create_session_state(target_session_id)
+                    tool_call_dict = {
+                        "toolCallId": tool_call_id,
+                        "title": tool_title,
+                        "kind": tool_kind,
+                        "status": tool_status,
+                    }
+                    # Обновляем existing tool call или добавляем новый
+                    state.tool_calls = [
+                        tc if tc.get("toolCallId") != tool_call_id else tool_call_dict
+                        for tc in state.tool_calls
+                    ]
+                    if tool_call_id not in [tc.get("toolCallId") for tc in state.tool_calls]:
+                        state.tool_calls.append(tool_call_dict)
+                    
+                    self._session_states[target_session_id] = state
+                    
+                    # Синхронизируем с UI если это активная сессия
+                    if self._active_session_id == target_session_id:
+                        self.tool_calls.value = list(state.tool_calls)
+
+            elif session_update_type == "tool_call_result":
+                tool_call_id = update.get("toolCallId")
+                result = update.get("result")
+
+                if target_session_id is not None and tool_call_id:
+                    self.logger.info(
+                        "tool_call_result_received",
+                        session_id=target_session_id,
+                        tool_call_id=tool_call_id,
+                        has_result=bool(result),
+                    )
+
+            # Обработка plan - обновление плана агента через PlanViewModel
+            elif session_update_type == "plan":
+                entries = update.get("entries", [])
+                self.logger.info(
+                    "plan_session_update_received",
+                    session_id=target_session_id,
+                    entries_count=len(entries),
+                    has_plan_vm=self._plan_vm is not None,
+                    raw_entries=entries[:2] if entries else None,  # First 2 for debug
+                )
+
+                if self._plan_vm is not None and entries:
+                    # Форматируем план для отображения в UI
+                    plan_lines = ["План:"]
+                    for entry in entries:
+                        content = entry.get("content", "")
+                        priority = entry.get("priority", "medium")
+                        status = entry.get("status", "pending")
+                        plan_lines.append(f"- [{status}] ({priority}) {content}")
+                    plan_text = "\n".join(plan_lines)
+                    self._plan_vm.set_plan(plan_text)
+
+                    self.logger.info(
+                        "plan_update_received",
+                        session_id=target_session_id,
+                        entries_count=len(entries),
+                    )
 
         except Exception as e:
             self.logger.error(
@@ -371,6 +469,106 @@ class ChatViewModel(BaseViewModel):
         self.last_stop_reason.value = None
         self._persist_active_state()
         self.logger.info("Chat cleared")
+
+    def _handle_fs_read(self, path: str) -> str:
+        """Обработать fs/read_text_file от агента (синхронный).
+
+        Используется синхронный метод FileSystemExecutor напрямую.
+
+        Args:
+            path: Путь к файлу для чтения
+
+        Returns:
+            Содержимое файла или пустая строка в случае ошибки
+        """
+        try:
+            session_id = self._active_session_id
+            if not session_id:
+                self.logger.warning("fs_read_no_active_session", path=path)
+                return ""
+
+            # Проверяем наличие executor'а перед использованием
+            if self._fs_executor is None:
+                self.logger.warning("fs_executor_not_initialized", path=path)
+                return ""
+
+            # Используем синхронный метод executor напрямую
+            content = self._fs_executor.read_text_file_sync(path)
+            self.logger.debug("fs_read_success", path=path, content_size=len(content))
+            return content
+        except Exception as e:
+            self.logger.error("fs_read_error", path=path, error=str(e))
+            return ""
+
+    def _handle_fs_write(self, path: str, content: str) -> bool:
+        """Обработать fs/write_text_file от агента (синхронный).
+
+        Используется синхронный метод FileSystemExecutor напрямую.
+
+        Args:
+            path: Путь к файлу для записи
+            content: Содержимое для записи
+
+        Returns:
+            True если запись успешна, False в случае ошибки
+        """
+        try:
+            session_id = self._active_session_id
+            if not session_id:
+                self.logger.warning("fs_write_no_active_session", path=path)
+                return False
+
+            # Проверяем наличие executor'а перед использованием
+            if self._fs_executor is None:
+                self.logger.warning("fs_executor_not_initialized", path=path)
+                return False
+
+            # Используем синхронный метод executor напрямую
+            self._fs_executor.write_text_file_sync(path, content)
+            self.logger.debug("fs_write_success", path=path, content_size=len(content))
+            return True
+        except Exception as e:
+            self.logger.error("fs_write_error", path=path, error=str(e))
+            return False
+
+    def _handle_terminal_execute(self, command: str, cwd: str | None = None) -> dict[str, Any]:
+        """Обработать terminal/execute от агента (синхронный).
+
+        Используется синхронный метод TerminalExecutor напрямую.
+
+        Args:
+            command: Команда для выполнения
+            cwd: Рабочая директория (опционально)
+
+        Returns:
+            Словарь с результатом выполнения (success, output, exit_code)
+        """
+        try:
+            session_id = self._active_session_id
+            if not session_id:
+                self.logger.warning("terminal_execute_no_active_session", command=command)
+                return {"success": False, "error": "No active session"}
+
+            # Проверяем наличие executor'а перед использованием
+            if self._terminal_executor is None:
+                self.logger.warning("terminal_executor_not_initialized", command=command)
+                return {
+                    "success": False,
+                    "error": "Terminal executor not initialized",
+                }
+
+            # Используем синхронный метод executor напрямую
+            result = self._terminal_executor.execute(command, cwd=cwd)
+            self.logger.debug(
+                "terminal_execute_result",
+                command=command,
+                exit_code=result.get("exit_code"),
+                success=result.get("success"),
+            )
+            return result
+        except Exception as e:
+            self.logger.error("terminal_execute_error", command=command, error=str(e))
+            return {"success": False, "error": str(e)}
 
     def add_message(self, role: str, content: str, session_id: str | None = None) -> None:
         """Добавить сообщение в чат.

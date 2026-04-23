@@ -8,10 +8,21 @@ from typing import Any
 
 @dataclass
 class LLMMessage:
-    """Сообщение для LLM."""
+    """Сообщение для LLM.
+    
+    Поддерживает OpenAI формат с tool calls:
+    - role: "system", "user", "assistant", "tool"
+    - content: текстовое содержимое
+    - tool_calls: список вызовов инструментов (для assistant)
+    - tool_call_id: ID вызова инструмента (для tool)
+    - name: имя инструмента (для tool)
+    """
 
-    role: str  # "system", "user", "assistant"
-    content: str
+    role: str  # "system", "user", "assistant", "tool"
+    content: str | None = None
+    tool_calls: list["LLMToolCall"] | None = None  # Для assistant messages
+    tool_call_id: str | None = None  # Для tool messages
+    name: str | None = None  # Для tool messages
 
 
 @dataclass

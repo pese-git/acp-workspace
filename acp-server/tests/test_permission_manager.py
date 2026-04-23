@@ -105,25 +105,26 @@ class TestPermissionManagerRequest:
             tool_title="Execute Command",
             tool_kind="execute",
         )
-        
+
         assert msg.method == "session/request_permission"
         assert msg.params is not None
         assert msg.params["sessionId"] == "sess_1"
-        assert msg.params["toolCallId"] == "call_001"
-        assert msg.params["toolTitle"] == "Execute Command"
-        assert msg.params["toolKind"] == "execute"
+        assert isinstance(msg.params.get("toolCall"), dict)
+        assert msg.params["toolCall"]["toolCallId"] == "call_001"
+        assert msg.params["toolCall"]["title"] == "Execute Command"
+        assert msg.params["toolCall"]["kind"] == "execute"
         assert "options" in msg.params
 
     def test_permission_options_structure(self, manager: PermissionManager) -> None:
         """Проверяет структуру permission options."""
         options = manager.build_permission_options()
-        
+
         assert len(options) == 4
         assert options[0]["optionId"] == "allow_once"
         assert options[1]["optionId"] == "allow_always"
         assert options[2]["optionId"] == "reject_once"
         assert options[3]["optionId"] == "reject_always"
-        
+
         # Проверяем, что каждая опция имеет обязательные поля
         for option in options:
             assert "optionId" in option
@@ -135,12 +136,12 @@ class TestPermissionManagerRequest:
     ) -> None:
         """Проверяет, что build_permission_request обновляет active_turn."""
         from acp_server.protocol.state import ActiveTurnState
-        
+
         session.active_turn = ActiveTurnState(
             prompt_request_id="req_1",
             session_id="sess_1",
         )
-        
+
         msg = manager.build_permission_request(
             session=session,
             session_id="sess_1",
@@ -148,7 +149,7 @@ class TestPermissionManagerRequest:
             tool_title="Test",
             tool_kind="execute",
         )
-        
+
         # Проверяем, что permission_request_id установлен
         if msg.id is not None:
             assert session.active_turn.permission_request_id == msg.id
@@ -254,14 +255,14 @@ class TestPermissionManagerAcceptance:
             kind="execute",
             status="pending",
         )
-        
+
         manager.build_permission_acceptance_updates(
             session=session,
             session_id="sess_1",
             tool_call_id=tool_call_id,
             option_id="allow_once",
         )
-        
+
         # Policy не должна быть сохранена
         assert session.permission_policy.get("execute") is None
 
@@ -270,7 +271,7 @@ class TestPermissionManagerAcceptance:
     ) -> None:
         """Проверяет, что allow_always сохраняет policy."""
         from acp_server.protocol.state import ToolCallState
-        
+
         tool_call_id = "call_001"
         session.tool_calls[tool_call_id] = ToolCallState(
             tool_call_id=tool_call_id,
@@ -278,14 +279,14 @@ class TestPermissionManagerAcceptance:
             kind="execute",
             status="pending",
         )
-        
+
         manager.build_permission_acceptance_updates(
             session=session,
             session_id="sess_1",
             tool_call_id=tool_call_id,
             option_id="allow_always",
         )
-        
+
         # Policy должна быть сохранена
         assert session.permission_policy.get("execute") == "allow_always"
 
@@ -294,7 +295,7 @@ class TestPermissionManagerAcceptance:
     ) -> None:
         """Проверяет, что reject_always сохраняет policy."""
         from acp_server.protocol.state import ToolCallState
-        
+
         tool_call_id = "call_001"
         session.tool_calls[tool_call_id] = ToolCallState(
             tool_call_id=tool_call_id,
@@ -302,14 +303,14 @@ class TestPermissionManagerAcceptance:
             kind="read",
             status="pending",
         )
-        
+
         manager.build_permission_acceptance_updates(
             session=session,
             session_id="sess_1",
             tool_call_id=tool_call_id,
             option_id="reject_always",
         )
-        
+
         # Policy должна быть сохранена
         assert session.permission_policy.get("read") == "reject_always"
 
@@ -323,7 +324,7 @@ class TestPermissionManagerAcceptance:
             tool_call_id="nonexistent",
             option_id="allow_always",
         )
-        
+
         # Не должно быть ошибок, policy просто не сохранится
         assert len(updates) == 0
 
@@ -331,12 +332,10 @@ class TestPermissionManagerAcceptance:
 class TestPermissionManagerSessionFinding:
     """Тесты поиска сессий по permission request ID."""
 
-    def test_find_session_by_permission_request_id(
-        self, manager: PermissionManager
-    ) -> None:
+    def test_find_session_by_permission_request_id(self, manager: PermissionManager) -> None:
         """Проверяет поиск сессии по permission request ID."""
         from acp_server.protocol.state import ActiveTurnState
-        
+
         session = SessionState(
             session_id="sess_1",
             cwd="/tmp",
@@ -347,10 +346,10 @@ class TestPermissionManagerSessionFinding:
             session_id="sess_1",
             permission_request_id="perm_123",
         )
-        
+
         sessions = {"sess_1": session}
         found = manager.find_session_by_permission_request_id("perm_123", sessions)
-        
+
         assert found is session
 
     def test_find_session_missing(self, manager: PermissionManager) -> None:
@@ -367,18 +366,16 @@ class TestPermissionManagerSessionFinding:
             mcp_servers=[],
         )
         session.active_turn = None
-        
+
         sessions = {"sess_1": session}
         found = manager.find_session_by_permission_request_id("perm_123", sessions)
-        
+
         assert found is None
 
-    def test_find_session_no_permission_request_id(
-        self, manager: PermissionManager
-    ) -> None:
+    def test_find_session_no_permission_request_id(self, manager: PermissionManager) -> None:
         """Проверяет поиск в active_turn без permission_request_id."""
         from acp_server.protocol.state import ActiveTurnState
-        
+
         session = SessionState(
             session_id="sess_1",
             cwd="/tmp",
@@ -389,8 +386,8 @@ class TestPermissionManagerSessionFinding:
             session_id="sess_1",
             permission_request_id=None,
         )
-        
+
         sessions = {"sess_1": session}
         found = manager.find_session_by_permission_request_id("perm_123", sessions)
-        
+
         assert found is None

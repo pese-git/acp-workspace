@@ -147,8 +147,10 @@ async def test_conformance_permission_selected_completes_turn() -> None:
             },
         )
     )
-    assert len(permission_resolved.followup_responses) == 1
-    assert permission_resolved.followup_responses[0].result == {"stopReason": "end_turn"}
+    # Новый async flow: permission approval возвращает pending_tool_execution
+    # Turn completion происходит в http_server после async выполнения tool
+    assert permission_resolved.pending_tool_execution is not None
+    assert permission_resolved.pending_tool_execution.session_id == session_id
 
 
 @pytest.mark.asyncio

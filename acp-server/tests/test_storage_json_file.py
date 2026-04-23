@@ -204,9 +204,7 @@ async def test_serialize_complex_session(temp_storage_dir: Path) -> None:
         permission_policy={"kind_test": "allow_always"},
         cancelled_permission_requests={"req_1", "req_2"},
         cancelled_client_rpc_requests={"rpc_1", "rpc_2"},
-        runtime_capabilities=ClientRuntimeCapabilities(
-            fs_read=True, fs_write=True, terminal=False
-        ),
+        runtime_capabilities=ClientRuntimeCapabilities(fs_read=True, fs_write=True, terminal=False),
     )
 
     # Добавляем tool call

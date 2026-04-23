@@ -35,7 +35,8 @@ class SessionFactory:
             mcp_servers: Список MCP-серверов (опционально)
             config_values: Значения конфигурации сессии (опционально)
             available_commands: Доступные slash-команды (опционально)
-            runtime_capabilities: Runtime capabilities клиента (опционально)
+            runtime_capabilities: Runtime capabilities клиента (опционально,
+                используется для фильтрации tools)
             session_id: ID сессии (генерируется автоматически, если не указан)
 
         Returns:
@@ -45,11 +46,13 @@ class SessionFactory:
             ValidationError: Если параметры некорректны
         """
         # Валидация обязательных параметров
-        SessionFactory.validate_session_params({
-            "cwd": cwd,
-            "mcp_servers": mcp_servers,
-            "config_values": config_values,
-        })
+        SessionFactory.validate_session_params(
+            {
+                "cwd": cwd,
+                "mcp_servers": mcp_servers,
+                "config_values": config_values,
+            }
+        )
 
         # Генерация ID, если не указан
         if session_id is None:
@@ -61,9 +64,7 @@ class SessionFactory:
         available_commands = available_commands or []
 
         # Фильтруем только dict-сервера
-        filtered_mcp_servers = [
-            srv for srv in mcp_servers if isinstance(srv, dict)
-        ]
+        filtered_mcp_servers = [srv for srv in mcp_servers if isinstance(srv, dict)]
 
         # Создание сессии
         return SessionState(
@@ -87,9 +88,7 @@ class SessionFactory:
         """
         # Проверка обязательных параметров
         if "cwd" not in params or not isinstance(params["cwd"], str):
-            raise ValidationError(
-                "cwd обязателен и должен быть строкой"
-            )
+            raise ValidationError("cwd обязателен и должен быть строкой")
 
         # Проверка типов опциональных параметров
         if (

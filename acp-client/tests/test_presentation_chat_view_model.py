@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import Mock
 
 import pytest
 
@@ -11,7 +12,24 @@ from acp_client.presentation.chat_view_model import ChatViewModel
 
 
 @pytest.fixture
-def chat_view_model(tmp_path) -> ChatViewModel:
+def mock_fs_executor():
+    """Создает mock FileSystemExecutor для тестов."""
+    executor = Mock()
+    executor.read_text_file_sync = Mock(return_value="test content")
+    executor.write_text_file_sync = Mock(return_value=True)
+    return executor
+
+
+@pytest.fixture
+def mock_terminal_executor():
+    """Создает mock TerminalExecutor для тестов."""
+    executor = Mock()
+    executor.execute = Mock(return_value={"exit_code": 0, "output": "test output", "success": True})
+    return executor
+
+
+@pytest.fixture
+def chat_view_model(tmp_path, mock_fs_executor, mock_terminal_executor) -> ChatViewModel:
     """Создает ChatViewModel для тестов."""
 
     return ChatViewModel(
@@ -19,6 +37,8 @@ def chat_view_model(tmp_path) -> ChatViewModel:
         event_bus=EventBus(),
         logger=None,
         history_dir=tmp_path / "history",
+        fs_executor=mock_fs_executor,
+        terminal_executor=mock_terminal_executor,
     )
 
 
@@ -238,6 +258,58 @@ def test_chat_history_is_persisted_to_local_storage(tmp_path) -> None:
     assert second_vm.messages.value == [{"role": "user", "content": "persist me"}]
 
 
+def test_chat_history_uses_env_dir_when_history_dir_not_passed(tmp_path, monkeypatch) -> None:
+    """При отсутствии history_dir используется путь из ACP_CLIENT_HISTORY_DIR."""
+
+    env_history_dir = tmp_path / "history_from_env"
+    monkeypatch.setenv("ACP_CLIENT_HISTORY_DIR", str(env_history_dir))
+
+    vm = ChatViewModel(
+        coordinator=None,
+        event_bus=EventBus(),
+        logger=None,
+    )
+    vm.add_message("user", "saved via env", session_id="sess_env")
+
+    assert (env_history_dir / "sess_env.json").exists()
+
+
+def test_chat_history_explicit_dir_has_priority_over_env(tmp_path, monkeypatch) -> None:
+    """Явный history_dir имеет приоритет над ACP_CLIENT_HISTORY_DIR."""
+
+    env_history_dir = tmp_path / "history_from_env"
+    explicit_history_dir = tmp_path / "history_explicit"
+    monkeypatch.setenv("ACP_CLIENT_HISTORY_DIR", str(env_history_dir))
+
+    vm = ChatViewModel(
+        coordinator=None,
+        event_bus=EventBus(),
+        logger=None,
+        history_dir=explicit_history_dir,
+    )
+    vm.add_message("user", "saved via explicit", session_id="sess_explicit_priority")
+
+    assert (explicit_history_dir / "sess_explicit_priority.json").exists()
+    assert not (env_history_dir / "sess_explicit_priority.json").exists()
+
+
+def test_chat_history_falls_back_to_default_dir_when_env_missing(tmp_path, monkeypatch) -> None:
+    """Без history_dir и ACP_CLIENT_HISTORY_DIR используется ~/.acp-client/history."""
+
+    monkeypatch.delenv("ACP_CLIENT_HISTORY_DIR", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    vm = ChatViewModel(
+        coordinator=None,
+        event_bus=EventBus(),
+        logger=None,
+    )
+    vm.add_message("user", "saved via default", session_id="sess_default")
+
+    default_history_dir = tmp_path / ".acp-client" / "history"
+    assert (default_history_dir / "sess_default.json").exists()
+
+
 def test_message_with_explicit_session_id_is_persisted(tmp_path) -> None:
     """Сообщение с explicit session_id сразу сохраняется в локальный storage."""
 
@@ -336,3 +408,117 @@ def test_streaming_flag_resets_after_background_session_completion(
     chat_view_model._set_streaming_state("sess_background", is_streaming=False, clear_text=True)
 
     assert chat_view_model.is_streaming.value is False
+
+
+# Тесты для callbacks файловой системы и терминала
+def test_handle_fs_read_success(chat_view_model: ChatViewModel, mock_fs_executor) -> None:
+    """Тест успешного чтения файла через callback."""
+    chat_view_model.set_active_session("test-session")
+
+    content = chat_view_model._handle_fs_read("test.txt")
+
+    assert content == "test content"
+    mock_fs_executor.read_text_file_sync.assert_called_once_with("test.txt")
+
+
+def test_handle_fs_read_no_active_session(chat_view_model: ChatViewModel, mock_fs_executor) -> None:
+    """Тест чтения файла без активной сессии."""
+    chat_view_model.set_active_session(None)
+
+    content = chat_view_model._handle_fs_read("test.txt")
+
+    assert content == ""
+    mock_fs_executor.read_text_file_sync.assert_not_called()
+
+
+def test_handle_fs_read_error(chat_view_model: ChatViewModel, mock_fs_executor) -> None:
+    """Тест обработки ошибки при чтении файла."""
+    chat_view_model.set_active_session("test-session")
+    mock_fs_executor.read_text_file_sync.side_effect = Exception("Read error")
+
+    content = chat_view_model._handle_fs_read("test.txt")
+
+    assert content == ""
+
+
+def test_handle_fs_write_success(chat_view_model: ChatViewModel, mock_fs_executor) -> None:
+    """Тест успешной записи файла через callback."""
+    chat_view_model.set_active_session("test-session")
+
+    success = chat_view_model._handle_fs_write("test.txt", "content")
+
+    assert success is True
+    mock_fs_executor.write_text_file_sync.assert_called_once_with("test.txt", "content")
+
+
+def test_handle_fs_write_no_active_session(
+    chat_view_model: ChatViewModel, mock_fs_executor
+) -> None:
+    """Тест записи файла без активной сессии."""
+    chat_view_model.set_active_session(None)
+
+    success = chat_view_model._handle_fs_write("test.txt", "content")
+
+    assert success is False
+    mock_fs_executor.write_text_file_sync.assert_not_called()
+
+
+def test_handle_fs_write_error(chat_view_model: ChatViewModel, mock_fs_executor) -> None:
+    """Тест обработки ошибки при записи файла."""
+    chat_view_model.set_active_session("test-session")
+    mock_fs_executor.write_text_file_sync.side_effect = Exception("Write error")
+
+    success = chat_view_model._handle_fs_write("test.txt", "content")
+
+    assert success is False
+
+
+def test_handle_terminal_execute_success(
+    chat_view_model: ChatViewModel, mock_terminal_executor
+) -> None:
+    """Тест успешного выполнения команды в терминале."""
+    chat_view_model.set_active_session("test-session")
+
+    result = chat_view_model._handle_terminal_execute("ls -la")
+
+    assert result["success"] is True
+    assert result["output"] == "test output"
+    mock_terminal_executor.execute.assert_called_once_with("ls -la", cwd=None)
+
+
+def test_handle_terminal_execute_with_cwd(
+    chat_view_model: ChatViewModel, mock_terminal_executor
+) -> None:
+    """Тест выполнения команды с рабочей директорией."""
+    chat_view_model.set_active_session("test-session")
+
+    result = chat_view_model._handle_terminal_execute("pwd", cwd="/tmp")
+
+    assert result["success"] is True
+    mock_terminal_executor.execute.assert_called_once_with("pwd", cwd="/tmp")
+
+
+def test_handle_terminal_execute_no_active_session(
+    chat_view_model: ChatViewModel, mock_terminal_executor
+) -> None:
+    """Тест выполнения команды без активной сессии."""
+    chat_view_model.set_active_session(None)
+
+    result = chat_view_model._handle_terminal_execute("ls -la")
+
+    assert result["success"] is False
+    assert "No active session" in result.get("error", "")
+    mock_terminal_executor.execute.assert_not_called()
+
+
+def test_handle_terminal_execute_error(
+    chat_view_model: ChatViewModel, mock_terminal_executor
+) -> None:
+    """Тест обработки ошибки при выполнении команды."""
+    chat_view_model.set_active_session("test-session")
+    mock_terminal_executor.execute.side_effect = Exception("Execution error")
+
+    result = chat_view_model._handle_terminal_execute("ls -la")
+
+    assert result["success"] is False
+    assert "Execution error" in result.get("error", "")

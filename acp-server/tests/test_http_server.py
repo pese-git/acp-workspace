@@ -8,6 +8,8 @@ import pytest
 from aiohttp import ClientSession, web
 
 from acp_server.http_server import ACPHttpServer
+from acp_server.messages import ACPMessage
+from acp_server.protocol import ACPProtocol, ProtocolOutcome
 
 
 def _get_free_port() -> int:
@@ -482,6 +484,74 @@ async def test_ws_prompt_terminal_roundtrip_finishes_with_end_turn() -> None:
 
                 assert received_prompt_response is not None
                 assert received_prompt_response["result"] == {"stopReason": "end_turn"}
+            finally:
+                await ws.close()
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_ws_prompt_is_processed_in_background_and_does_not_block_ping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Проверяет, что in-flight prompt не блокирует обработку других запросов."""
+
+    original_handle = ACPProtocol.handle
+
+    async def delayed_prompt_handle(self: ACPProtocol, message: ACPMessage) -> ProtocolOutcome:
+        if message.method == "session/prompt":
+            await asyncio.sleep(0.3)
+            return ProtocolOutcome(
+                response=ACPMessage.response(message.id, {"stopReason": "end_turn"})
+            )
+        return await original_handle(self, message)
+
+    monkeypatch.setattr(ACPProtocol, "handle", delayed_prompt_handle)
+
+    runner, port = await _start_test_server()
+
+    try:
+        async with ClientSession() as session:
+            ws = await session.ws_connect(f"http://127.0.0.1:{port}/acp/ws")
+            try:
+                await _ws_initialize(ws)
+                await ws.send_json(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": "new_1",
+                        "method": "session/new",
+                        "params": {"cwd": "/tmp", "mcpServers": []},
+                    }
+                )
+                new_payload = await asyncio.wait_for(ws.receive_json(), timeout=1.0)
+                session_id = new_payload["result"]["sessionId"]
+
+                await ws.send_json(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": "prompt_1",
+                        "method": "session/prompt",
+                        "params": {
+                            "sessionId": session_id,
+                            "prompt": [{"type": "text", "text": "slow prompt"}],
+                        },
+                    }
+                )
+                await ws.send_json(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": "ping_1",
+                        "method": "ping",
+                        "params": {},
+                    }
+                )
+
+                first_response = await asyncio.wait_for(ws.receive_json(), timeout=0.2)
+                assert first_response.get("id") == "ping_1"
+
+                second_response = await asyncio.wait_for(ws.receive_json(), timeout=1.0)
+                assert second_response.get("id") == "prompt_1"
+                assert second_response.get("result") == {"stopReason": "end_turn"}
             finally:
                 await ws.close()
     finally:

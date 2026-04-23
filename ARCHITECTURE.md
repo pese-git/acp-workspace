@@ -1,386 +1,746 @@
-# Архитектура ACP Protocol
+# Архитектура ACP Protocol — Детальное руководство
 
-## Обзор
+## Оглавление
 
-ACP (Agent Client Protocol) — протокол взаимодействия между агентами и клиентами для выполнения задач с использованием LLM.
+1. [Введение](#введение)
+2. [Обзор системы](#обзор-системы)
+3. [Архитектура на уровне компонентов](#архитектура-на-уровне-компонентов)
+4. [Потоки данных](#потоки-данных)
+5. [Двухуровневая история в acp-server](#двухуровневая-история)
+6. [Background Receive Loop в acp-client](#background-receive-loop)
+7. [Критические архитектурные решения](#критические-архитектурные-решения)
+8. [Расширение и интеграция](#расширение-и-интеграция)
 
-Проект реализован как монорепозиторий с двумя независимыми Python-компонентами:
-- **acp-server** — серверная реализация протокола ACP с WebSocket транспортом
-- **acp-client** — клиентская реализация для подключения к ACP серверам
+---
 
-## Компоненты
+## Введение
 
-### acp-server
+ACP (Agent Client Protocol) — стандартный протокол взаимодействия между LLM-агентами и клиентами для выполнения задач с инструментами.
 
-Серверная реализация протокола ACP с полной поддержкой сессий, аутентификации и управления состоянием.
+Проект реализован как **монорепозиторий** с двумя независимыми Python-компонентами:
+- **[acp-server/](acp-server/)** — серверная реализация протокола с LLM-агентом и управлением сессиями
+- **[acp-client/](acp-client/)** — клиентская реализация с TUI интерфейсом на базе Clean Architecture
 
-#### Структура модулей
+---
 
-```
-acp-server/src/acp_server/
-├── exceptions.py             # Иерархия специализированных исключений (ФАЗ 1 ✓)
-├── models.py                 # Pydantic модели типизации (ФАЗ 1 ✓)
-├── cli.py                    # CLI entry point
-├── http_server.py            # WebSocket транспорт
-├── logging.py                # Структурированное логирование
-├── messages.py               # Pydantic модели сообщений
-├── server.py                 # TCP транспорт (legacy)
-├── config.py                 # Конфигурация сервера
-├── protocol/                 # Ядро протокола
-│   ├── __init__.py           # Экспорт публичных классов
-│   ├── core.py               # ACPProtocol класс
-│   ├── state.py              # Dataclasses состояния
-│   ├── session_factory.py    # SessionFactory для создания сессий (ФАЗ 1 ✓)
-│   ├── handlers/             # Обработчики методов
-│   │   ├── auth.py           # authenticate, initialize
-│   │   ├── session.py        # session/new, load, list
-│   │   ├── prompt.py         # session/prompt, cancel (основная логика)
-│   │   ├── permissions.py    # session/request_permission
-│   │   ├── config.py         # session/set_config_option
-│   │   ├── legacy.py         # ping, echo, shutdown
-│   │   └── prompt_handlers/  # Разложение session_prompt (ФАЗ 1 ✓)
-│   │       ├── __init__.py
-│   │       ├── validator.py           # PromptValidator
-│   │       ├── directive_resolver.py  # DirectiveResolver
-│   │       └── # 5 ещё компонентов (ФАЗ 2-7)
-│   └── storage/              # Хранилище сессий
-│       ├── base.py           # SessionStorage(ABC)
-│       ├── memory.py         # InMemoryStorage
-│       └── json_file.py      # JsonFileStorage
-├── tools/                    # Управление инструментами
-│   ├── base.py               # BaseTool интерфейс
-│   └── registry.py           # ToolRegistry
-└── llm/                      # LLM провайдеры
-    ├── base.py               # BaseLLMProvider интерфейс
-    ├── mock_provider.py      # Mock провайдер для тестирования
-    └── openai_provider.py    # OpenAI провайдер
-```
+## Обзор системы
 
-#### Слои архитектуры
+### Диаграмма высокоуровневой архитектуры
 
-1. **Exception Handling Layer** (Фаза 1 ✓)
-   - **`exceptions.py`** — специализированная иерархия исключений (10 типов)
-   - Явная типизация разных видов ошибок: Validation, Authentication, Authorization, Storage, Protocol
-   - Возможность селективной обработки ошибок в handlers и транспорте
-   - Улучшенное логирование через специализированные исключения
-
-2. **Data Models Layer** (Фаза 1 ✓)
-   - **`models.py`** — Pydantic модели для типизации данных (10+ моделей)
-   - Замена `dict[str, Any]` на строго типизированные BaseModel
-   - Автоматическая валидация при создании объектов
-   - IDE автодополнение и type checking поддержка
-
-3. **Transport Layer** (`http_server.py`)
-   - WebSocket endpoint `/acp/ws`
-   - Обработка JSON-RPC сообщений
-   - Update-поток для `session/update` событий
-   - Асинхронная обработка запросов с deferred responses
-
-4. **Protocol Layer** (`protocol/`)
-   - **`core.py`** — `ACPProtocol.handle()` для диспетчеризации методов
-   - **`session_factory.py`** (Фаза 1 ✓) — централизованная логика создания сессий
-   - Валидация запросов согласно ACP спецификации
-   - Управление состоянием сессий через SessionState
-   - **`handlers/`** — модульная архитектура для разных категорий методов
-   - **`prompt_handlers/`** (Фаза 1 ✓) — разложение монолитной `session_prompt` на компоненты
-     - `PromptValidator` — валидация входных данных
-     - `DirectiveResolver` — парсинг slash-команд и разрешение directives
-
-5. **Storage Layer** (`storage/`)
-   - Абстракция `SessionStorage(ABC)` для plug-and-play архитектуры
-   - `InMemoryStorage` — для development и тестирования
-   - `JsonFileStorage` — для production с persistence на диск
-   - Расширяемая архитектура для добавления новых backends
-
-6. **Logging Layer** (`logging.py`)
-   - Структурированное логирование с structlog
-   - JSON и консольный форматы с уровнями DEBUG, INFO, WARNING, ERROR
-   - Интеграция с CLI флагом `--log-level`
-
-### acp-client
-
-Клиентская реализация для подключения к ACP серверам и выполнения операций.
-
-#### Структура модулей
-
-```
-acp-client/src/acp_client/
-├── cli.py                   # CLI команды и entry point
-├── client.py                # ACPClient для запросов к серверу (654 строк)
-├── logging.py               # Структурированное логирование
-├── messages.py              # Pydantic модели сообщений
-├── __init__.py              # Экспорт публичного API
-├── helpers/                 # 🔧 Вспомогательные функции
-│   ├── __init__.py          # Экспорт helper функций
-│   ├── auth.py              # pick_auth_method_id() — выбор метода аутентификации
-│   └── session.py           # Функции парсинга session/update событий
-├── handlers/                # 🎯 Обработчики RPC запросов от сервера
-│   ├── __init__.py          # Экспорт обработчиков
-│   ├── permissions.py       # build_permission_result() — результат разрешений
-│   ├── filesystem.py        # handle_server_fs_request() — файловая система
-│   └── terminal.py          # handle_server_terminal_request() — терминал
-└── transport/               # 🌐 Транспортный слой
-    ├── __init__.py          # Экспорт транспортных компонентов
-    └── websocket.py         # WebSocket сессия (ACPClientWSSession) и функции
+```mermaid
+graph TB
+    subgraph Client["acp-client (Client Side)"]
+        TUI["🖥️ TUI Layer<br/>Textual UI Components"]
+        Presentation["📊 Presentation Layer<br/>ViewModels + Observable"]
+        Application["🎯 Application Layer<br/>Use Cases + State Machine"]
+        Infrastructure["🔧 Infrastructure Layer<br/>DI, Transport, Event Bus"]
+        Domain["📦 Domain Layer<br/>Entities, Events, Interfaces"]
+    end
+    
+    subgraph Server["acp-server (Server Side)"]
+        HttpServer["🌐 HTTP/WebSocket Server<br/>JSON-RPC Transport"]
+        Protocol["🔄 Protocol Layer<br/>ACPProtocol + Handlers"]
+        Agent["🤖 Agent Layer<br/>LLM Orchestration"]
+        Tools["🛠️ Tools Layer<br/>Executors + Registry"]
+        Storage["💾 Storage Layer<br/>SessionStorage Backends"]
+    end
+    
+    WebSocket["WebSocket<br/>Connection"]
+    
+    TUI --> Presentation
+    Presentation --> Application
+    Application --> Infrastructure
+    Infrastructure --> Domain
+    Infrastructure --> WebSocket
+    
+    WebSocket --> HttpServer
+    HttpServer --> Protocol
+    Protocol --> Agent
+    Protocol --> Tools
+    Protocol --> Storage
+    Agent --> Tools
+    
+    style Client fill:#e1f5ff,stroke:#01579b,stroke-width:2px
+    style Server fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    style WebSocket fill:#fff3e0,stroke:#e65100,stroke-width:2px
 ```
 
-#### Слои архитектуры
+### Таблица компонентов
 
-1. **Transport Layer** (`transport/websocket.py`)
-   - `ACPClientWSSession` — класс для управления persistent WebSocket-сессиями
-   - `await_ws_response()` — ожидание финального ответа с обработкой промежуточных событий
-   - `perform_ws_initialize()` — handshake инициализация
-   - `perform_ws_authenticate()` — аутентификация в WS-сессии
+| Компонент | Слой | Ответственность | Файлы |
+|-----------|------|-----------------|-------|
+| **TUI** | Presentation | Textual компоненты, User Interaction | `acp-client/src/acp_client/tui/` |
+| **ViewModels** | Presentation | MVVM паттерн, Observable state | `acp-client/src/acp_client/presentation/` |
+| **Use Cases** | Application | Business scenarios, DTOs | `acp-client/src/acp_client/application/` |
+| **DIContainer** | Infrastructure | Dependency Injection | [`acp-client/src/acp_client/infrastructure/di_container.py`](acp-client/src/acp_client/infrastructure/di_container.py:33) |
+| **BackgroundReceiveLoop** | Infrastructure | Единственный receive() на WebSocket | [`acp-client/src/acp_client/infrastructure/services/background_receive_loop.py`](acp-client/src/acp_client/infrastructure/services/background_receive_loop.py:22) |
+| **MessageRouter** | Infrastructure | Маршрутизация сообщений | [`acp-client/src/acp_client/infrastructure/services/message_router.py`](acp-client/src/acp_client/infrastructure/services/message_router.py:26) |
+| **EventBus** | Infrastructure | Pub/Sub система событий | [`acp-client/src/acp_client/infrastructure/events/bus.py`](acp-client/src/acp_client/infrastructure/events/bus.py) |
+| **ACPProtocol** | Protocol | Диспетчер методов ACP | [`acp-server/src/acp_server/protocol/core.py`](acp-server/src/acp_server/protocol/core.py:39) |
+| **Handlers** | Protocol | Обработчики методов (auth, session, prompt) | [`acp-server/src/acp_server/protocol/handlers/`](acp-server/src/acp_server/protocol/handlers/) |
+| **PromptOrchestrator** | Protocol | Главный оркестратор prompt-turn | [`acp-server/src/acp_server/protocol/handlers/prompt_orchestrator.py`](acp-server/src/acp_server/protocol/handlers/prompt_orchestrator.py:32) |
+| **AgentOrchestrator** | Agent | Управление LLM-агентом | [`acp-server/src/acp_server/agent/orchestrator.py`](acp-server/src/acp_server/agent/orchestrator.py:18) |
+| **ToolRegistry** | Tools | Регистрация и управление инструментами | [`acp-server/src/acp_server/tools/registry.py`](acp-server/src/acp_server/tools/registry.py) |
+| **Storage** | Storage | Persistence для сессий | [`acp-server/src/acp_server/storage/`](acp-server/src/acp_server/storage/) |
+| **HttpServer** | Transport | WebSocket endpoint и JSON-RPC | [`acp-server/src/acp_server/http_server.py`](acp-server/src/acp_server/http_server.py) |
 
-2. **Handlers Layer** (`handlers/`)
-   - `build_permission_result()` — обработка запросов разрешений
-   - `handle_server_fs_request()` — обработка FS операций от сервера
-   - `handle_server_terminal_request()` — обработка терминала от сервера
+---
 
-3. **Helpers Layer** (`helpers/`)
-   - `pick_auth_method_id()` — выбор метода аутентификации из доступных
-   - `extract_tool_call_updates()`, `extract_plan_updates()` и другие — парсинг session updates
+## Архитектура на уровне компонентов
 
-4. **Client Layer** (`client.py`)
-   - `ACPClient` — основной асинхронный клиент для запросов к серверу
-   - Поддержка методов: `authenticate`, `initialize`, `session/new`, `session/load`, `session/list`, `session/prompt`
-   - Обработка `session/request_permission` и других RPC запросов от сервера
+### acp-server: Внутренняя структура
 
-#### Функциональность
-
-- **ACPClient** — асинхронный клиент для WebSocket соединений с серверами ACP
-- Поддержка методов: `authenticate`, `initialize`, `session/new`, `session/load`, `session/list`, `session/prompt`
-- Обработка `session/request_permission` и других RPC запросов от сервера
-- CLI для быстрого взаимодействия с серверами
-- Структурированное логирование с поддержкой JSON формата
-- Модульная архитектура для легкого добавления новых обработчиков
-
-## Поток данных
-
-```
-Client → WebSocket → ACPHttpServer → ACPProtocol → SessionStorage
-                            ↓
-                     Handler (auth/session/prompt/etc.)
-                            ↓
-                  Response/Updates → Client
-```
-
-### Agent→Client RPC (обратные запросы)
-
-Сервер отправляет запросы клиенту для выполнения операций:
-- `fs/readTextFile`, `fs/writeTextFile` — файловые операции
-- `terminal/execute` — выполнение команд в терминале
-- `session/request_permission` — запрос разрешений пользователя
-
-Клиент обрабатывает операции и возвращает результаты через `session/request_permission_response`.
-
-## Ключевые концепции
-
-### Sessions (Сессии)
-
-Сессии хранят контекст работы:
-- История сообщений и tool calls
-- Конфигурационные опции
-- Активные tool calls и их статусы
-- Состояние выполнения prompt-turn
-
-Сессии могут быть созданы, загружены, перечислены и сохранены через SessionStorage.
-
-### SessionState
-
-Dataclass с полной информацией о сессии:
-- `id`, `created_at`, `cwd` (current working directory)
-- `model`, `system_prompt`, `tools`
-- `config_options` (конфигурация)
-- `messages` (история сообщений)
-- `tool_calls` (активные tool calls)
-- `stopped` (флаг завершения)
-
-### Storage Backends
-
-- **InMemoryStorage**: данные хранятся в памяти, идеально для development и тестирования, все данные теряются при перезагрузке
-- **JsonFileStorage**: persistence в JSON файлах на диск, поддерживает backup и recovery, подходит для production
-
-Backends могут быть переключены через CLI флаг `--storage` без изменения остального кода.
-
-### Handlers (Обработчики методов)
-
-Каждый handler отвечает за группу методов протокола:
-- **auth.py** — `authenticate`, `initialize`
-- **session.py** — `session/new`, `session/load`, `session/list`
-- **prompt.py** — `session/prompt`, `session/cancel`
-- **permissions.py** — `session/request_permission`, `session/request_permission_response`
-- **config.py** — `session/set_config_option`
-- **legacy.py** — `ping`, `echo`, `shutdown` (для обратной совместимости)
-
-## Конфигурация
-
-### Development режим
-
-```bash
-# Запуск с DEBUG логированием в консоль
-acp-server --host 127.0.0.1 --port 8080 --log-level DEBUG
-
-# С in-memory storage (по умолчанию)
-uv run --directory acp-server acp-server --host 127.0.0.1 --port 8080
+```mermaid
+graph LR
+    subgraph Transport["Transport"]
+        WS["WebSocket<br/>Endpoint"]
+    end
+    
+    subgraph Protocol["Protocol Layer"]
+        Core["ACPProtocol"]
+        Handlers["Handlers<br/>auth / session / prompt"]
+        PromptOrch["PromptOrchestrator<br/>(Главный координатор)"]
+    end
+    
+    subgraph Processing["Processing"]
+        Agent["AgentOrchestrator<br/>LLM обработка"]
+        ToolReg["ToolRegistry<br/>Управление инструментами"]
+        Executors["Executors<br/>FS / Terminal"]
+    end
+    
+    subgraph Persistence["Persistence"]
+        SessionStore["SessionStorage<br/>Abstract"]
+        InMem["InMemoryStorage"]
+        JsonFile["JsonFileStorage"]
+    end
+    
+    subgraph RPC["Client RPC"]
+        ClientRPCService["ClientRPCService<br/>Асинхронные вызовы"]
+    end
+    
+    WS --> Core
+    Core --> Handlers
+    Handlers --> PromptOrch
+    PromptOrch --> Agent
+    PromptOrch --> ToolReg
+    ToolReg --> Executors
+    Executors --> ClientRPCService
+    ClientRPCService --> WS
+    
+    Core --> SessionStore
+    SessionStore --> InMem
+    SessionStore --> JsonFile
+    
+    style Transport fill:#fff3e0
+    style Protocol fill:#f3e5f5
+    style Processing fill:#e8f5e9
+    style Persistence fill:#e0f2f1
+    style RPC fill:#fce4ec
 ```
 
-### Production режим
+### acp-client: Clean Architecture в 5 слоев
 
-```bash
-# С обязательной аутентификацией и persistence
-acp-server \
-  --host 0.0.0.0 \
-  --port 8080 \
-  --require-auth \
-  --auth-api-key $ACP_SERVER_API_KEY \
-  --log-json \
-  --log-level INFO \
-  --storage json:/var/lib/acp/sessions
+```mermaid
+graph TB
+    subgraph TUI["TUI Layer"]
+        Chat["Chat View<br/>Terminal UI"]
+        FileView["File Viewer"]
+        Permission["Permission Modal"]
+        Terminal["Terminal Output"]
+    end
+    
+    subgraph Presentation["Presentation Layer"]
+        ChatVM["ChatViewModel"]
+        FileVM["FileSystemViewModel"]
+        PermVM["PermissionViewModel"]
+        SessionVM["SessionViewModel"]
+    end
+    
+    subgraph Application["Application Layer"]
+        UseCases["Use Cases<br/>session/prompt/load"]
+        StateMachine["UIStateMachine<br/>State Management"]
+        DTOs["DTOs<br/>Data Transfer Objects"]
+    end
+    
+    subgraph Infrastructure["Infrastructure Layer"]
+        Transport["Transport Service<br/>WebSocket"]
+        BgLoop["BackgroundReceiveLoop<br/>Единственный receive()"]
+        Router["MessageRouter<br/>Маршрутизация"]
+        Queues["RoutingQueues<br/>Распределение"]
+        EventBus["EventBus<br/>Pub/Sub система"]
+        DI["DIContainer<br/>Dependency Injection"]
+        
+        subgraph AgentRPC["Agent → Client RPC"]
+            FSHandler["FileSystemHandler"]
+            TermHandler["TerminalHandler"]
+            FSExec["FileSystemExecutor"]
+            TermExec["TerminalExecutor"]
+        end
+    end
+    
+    subgraph Domain["Domain Layer"]
+        Entities["Entities<br/>Session, Message"]
+        Events["Events<br/>Domain Events"]
+        Repos["Repositories<br/>Interfaces"]
+    end
+    
+    Chat --> ChatVM
+    FileView --> FileVM
+    Permission --> PermVM
+    Terminal --> SessionVM
+    
+    ChatVM --> UseCases
+    FileVM --> UseCases
+    PermVM --> UseCases
+    SessionVM --> UseCases
+    
+    UseCases --> StateMachine
+    StateMachine --> DTOs
+    
+    DTOs --> Transport
+    DTOs --> EventBus
+    
+    Transport --> BgLoop
+    BgLoop --> Router
+    Router --> Queues
+    Queues --> EventBus
+    
+    Router --> FSHandler
+    Router --> TermHandler
+    FSHandler --> FSExec
+    TermHandler --> TermExec
+    
+    EventBus --> Entities
+    EventBus --> Events
+    EventBus --> Repos
+    
+    DI --> TUI
+    DI --> Presentation
+    DI --> Application
+    DI --> Infrastructure
+    
+    style TUI fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    style Presentation fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px
+    style Application fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    style Infrastructure fill:#e0f2f1,stroke:#004d40,stroke-width:2px
+    style Domain fill:#eceff1,stroke:#263238,stroke-width:2px
 ```
 
-### CLI флаги
+---
 
-- `--host` — IP адрес для слушания (default: 127.0.0.1)
-- `--port` — порт для слушания (default: 8080)
-- `--log-level` — уровень логирования: DEBUG, INFO, WARNING, ERROR (default: INFO)
-- `--log-json` — JSON формат логирования вместо консоли
-- `--require-auth` — требовать аутентификацию для всех сессий
-- `--auth-api-key` — API ключ для аутентификации (local backend)
-- `--storage` — URI хранилища (memory:// или json://path/to/sessions)
+## Потоки данных
 
-## Тестирование
+### 1. Отправка промпта (Client → Server)
 
-### Полная проверка (оба проекта)
+```mermaid
+sequenceDiagram
+    actor User
+    participant TUI
+    participant ChatVM
+    participant UseCase
+    participant Transport
+    participant BgLoop
+    participant Server as acp-server
 
-```bash
-# Из корня репозитория
-make check
+    User->>TUI: Вводит промпт
+    TUI->>ChatVM: prompt_text.value = "..."
+    ChatVM->>UseCase: send_prompt(session_id, text)
+    UseCase->>Transport: request_with_callbacks(method="session/prompt")
+    
+    Transport->>Transport: Отправляет JSON-RPC<br/>на WebSocket
+    Transport->>Transport: Создает asyncio.Future<br/>для ожидания результата
+    
+    rect RGB(200, 220, 255)
+        Note over BgLoop,Server: В фоне: BackgroundReceiveLoop слушает
+        Server->>Transport: Начинает обработку prompt
+        Server->>Transport: Отправляет session/update
+        Transport->>BgLoop: receive() получает update
+        BgLoop->>Router: route(message)
+        Router->>Queues: Помещает в notification_queue
+        Queues->>UseCase: on_update_callback вызывается
+        UseCase->>ChatVM: Обновляет view_model
+    end
+    
+    Server->>Transport: Обработка завершена<br/>отправляет result
+    Transport->>BgLoop: receive() получает result
+    BgLoop->>Router: route(message) → response[id]
+    Router->>Queues: response_queue[id].put(result)
+    Queues->>Transport: await future.set_result()
+    Transport->>UseCase: Возвращает результат
+    UseCase->>ChatVM: Обновляет final state
+    ChatVM->>TUI: Отрисовка завершена
 ```
 
-Запускает для обоих подпроектов:
-- `ruff check .` — проверка стиля кода и линтинг
-- `ty check` — проверка типов с PyRight
-- `python -m pytest` — unit и интеграционные тесты
+### 2. Обработка session/prompt на сервере
 
-### Локальные проверки
+```mermaid
+sequenceDiagram
+    participant Client
+    participant HttpServer
+    participant ACPProtocol
+    participant PromptOrch as PromptOrchestrator
+    participant Agent as AgentOrchestrator
+    participant Tools as ToolRegistry
+    participant ClientRPC as ClientRPCService
 
-Для server:
-```bash
-uv run --directory acp-server ruff check .
-uv run --directory acp-server ty check
-uv run --directory acp-server python -m pytest
+    Client->>HttpServer: session/prompt request
+    HttpServer->>ACPProtocol: handle(message)
+    
+    ACPProtocol->>PromptOrch: process_prompt_turn(session_id, text)
+    
+    PromptOrch->>PromptOrch: 1. Валидация и preprocessing
+    
+    PromptOrch->>Agent: 2. agent.process_prompt(context)
+    Agent->>Agent: Добавляет user message в LLM контекст
+    Agent->>Tools: Получает доступные tools
+    Agent->>Agent: Вызывает LLM
+    
+    Agent->>Tools: 3. Выполнение tool calls
+    Tools->>ClientRPC: Запрос инструмента (fs/*, terminal/*)
+    ClientRPC->>Client: RPC вызов (fs/readTextFile и т.д.)
+    Client->>ClientRPC: Результат инструмента
+    
+    PromptOrch->>PromptOrch: 4. Обновление session/history
+    PromptOrch->>PromptOrch: 5. Отправка session/update
+    
+    HttpServer->>Client: Итоговый результат
 ```
 
-Для client:
-```bash
-uv run --directory acp-client ruff check .
-uv run --directory acp-client ty check
-uv run --directory acp-client python -m pytest
+### 3. Обработка permission request на клиенте
+
+```mermaid
+sequenceDiagram
+    participant Server as acp-server
+    participant BgLoop as BackgroundReceiveLoop
+    participant PermVM as PermissionViewModel
+    participant User as 👤 User
+    participant Transport
+
+    Server->>BgLoop: session/request_permission
+    BgLoop->>Router: route(message) → permission_queue
+    Router->>Queues: permission_queue.put(request)
+    Queues->>PermVM: Уведомление о запросе
+    
+    PermVM->>PermVM: Заполняет permission data
+    PermVM->>User: Показывает permission modal
+    
+    User->>User: Рассматривает запрос
+    User->>PermVM: Нажимает Allow/Deny
+    
+    PermVM->>Transport: session/request_permission_response
+    Transport->>Server: JSON-RPC ответ
+    Server->>Server: Вычисляет result
+    Server->>Transport: Отправляет session/update
+    Transport->>BgLoop: receive() получает update
+    BgLoop->>PermVM: on_update_callback
+    PermVM->>PermVM: Обновляет state
 ```
 
-### Тестовое покрытие
+### 4. Background Receive Loop: Маршрутизация сообщений
 
-- **test_protocol.py** — основные методы протокола
-- **test_http_server.py** — WebSocket транспорт
-- **test_storage_*.py** — различные backends
-- **test_conformance.py** — соответствие ACP спецификации
-- **test_integration_with_server.py** — интеграционные тесты client-server
+```mermaid
+graph TD
+    A["receive() на WebSocket<br/>await transport.receive()"]
+    B["Парсинг JSON"]
+    C{"Анализ сообщения"}
+    
+    D["message.method == 'session/update'"]
+    E["message.method == 'session/request_permission'"]
+    F["message.method == 'fs/*' или 'terminal/*'"]
+    G["message.id присутствует"]
+    H["Неизвестный тип"]
+    
+    D --> D1["→ notification_queue<br/>on_update_callback"]
+    E --> E1["→ permission_queue<br/>on_permission_callback"]
+    F --> F1["→ notification_queue<br/>request_with_callbacks callback"]
+    G --> G1["→ response_queue[id]<br/>asyncio.Future.set_result"]
+    H --> H1["Логирование ошибки"]
+    
+    A --> B --> C
+    C -->|method first| D
+    C -->|method first| E
+    C -->|method first| F
+    C -->|id check| G
+    C -->|default| H
+    
+    D1 --> I["Распределение в очереди"]
+    E1 --> I
+    F1 --> I
+    G1 --> I
+    
+    I --> J["Вызов callbacks<br/>или set asyncio.Future"]
+    J --> A
+    
+    style A fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    style C fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px
+    style I fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    style J fill:#e0f2f1,stroke:#004d40,stroke-width:2px
+```
 
-## Расширение
+---
 
-### Добавление нового storage backend
+## Двухуровневая история
 
-1. Создать класс наследующий `SessionStorage(ABC)` в `storage/`
-2. Реализовать все абстрактные методы:
-   - `create_session()` — создание новой сессии
-   - `load_session()` — загрузка существующей
-   - `list_sessions()` — перечисление с фильтром и pagination
-   - `update_session()` — сохранение изменений
-   - `delete_session()` — удаление сессии
-3. Добавить класс в `storage/__init__.py` для экспорта
-4. Обновить `cli.py` для парсинга нового URI формата в флаге `--storage`
+### SessionState.history vs events_history
+
+На сервере в acp-server существует **двухуровневая система истории**:
+
+```mermaid
+graph TB
+    subgraph LLMContext["LLM Context (SessionState.history)"]
+        M1["user: Привет"]
+        M2["assistant: Привет!"]
+        M3["user: Выполни задачу X"]
+    end
+    
+    subgraph ReplayContext["Replay Context (events_history)"]
+        E1["session/started"]
+        E2["message_added: user message"]
+        E3["tool_call_started"]
+        E4["tool_call_completed"]
+        E5["message_added: assistant message"]
+    end
+    
+    LLMContext -->|читается| AgentLLM["AgentOrchestrator<br/>для process_prompt"]
+    ReplayContext -->|используется| SessionLoad["session/load<br/>для восстановления состояния"]
+    
+    NewPrompt["Новый prompt"]
+    NewPrompt -->|добавляет в| LLMContext
+    NewPrompt -->|добавляет events в| ReplayContext
+    
+    style LLMContext fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    style ReplayContext fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px
+    style AgentLLM fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    style SessionLoad fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+```
+
+**Ключевые различия:**
+
+| Аспект | SessionState.history | events_history |
+|--------|----------------------|-----------------|
+| **Содержание** | Message objects (user/assistant) | Structured events (started, added, completed) |
+| **Использование** | Передача LLM для контекста | Восстановление state при load |
+| **Обновление** | Централизованно в PromptOrchestrator | Через TurnLifecycleManager |
+| **Размер** | Компактный (только сообщения) | Расширенный (все события) |
+| **Воспроизведение** | Невозможно (информация потеряна) | Полное восстановление через replay |
+
+**Архитектурное решение:**
+- **AgentOrchestrator.process_prompt()** — **НЕ** модифицирует SessionState
+- **PromptOrchestrator** отвечает за добавление messages в history
+- **TurnLifecycleManager** добавляет события в events_history
+- Это обеспечивает **разделение ответственности** и **централизованное управление**
+
+---
+
+## Background Receive Loop
+
+### Проблема: Race Condition при конкурентном доступе к WebSocket
+
+```mermaid
+graph LR
+    subgraph Wrong["❌ Неправильно: Race Condition"]
+        T1["Task 1<br/>receive()"]
+        T2["Task 2<br/>receive()"]
+        WS["WebSocket"]
+        Error["RuntimeError:<br/>Only one receive() allowed"]
+        
+        T1 -->|получает сообщение| WS
+        T2 -->|пытается получить| WS
+        WS --> Error
+    end
+    
+    subgraph Right["✅ Правильно: BackgroundReceiveLoop"]
+        BgLoop["BackgroundReceiveLoop<br/>Единственный receive()"]
+        Q1["response_queue"]
+        Q2["notification_queue"]
+        Q3["permission_queue"]
+        T1["Task 1<br/>ждет response[id]"]
+        T2["Task 2<br/>ждет callback"]
+        
+        BgLoop -->|message| Router["MessageRouter"]
+        Router -->|маршрутизирует| Q1
+        Router -->|маршрутизирует| Q2
+        Router -->|маршрутизирует| Q3
+        
+        Q1 -->|asyncio.Future| T1
+        Q2 -->|callback| T2
+        Q3 -->|permission queue| T2
+    end
+    
+    style Wrong fill:#ffebee,stroke:#c62828,stroke-width:2px
+    style Right fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    style Error fill:#ffcdd2,stroke:#b71c1c,stroke-width:2px
+```
+
+### Архитектура BackgroundReceiveLoop
+
+```
+┌─────────────────────────────────────────────────────────┐
+│         BackgroundReceiveLoop                           │
+│                                                          │
+│  ┌──────────────────────────────────────────────┐      │
+│  │ Главный цикл (asyncio.Task)                  │      │
+│  │                                               │      │
+│  │  while not should_stop:                      │      │
+│  │    message = await transport.receive()       │      │
+│  │    routing_key = router.route(message)       │      │
+│  │    queue = queues.get(routing_key)           │      │
+│  │    queue.put(message)                        │      │
+│  └──────────────────────────────────────────────┘      │
+│                     │                                   │
+│    ┌────────────────┼────────────────┐                 │
+│    ▼                ▼                ▼                 │
+│  ┌──────────┐  ┌──────────┐  ┌──────────────┐         │
+│  │Response  │  │Notif.    │  │Permission    │         │
+│  │Queue     │  │Queue     │  │Queue         │         │
+│  │          │  │          │  │              │         │
+│  │[id1]:    │  │events:   │  │requests:     │         │
+│  │Future    │  │list      │  │list          │         │
+│  │[id2]:    │  │          │  │              │         │
+│  │Future    │  │          │  │              │         │
+│  └──────────┘  └──────────┘  └──────────────┘         │
+│      ▲              ▲              ▲                   │
+│      │              │              │                   │
+│  ┌───┴──────────────┴──────────────┴─────┐            │
+│  │ Потребители:                          │            │
+│  │ - request_with_callbacks              │            │
+│  │ - on_update_callback                  │            │
+│  │ - on_permission_callback              │            │
+│  └───────────────────────────────────────┘            │
+│                                                          │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Ключевые особенности:**
+
+1. **Единственный receive()** — избегает RuntimeError при конкурентном доступе
+2. **Маршрутизация на основе сообщения** — router.route() определяет очередь
+3. **Три типа очередей:**
+   - **response_queue** — RPC ответы (по id)
+   - **notification_queue** — асинхронные уведомления (session/update, fs/*, terminal/*)
+   - **permission_queue** — запросы разрешений
+4. **Graceful shutdown** — await stop() дожидается завершения loop
+5. **Диагностика** — счетчики сообщений и ошибок для мониторинга
+
+---
+
+## Критические архитектурные решения
+
+### 1. Абстракция SessionStorage в acp-server
+
+**Проблема:** Нужна гибкость в выборе хранилища (в памяти для dev, на диске для prod).
+
+**Решение:** [`SessionStorage(ABC)`](acp-server/src/acp_server/storage/base.py) — интерфейс с двумя реализациями:
+
+```mermaid
+graph TB
+    subgraph Interface["SessionStorage Abstract Interface"]
+        create["async create_session()"]
+        load["async load_session()"]
+        list["async list_sessions()"]
+        update["async update_session()"]
+        delete["async delete_session()"]
+    end
+    
+    subgraph Memory["InMemoryStorage"]
+        MemDict["dict[id] = SessionState<br/>в памяти"]
+    end
+    
+    subgraph File["JsonFileStorage"]
+        FileDict["dir/id.json<br/>на диске"]
+    end
+    
+    Interface --> Memory
+    Interface --> File
+    
+    CLI["CLI флаг<br/>--storage"]
+    CLI -->|memory://| Memory
+    CLI -->|json://path| File
+    
+    style Interface fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px
+    style Memory fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    style File fill:#fff3e0,stroke:#e65100,stroke-width:2px
+```
+
+**Преимущества:**
+- ✅ Easy testing (InMemoryStorage)
+- ✅ Production persistence (JsonFileStorage)
+- ✅ Plug-and-play новых backends (Redis, PostgreSQL)
+- ✅ Изоляция логики хранения от протокола
+
+### 2. Фильтрация инструментов по ClientRuntimeCapabilities
+
+**Проблема:** Не все клиенты поддерживают все инструменты (например, некоторые не поддерживают file system операции).
+
+**Решение:** [`ClientRuntimeCapabilities`](acp-server/src/acp_server/protocol/state.py) для фильтрации:
+
+```python
+# Пример из PromptOrchestrator
+available_tools = [
+    tool for tool in all_tools
+    if client_capabilities.supports_tool(tool.id)
+]
+```
+
+**Ключевые возможности:**
+- `supports_filesystem`: Поддержка fs операций
+- `supports_terminal`: Поддержка terminal операций
+- `max_tool_call_iterations`: Максимальное количество итераций tool calls
+
+### 3. ClientRPCService для асинхронных вызовов
+
+**Проблема:** Инструменты (fs/*, terminal/*) должны выполняться асинхронно на клиенте, а сервер ждет результата.
+
+**Решение:** [`ClientRPCService`](acp-server/src/acp_server/client_rpc/service.py) управляет [`asyncio.Future`](acp-server/src/acp_server/client_rpc/models.py):
+
+```mermaid
+graph TD
+    A["Инструмент начинает выполнение"]
+    B["ClientRPCService.execute_tool()"]
+    C["Отправляет RPC на клиент"]
+    D["Создает asyncio.Future"]
+    E["await future (блокирует до результата)"]
+    F["Клиент выполняет операцию"]
+    G["Отправляет ответ"]
+    H["ClientRPCService получает ответ"]
+    I["future.set_result()"]
+    J["Инструмент получает результат"]
+    
+    A --> B --> C --> D --> E
+    F --> G --> H --> I --> J
+    
+    style E fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    style I fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+```
+
+### 4. PromptOrchestrator как центральный координатор
+
+**Проблема:** Обработка prompt-turn включает множество этапов (валидация, LLM, tools, permissions, обновления).
+
+**Решение:** [`PromptOrchestrator`](acp-server/src/acp_server/protocol/handlers/prompt_orchestrator.py) интегрирует все компоненты:
+
+```python
+class PromptOrchestrator:
+    def __init__(
+        self,
+        state_manager: StateManager,
+        plan_builder: PlanBuilder,
+        turn_lifecycle_manager: TurnLifecycleManager,
+        tool_call_handler: ToolCallHandler,
+        permission_manager: PermissionManager,
+        client_rpc_handler: ClientRPCHandler,
+        tool_registry: ToolRegistry,
+    ):
+        # Все компоненты инжектированы
+        self.state_manager = state_manager
+        self.plan_builder = plan_builder
+        # ...
+```
+
+**Координирует:**
+1. Валидацию входных данных
+2. Преобразование контекста для LLM
+3. Вызов агента
+4. Управление tool calls
+5. Проверку разрешений
+6. Обновление состояния сессии
+7. Отправку events в историю
+
+---
+
+## Расширение и интеграция
+
+### Добавление нового инструмента в acp-server
+
+1. **Определить инструмент** в `tools/definitions/`
+2. **Реализовать executor** в `tools/executors/`
+3. **Зарегистрировать** в `PromptOrchestrator`
 
 Пример:
 
 ```python
-from storage.base import SessionStorage
+from acp_server.tools.base import ToolDefinition, ToolExecutor
 
-class RedisStorage(SessionStorage):
-    """Storage backend на Redis для распределенных систем."""
+class MyToolDefinition(ToolDefinition):
+    id = "my/tool"
+    name = "My Tool"
     
-    async def create_session(self, state: SessionState) -> SessionState:
-        # Реализация сохранения в Redis
+    async def execute(self, input_schema: dict) -> dict:
+        # Реализация
         pass
-    
-    # Остальные методы...
+
+class MyToolExecutor(ToolExecutor):
+    async def execute(self, name: str, arguments: dict) -> dict:
+        # Выполнение
+        pass
+
+# В PromptOrchestrator.__init__():
+tool_registry.register("my/tool", MyToolDefinition(), MyToolExecutor())
 ```
 
-### Добавление нового метода протокола
+### Добавление нового обработчика в acp-client
 
-1. Определить модель сообщения в `messages.py`
-2. Добавить handler в соответствующий файл `protocol/handlers/`:
-   - Для аутентификации/инициализации — `auth.py`
-   - Для сессий — `session.py`
-   - Для prompt-турнов — `prompt.py`
-   - И т.д.
-3. Зарегистрировать метод в `ACPProtocol.handle()` в `core.py`
-4. Добавить unit тесты в `tests/test_protocol.py`
-5. Добавить conformance тесты если требует спецификация
+1. **Создать handler** в `infrastructure/handlers/`
+2. **Зарегистрировать** в [`HandlerRegistry`](acp-client/src/acp_client/infrastructure/handler_registry.py)
+3. **Добавить tests** в `tests/`
 
 Пример:
 
 ```python
-# handlers/new_handler.py
-async def handle_new_method(protocol: ACPProtocol, request: NewMethodRequest) -> NewMethodResponse:
-    """Обработка нового метода."""
-    # Логика обработки
-    return NewMethodResponse(...)
+from acp_client.infrastructure.handler_registry import HandlerRegistry
 
-# protocol/core.py
-elif method == "namespace/new_method":
-    return await handle_new_method(self, request)
+class MyHandler:
+    async def handle(self, request: dict) -> dict:
+        # Обработка запроса
+        pass
+
+# Регистрация:
+registry = HandlerRegistry()
+registry.register("my/method", MyHandler())
 ```
 
-## Жизненный цикл запроса
+### Интеграция нового LLM провайдера
 
+1. **Наследовать** [`BaseLLMProvider`](acp-server/src/acp_server/llm/base.py)
+2. **Реализовать** `async generate()` метод
+3. **Зарегистрировать** в CLI флаге `--llm-provider`
+
+Пример:
+
+```python
+from acp_server.llm.base import BaseLLMProvider, LLMMessage
+
+class MyLLMProvider(BaseLLMProvider):
+    async def generate(self, messages: list[LLMMessage]) -> str:
+        # Вызов API
+        response = await my_api.generate(messages)
+        return response.text
 ```
-1. Client отправляет JSON-RPC запрос на WebSocket
-2. ACPHttpServer парсит JSON и создает Request
-3. ACPProtocol.handle() диспетчеризует на handler
-4. Handler обрабатывает запрос с использованием SessionStorage
-5. Handler возвращает Response или ошибку
-6. ACPHttpServer отправляет JSON-RPC результат клиенту
-7. Если требуется длительное выполнение, используется deferred response
-8. Session updates отправляются через отдельный update-поток
-```
 
-## Безопасность
-
-- Аутентификация через `authenticate` с API ключами
-- Permission-гейт для операций, требующих разрешения (`session/request_permission`)
-- Валидация всех входных данных согласно Pydantic моделям
-- Логирование всех операций для аудита
-- Изоляция сессий друг от друга через SessionStorage
-
-## Производительность
-
-- Асинхронная обработка запросов через asyncio
-- Потоковые session/update события для real-time обновлений
-- Plug-and-play хранилища для оптимизации по сценариям использования
-- Lazy loading сессий (загрузка только при необходимости)
-
-## Конкурентность
-
-- WebSocket многопользовательский, поддерживает множество одновременных соединений
-- Состояние сессий synchronous (не асинхронное), но может быть расширено
-- Деferred responses позволяют длительным операциям не блокировать соединение
-- Cancel-flow детерминирован для race условий с permission
+---
 
 ## Документы проекта
 
+### Справочная документация
+
+- **[acp-server/README.md](acp-server/README.md)** — запуск и использование сервера
+- **[acp-client/README.md](acp-client/README.md)** — запуск и использование клиента
+- **[acp-server/docs/ARCHITECTURE.md](acp-server/docs/ARCHITECTURE.md)** — детальная архитектура сервера
+- **[acp-client/docs/developer-guide/ARCHITECTURE.md](acp-client/docs/developer-guide/ARCHITECTURE.md)** — детальная архитектура клиента
+
+### Специальные документы
+
 - **[AGENTS.md](AGENTS.md)** — инструкции для агентных ассистентов
-- **[README.md](README.md)** — обзор и быстрый старт
-- **[CHANGELOG.md](CHANGELOG.md)** — история изменений
-- **[doc/ACP_IMPLEMENTATION_STATUS.md](doc/ACP_IMPLEMENTATION_STATUS.md)** — матрица соответствия ACP
-- **[doc/Agent Client Protocol/](doc/Agent Client Protocol/)** — спецификация и рабочие материалы ACP
+- **[doc/ACP_IMPLEMENTATION_STATUS.md](doc/ACP_IMPLEMENTATION_STATUS.md)** — матрица соответствия ACP спецификации
+- **[doc/Agent Client Protocol/](doc/Agent Client Protocol/)** — официальная спецификация ACP (не менять!)
+
+---
+
+## Заключение
+
+Архитектура acp-protocol разработана для:
+- ✅ **Модульности** — каждый компонент отвечает за одно
+- ✅ **Расширяемости** — добавление новых компонентов не требует изменений существующих
+- ✅ **Тестируемости** — все слои имеют интерфейсы для mock-объектов
+- ✅ **Производительности** — асинхронность, потоковые обновления, оптимальные структуры данных
+- ✅ **Безопасности** — валидация, аутентификация, логирование всех операций

@@ -82,6 +82,7 @@ class TestSessionStorageAbstraction:
         Если создать подкласс SessionStorage, но реализовать только часть
         методов, то его нельзя будет инстанцировать.
         """
+
         # Создаем неполную реализацию
         class IncompleteStorage(SessionStorage):
             """Неполная реализация с одним методом."""
@@ -100,6 +101,7 @@ class TestSessionStorageAbstraction:
         Если создать подкласс SessionStorage и реализовать все методы,
         то экземпляр может быть создан успешно.
         """
+
         # Создаем полную реализацию
         class CompleteStorage(SessionStorage):
             """Полная реализация хранилища."""

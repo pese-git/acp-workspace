@@ -51,6 +51,14 @@ def run_client() -> None:
         default=None,
         help="Путь к файлу логов. 'default' для ~/.acp-client/logs/acp-client.log",
     )
+    parser.add_argument(
+        "--history-dir",
+        default=None,
+        help=(
+            "Путь к локальной истории чата "
+            "(default: ACP_CLIENT_HISTORY_DIR или ~/.acp-client/history)"
+        ),
+    )
     args = parser.parse_args()
 
     # Настроить логирование с сохранением в ~/.acp-client/logs/acp-client.log по умолчанию
@@ -61,12 +69,12 @@ def run_client() -> None:
     )
 
     # Запустить TUI по умолчанию
-    run_tui_app(host=args.host, port=args.port)
+    run_tui_app(host=args.host, port=args.port, history_dir=args.history_dir)
 
 
-def run_tui_app(*, host: str | None, port: int | None) -> None:
+def run_tui_app(*, host: str | None, port: int | None, history_dir: str | None = None) -> None:
     """Ленивая загрузка TUI, чтобы не требовать Textual для обычного CLI."""
 
     from .tui import run_tui_app as _run_tui
 
-    _run_tui(host=host, port=port)
+    _run_tui(host=host, port=port, history_dir=history_dir)

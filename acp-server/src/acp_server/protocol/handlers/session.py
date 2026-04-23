@@ -15,6 +15,7 @@ import structlog
 from ...messages import ACPMessage, JsonRpcId
 from ..session_factory import SessionFactory
 from ..state import ClientRuntimeCapabilities, ProtocolOutcome, SessionState
+from .replay_manager import ReplayManager
 
 # Используем structlog для структурированного логирования
 logger = structlog.get_logger()
@@ -228,72 +229,61 @@ def session_load(
 
     notifications: list[ACPMessage] = []
 
-    # Реплей из events_history - восстанавливаем полную историю session/update уведомлений
-    # согласно спецификации ACP (protocol/03-Session Setup.md, раздел 132)
-    # Агент MUST replay всю историю через session/update уведомления
-    for event in session.events_history:
-        event_type = event.get("type")
+    # Используем ReplayManager для воспроизведения истории session/update уведомлений
+    # согласно спецификации ACP (protocol/03-Session Setup.md, раздел 132):
+    # "The Agent MUST replay the entire conversation to the Client
+    # in the form of session/update notifications"
+    replay_manager = ReplayManager()
+    history_notifications = replay_manager.replay_history(session)
+    notifications.extend(history_notifications)
 
-        if event_type == "session_update":
-            # Восстанавливаем session/update уведомления из сохранённых событий
-            update_data = event.get("update", {})
-            if update_data:
-                notifications.append(
-                    ACPMessage.notification(
-                        "session/update", {"sessionId": session_id, "update": update_data}
-                    )
-                )
-        # Пропускаем другие типы событий (permission requests и т.д.)
-        # при replay, так как они не требуют восстановления UI
+    # Реплеим latest_plan если он есть и не был в events_history
+    plan_notification = replay_manager.replay_latest_plan(session)
+    if plan_notification:
+        notifications.append(plan_notification)
 
-    if session.latest_plan:
-        notifications.append(
-            ACPMessage.notification(
-                "session/update",
-                {
-                    "sessionId": session_id,
-                    "update": {
-                        "sessionUpdate": "plan",
-                        "entries": session.latest_plan,
-                    },
-                },
-            )
-        )
-
-    # Реплеим текущее состояние tool calls, чтобы клиент восстановил UI.
-    for tool_call in session.tool_calls.values():
-        notifications.append(
-            ACPMessage.notification(
-                "session/update",
-                {
-                    "sessionId": session_id,
-                    "update": {
-                        "sessionUpdate": "tool_call",
-                        "toolCallId": tool_call.tool_call_id,
-                        "title": tool_call.title,
-                        "kind": tool_call.kind,
-                        "status": "pending",
-                    },
-                },
-            )
-        )
-        if tool_call.status != "pending":
-            update_payload: dict[str, Any] = {
-                "sessionUpdate": "tool_call_update",
-                "toolCallId": tool_call.tool_call_id,
-                "status": tool_call.status,
-            }
-            if tool_call.content:
-                update_payload["content"] = tool_call.content
+    # Fallback: реплеим tool calls из session.tool_calls если они не были в events_history
+    # Это обеспечивает обратную совместимость с сессиями, созданными до внедрения
+    # сохранения tool_call событий в events_history
+    has_tool_call_events = any(
+        event.get("type") == "session_update"
+        and event.get("update", {}).get("sessionUpdate") == "tool_call"
+        for event in session.events_history
+    )
+    if not has_tool_call_events and session.tool_calls:
+        for tool_call in session.tool_calls.values():
             notifications.append(
                 ACPMessage.notification(
                     "session/update",
                     {
                         "sessionId": session_id,
-                        "update": update_payload,
+                        "update": {
+                            "sessionUpdate": "tool_call",
+                            "toolCallId": tool_call.tool_call_id,
+                            "title": tool_call.title,
+                            "kind": tool_call.kind,
+                            "status": "pending",
+                        },
                     },
                 )
             )
+            if tool_call.status != "pending":
+                update_payload: dict[str, Any] = {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": tool_call.tool_call_id,
+                    "status": tool_call.status,
+                }
+                if tool_call.content:
+                    update_payload["content"] = tool_call.content
+                notifications.append(
+                    ACPMessage.notification(
+                        "session/update",
+                        {
+                            "sessionId": session_id,
+                            "update": update_payload,
+                        },
+                    )
+                )
 
     notifications.append(
         ACPMessage.notification(
@@ -521,14 +511,16 @@ def session_info_notification(
 
 
 def build_default_commands() -> list[dict[str, Any]]:
-    """Возвращает базовый набор команд для demo-сессий.
+    """Возвращает базовый набор команд для сессий.
+
+    Возвращает список встроенных slash-команд в формате, соответствующем
+    спецификации ACP Protocol 14-Slash Commands.
 
     Пример использования:
         commands = build_default_commands()
     """
-
-    # Базовый список slash-команд для демонстрации протокольного update.
-    # Возвращаем list[dict[str, Any]] которая совместима с list[AvailableCommand | dict[str, Any]]
+    # Встроенные slash-команды согласно спецификации ACP Protocol.
+    # Формат соответствует AvailableCommand: name, description, input? (с hint).
     return [
         {
             "name": "status",
@@ -536,6 +528,12 @@ def build_default_commands() -> list[dict[str, Any]]:
         },
         {
             "name": "mode",
-            "description": "Показать и изменить режим сессии",
+            "description": "Показать или изменить режим сессии",
+            "input": {"hint": "имя режима (code, architect, ask, debug)"},
         },
-    ]  # type: ignore[return-value]
+        {
+            "name": "help",
+            "description": "Показать список доступных команд",
+            "input": {"hint": "имя команды для подробной справки"},
+        },
+    ]

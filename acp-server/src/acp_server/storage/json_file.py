@@ -104,7 +104,8 @@ class JsonFileStorage(SessionStorage):
         )
 
     def _serialize_pending_client_request(
-        self, pending: PendingClientRequestState,
+        self,
+        pending: PendingClientRequestState,
     ) -> dict[str, Any]:
         """Сериализует PendingClientRequestState в dict для JSON."""
         return {
@@ -121,7 +122,8 @@ class JsonFileStorage(SessionStorage):
         }
 
     def _deserialize_pending_client_request(
-        self, data: dict[str, Any],
+        self,
+        data: dict[str, Any],
     ) -> PendingClientRequestState:
         """Десериализует dict в PendingClientRequestState."""
         return PendingClientRequestState(
@@ -138,7 +140,8 @@ class JsonFileStorage(SessionStorage):
         )
 
     def _serialize_capabilities(
-        self, caps: ClientRuntimeCapabilities,
+        self,
+        caps: ClientRuntimeCapabilities,
     ) -> dict[str, Any]:
         """Сериализует ClientRuntimeCapabilities в dict для JSON."""
         return {
@@ -193,14 +196,10 @@ class JsonFileStorage(SessionStorage):
             "history": history_serialized,
             "events_history": session.events_history,
             "active_turn": (
-                self._serialize_active_turn(session.active_turn)
-                if session.active_turn
-                else None
+                self._serialize_active_turn(session.active_turn) if session.active_turn else None
             ),
             "tool_call_counter": session.tool_call_counter,
-            "tool_calls": {
-                k: self._serialize_tool_call(v) for k, v in session.tool_calls.items()
-            },
+            "tool_calls": {k: self._serialize_tool_call(v) for k, v in session.tool_calls.items()},
             "available_commands": available_commands_serialized,
             "latest_plan": latest_plan_serialized,
             "permission_policy": session.permission_policy,
@@ -266,18 +265,13 @@ class JsonFileStorage(SessionStorage):
             ),
             tool_call_counter=data.get("tool_call_counter", 0),
             tool_calls={
-                k: self._deserialize_tool_call(v)
-                for k, v in data.get("tool_calls", {}).items()
+                k: self._deserialize_tool_call(v) for k, v in data.get("tool_calls", {}).items()
             },
             available_commands=available_commands_deserialized,
             latest_plan=latest_plan_deserialized,
             permission_policy=data.get("permission_policy", {}),
-            cancelled_permission_requests=set(
-                data.get("cancelled_permission_requests", [])
-            ),
-            cancelled_client_rpc_requests=set(
-                data.get("cancelled_client_rpc_requests", [])
-            ),
+            cancelled_permission_requests=set(data.get("cancelled_permission_requests", [])),
+            cancelled_client_rpc_requests=set(data.get("cancelled_client_rpc_requests", [])),
             runtime_capabilities=(
                 self._deserialize_capabilities(data["runtime_capabilities"])
                 if data.get("runtime_capabilities")
@@ -339,9 +333,7 @@ class JsonFileStorage(SessionStorage):
             return session
 
         except json.JSONDecodeError as e:
-            raise StorageError(
-                f"Failed to parse session file {session_id}: invalid JSON"
-            ) from e
+            raise StorageError(f"Failed to parse session file {session_id}: invalid JSON") from e
         except Exception as e:
             raise StorageError(f"Failed to load session {session_id}: {e}") from e
 
@@ -412,9 +404,7 @@ class JsonFileStorage(SessionStorage):
 
             page = sessions[start_index : start_index + limit]
             next_cursor = (
-                page[-1].session_id
-                if len(sessions) > start_index + limit and page
-                else None
+                page[-1].session_id if len(sessions) > start_index + limit and page else None
             )
 
             return page, next_cursor

@@ -39,27 +39,36 @@ class PermissionModal(ModalScreen[str | None]):
         self,
         *,
         permission_vm: PermissionViewModel,
+        request_id: str | int | None = None,
         title: str = "",
         options: list[PermissionOption] | None = None,
+        on_choice: Callable[[str | int, str], None] | None = None,
     ) -> None:
         """Создает модальное окно запроса разрешения.
 
         Args:
             permission_vm: PermissionViewModel для управления состоянием.
                 Обязательный параметр для MVVM интеграции.
+            request_id: ID permission request для callback (опционально).
+                Передается в on_choice callback при выборе.
             title: Заголовок запроса разрешения (опционально).
                 Если указан, используется вместо значения из ViewModel.
             options: Список вариантов разрешения (опционально).
                 Если указан, используется для инициализации.
+            on_choice: Callback вызываемый при выборе (request_id, option_id).
+                Сигнатура: Callable[[str | int, str], None]
+                Опционально для backward compatibility и тестирования.
         """
 
         super().__init__()
         self.permission_vm = permission_vm
+        self._request_id = request_id
         self._title = title
         self._options = options or []
         self._option_by_id: dict[str, PermissionOption] = {
             option.optionId: option for option in self._options
         }
+        self._on_choice = on_choice
 
         # Сохраняем unsubscribe функции для очистки при уничтожении
         self._unsubscribers: list[Callable[[], None]] = []
@@ -146,36 +155,64 @@ class PermissionModal(ModalScreen[str | None]):
             pass  # Компонент еще не смонтирован
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Закрывает модал с выбранной опцией или отменой."""
+        """Обрабатывает нажатие кнопки выбора разрешения.
+        
+        Вызывает on_choice callback если он установлен, затем закрывает модал.
+        """
 
         pressed_id = event.button.id
         if pressed_id == "permission-cancel":
+            # Вызвать callback с cancelled если есть
+            if self._on_choice and self._request_id is not None:
+                self._on_choice(self._request_id, "cancelled")
             self.permission_vm.hide()
             self.dismiss(None)
             return
         if isinstance(pressed_id, str) and pressed_id.startswith("permission-"):
             option_id = pressed_id.removeprefix("permission-")
             if option_id in self._option_by_id:
+                # Вызвать callback если есть
+                if self._on_choice and self._request_id is not None:
+                    self._on_choice(self._request_id, option_id)
                 self.permission_vm.hide()
                 self.dismiss(option_id)
 
     def action_cancel(self) -> None:
-        """Отменяет выбор разрешения клавишей Escape."""
+        """Обрабатывает отмену выбора разрешения клавишей Escape.
+        
+        Вызывает on_choice callback с "cancelled" если он установлен.
+        """
 
+        # Вызвать callback если есть
+        if self._on_choice and self._request_id is not None:
+            self._on_choice(self._request_id, "cancelled")
+        
         self.permission_vm.hide()
         self.dismiss(None)
 
     def action_allow_once(self) -> None:
-        """Выбирает разрешение по горячей клавише A."""
+        """Выбирает разрешение по горячей клавише A.
+        
+        Вызывает on_choice callback если установлен.
+        """
 
         option_id = self._resolve_option_id_by_kinds(["allow_once", "allow_always"])
+        if option_id and self._on_choice and self._request_id is not None:
+            # Вызвать callback если есть
+            self._on_choice(self._request_id, option_id)
         self.permission_vm.hide()
         self.dismiss(option_id)
 
     def action_reject_once(self) -> None:
-        """Выбирает отклонение по горячей клавише R."""
+        """Выбирает отклонение по горячей клавише R.
+        
+        Вызывает on_choice callback если установлен.
+        """
 
         option_id = self._resolve_option_id_by_kinds(["reject_once", "reject_always"])
+        if option_id and self._on_choice and self._request_id is not None:
+            # Вызвать callback если есть
+            self._on_choice(self._request_id, option_id)
         self.permission_vm.hide()
         self.dismiss(option_id)
 

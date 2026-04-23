@@ -89,7 +89,13 @@ class InitializeUseCase(UseCase):
                 method="initialize",
                 params={
                     "protocolVersion": 1,  # Обязательный параметр протокола ACP
-                    "clientCapabilities": {},  # Возможности клиента (пока пусто)
+                    "clientCapabilities": {  # Возможности клиента согласно ACP спецификации
+                        "fs": {  # File System capabilities
+                            "readTextFile": True,  # Поддержка fs/read_text_file
+                            "writeTextFile": True,  # Поддержка fs/write_text_file
+                        },
+                        "terminal": True,  # Поддержка terminal/* методов
+                    },
                     "clientInfo": {
                         "name": "acp-client",  # Идентификатор клиента
                         "version": "1.0.0",  # Версия клиента
@@ -525,29 +531,10 @@ class SendPromptUseCase(UseCase):
                         has_callbacks=request.callbacks is not None,
                     )
 
-            # Обработчик для permission - обрабатываем через callback
-            def handle_permission(perm_data: dict[str, Any]) -> str | None:
-                """Обработчик запроса разрешения."""
-                self._logger.debug("permission_request_received", perm_data=perm_data)
-
-                if request.callbacks and request.callbacks.on_permission:
-                    try:
-                        result = request.callbacks.on_permission(perm_data)
-                        self._logger.info("permission_handled", result=result)
-                        return result
-                    except Exception as e:
-                        self._logger.warning(
-                            "user_permission_callback_error",
-                            error=str(e),
-                        )
-                        return None
-
-                return None
-
             # Подготовляем callbacks для транспорта
+            # Обработка permission requests происходит асинхронно через PermissionHandler
             transport_callbacks = {
                 "on_update": handle_update,
-                "on_permission": handle_permission,
             }
 
             # Добавляем остальные callbacks если предоставлены

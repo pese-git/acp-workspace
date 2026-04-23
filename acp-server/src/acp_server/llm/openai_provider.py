@@ -44,7 +44,7 @@ class OpenAIProvider(LLMProvider):
             }
         """
         logger.debug("initializing openai provider")
-        
+
         api_key = config.get("api_key")
         self._model = config.get("model", "gpt-4o")
         self._temperature = config.get("temperature", 0.7)
@@ -94,10 +94,18 @@ class OpenAIProvider(LLMProvider):
         )
 
         # Преобразовать сообщения в формат OpenAI
-        openai_messages = [
-            {"role": msg.role, "content": msg.content}
-            for msg in messages
-        ]
+        openai_messages = self._convert_to_openai_format(messages)
+        
+        # Валидировать историю сообщений
+        try:
+            self._validate_message_history(openai_messages)
+        except ValueError as e:
+            logger.error(
+                "message history validation failed",
+                error=str(e),
+                num_messages=len(openai_messages),
+            )
+            raise
 
         # Подготовить параметры запроса
         request_params = {
@@ -123,7 +131,7 @@ class OpenAIProvider(LLMProvider):
             )
 
             parsed_response = self._parse_completion(response)
-            
+
             # Логирование полученного ответа от LLM
             logger.info(
                 "llm response received",
@@ -140,7 +148,7 @@ class OpenAIProvider(LLMProvider):
                 tool_calls_count=len(parsed_response.tool_calls),
                 stop_reason=parsed_response.stop_reason,
             )
-            
+
             return parsed_response
 
         except Exception as e:
@@ -173,10 +181,7 @@ class OpenAIProvider(LLMProvider):
         )
 
         # Преобразовать сообщения
-        openai_messages = [
-            {"role": msg.role, "content": msg.content}
-            for msg in messages
-        ]
+        openai_messages = self._convert_to_openai_format(messages)
 
         request_params = {
             "model": self._model,
@@ -212,7 +217,7 @@ class OpenAIProvider(LLMProvider):
                         tool_calls=[],
                         stop_reason="streaming",
                     )
-            
+
             logger.debug(
                 "openai stream completed",
                 total_chunks=chunk_count,
@@ -242,10 +247,29 @@ class OpenAIProvider(LLMProvider):
         # Извлечь текст
         text = message.content or ""
 
+        logger.debug(
+            "parsing openai completion",
+            finish_reason=choice.finish_reason,
+            has_message_tool_calls=bool(message.tool_calls),  # type: ignore[union-attr]
+            message_content_length=len(text),
+        )
+
         # Извлечь tool calls
         tool_calls: list[LLMToolCall] = []
         if message.tool_calls:  # type: ignore[union-attr]
-            for tool_call in message.tool_calls:  # type: ignore[union-attr]
+            logger.debug(
+                "parsing tool_calls from message",
+                num_tool_calls=len(message.tool_calls),  # type: ignore[union-attr]
+            )
+            
+            for idx, tool_call in enumerate(message.tool_calls):  # type: ignore[union-attr]
+                logger.debug(
+                    "parsing individual tool_call",
+                    tool_call_index=idx,
+                    tool_call_id=tool_call.id,  # type: ignore[union-attr]
+                    tool_call_type=tool_call.type,  # type: ignore[union-attr]
+                )
+                
                 if tool_call.type == "function":  # type: ignore[union-attr]
                     # Получить функцию из tool_call
                     func = tool_call.function  # type: ignore[union-attr]
@@ -255,10 +279,26 @@ class OpenAIProvider(LLMProvider):
                         if isinstance(func.arguments, str):  # type: ignore[union-attr]
                             try:
                                 args = json.loads(func.arguments)  # type: ignore[union-attr]
-                            except (json.JSONDecodeError, TypeError):
+                                logger.debug(
+                                    "parsed tool arguments from json",
+                                    tool_name=func.name,  # type: ignore[union-attr]
+                                    arguments=args,
+                                )
+                            except (json.JSONDecodeError, TypeError) as e:
+                                logger.error(
+                                    "failed to parse tool arguments json",
+                                    tool_name=func.name,  # type: ignore[union-attr]
+                                    raw_arguments=func.arguments,  # type: ignore[union-attr]
+                                    error=str(e),
+                                )
                                 args = {}
                         elif isinstance(func.arguments, dict):  # type: ignore[union-attr]
                             args = func.arguments  # type: ignore[union-attr]
+                            logger.debug(
+                                "tool arguments already dict",
+                                tool_name=func.name,  # type: ignore[union-attr]
+                                arguments=args,
+                            )
 
                     tool_calls.append(
                         LLMToolCall(
@@ -266,6 +306,12 @@ class OpenAIProvider(LLMProvider):
                             name=func.name,  # type: ignore[union-attr]
                             arguments=args,
                         )
+                    )
+                    
+                    logger.debug(
+                        "tool_call parsed successfully",
+                        tool_call_id=tool_call.id,  # type: ignore[union-attr]
+                        tool_name=func.name,  # type: ignore[union-attr]
                     )
 
         # Определить stop reason
@@ -275,8 +321,116 @@ class OpenAIProvider(LLMProvider):
         elif choice.finish_reason == "length":
             stop_reason = "max_tokens"
 
+        logger.info(
+            "openai completion parsed",
+            stop_reason=stop_reason,
+            num_tool_calls_parsed=len(tool_calls),
+            text_length=len(text),
+        )
+
         return LLMResponse(
             text=text,
             tool_calls=tool_calls,
             stop_reason=stop_reason,
         )
+
+    def _convert_to_openai_format(self, messages: list[LLMMessage]) -> list[dict[str, Any]]:
+        """Преобразовать LLMMessage в формат OpenAI API.
+        
+        Поддерживает:
+        - Обычные сообщения (system, user, assistant)
+        - Assistant messages с tool_calls
+        - Tool messages с tool_call_id
+        
+        Args:
+            messages: Список LLMMessage
+            
+        Returns:
+            Список словарей в формате OpenAI API
+        """
+        openai_messages: list[dict[str, Any]] = []
+        
+        for msg in messages:
+            openai_msg: dict[str, Any] = {"role": msg.role}
+            
+            # Добавить content если есть
+            if msg.content is not None:
+                openai_msg["content"] = msg.content
+            
+            # Для assistant messages с tool_calls
+            if msg.role == "assistant" and msg.tool_calls:
+                # Преобразовать LLMToolCall в формат OpenAI
+                openai_msg["tool_calls"] = [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.name,
+                            "arguments": json.dumps(tc.arguments),
+                        },
+                    }
+                    for tc in msg.tool_calls
+                ]
+            
+            # Для tool messages
+            if msg.role == "tool":
+                if msg.tool_call_id:
+                    openai_msg["tool_call_id"] = msg.tool_call_id
+                if msg.name:
+                    openai_msg["name"] = msg.name
+            
+            openai_messages.append(openai_msg)
+        
+        return openai_messages
+    
+    def _validate_message_history(self, messages: list[dict[str, Any]]) -> None:
+        """Валидация истории сообщений перед отправкой в OpenAI API.
+        
+        Проверяет, что:
+        - Tool messages следуют после assistant messages с tool_calls
+        - Tool messages имеют tool_call_id
+        
+        Args:
+            messages: Список сообщений в формате OpenAI
+            
+        Raises:
+            ValueError: Если история сообщений некорректна
+        """
+        last_assistant_tool_call_ids: set[str] = set()
+        
+        for i, msg in enumerate(messages):
+            role = msg.get("role")
+            
+            # Собрать tool_call_ids из assistant messages
+            if role == "assistant":
+                tool_calls = msg.get("tool_calls", [])
+                if tool_calls:
+                    last_assistant_tool_call_ids = {tc["id"] for tc in tool_calls}
+                else:
+                    # Assistant message без tool_calls - сбросить ожидаемые IDs
+                    last_assistant_tool_call_ids = set()
+            
+            # Проверить tool messages
+            elif role == "tool":
+                tool_call_id = msg.get("tool_call_id")
+                
+                if not tool_call_id:
+                    logger.error(
+                        "tool message without tool_call_id",
+                        message_index=i,
+                        message=msg,
+                    )
+                    raise ValueError(
+                        f"Tool message at index {i} missing tool_call_id"
+                    )
+                
+                if not last_assistant_tool_call_ids:
+                    logger.error(
+                        "tool message without preceding assistant tool_calls",
+                        message_index=i,
+                        tool_call_id=tool_call_id,
+                    )
+                    raise ValueError(
+                        f"Tool message at index {i} (tool_call_id={tool_call_id}) "
+                        "must follow an assistant message with tool_calls"
+                    )
