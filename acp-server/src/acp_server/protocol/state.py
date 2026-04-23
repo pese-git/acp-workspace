@@ -67,6 +67,9 @@ class SessionState:
     # Ожидающие asyncio.Future для permission requests (request_id -> Future).
     # Используется для асинхронного ожидания ответов пользователя на запросы разрешений.
     pending_permission_requests: dict[JsonRpcId, asyncio.Future] = field(default_factory=dict)
+    # MCPManager для управления подключёнными MCP серверами.
+    # Используется для интеграции с внешними MCP серверами и их инструментами.
+    mcp_manager: Any = None
 
 
 @dataclass(slots=True)

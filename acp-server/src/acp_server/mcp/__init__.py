@@ -29,6 +29,12 @@ from .client import (
     MCPInitializeError,
     MCPToolCallError,
 )
+from .manager import (
+    MCPManager,
+    MCPManagerError,
+    MCPServerAlreadyExistsError,
+    MCPServerNotFoundError,
+)
 from .models import (
     MCPCallToolParams,
     MCPCallToolResult,
@@ -50,6 +56,7 @@ from .models import (
     MCPTool,
     MCPToolInputSchema,
 )
+from .tool_adapter import MCPToolAdapter
 from .transport import (
     ProcessExitedError,
     ProcessNotStartedError,
@@ -64,6 +71,13 @@ __all__ = [
     "MCPClientState",
     "MCPInitializeError",
     "MCPToolCallError",
+    # Manager
+    "MCPManager",
+    "MCPManagerError",
+    "MCPServerAlreadyExistsError",
+    "MCPServerNotFoundError",
+    # Tool Adapter
+    "MCPToolAdapter",
     # Transport
     "StdioTransport",
     "StdioTransportError",
