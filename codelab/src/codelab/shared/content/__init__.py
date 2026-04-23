@@ -8,7 +8,7 @@
 и используются как в серверной, так и в клиентской части.
 """
 
-from codelab.shared.content.audio import AudioContent, ALLOWED_AUDIO_MIME_TYPES
+from codelab.shared.content.audio import ALLOWED_AUDIO_MIME_TYPES, AudioContent
 from codelab.shared.content.base import (
     BlobResource,
     ContentBlock,
@@ -16,7 +16,7 @@ from codelab.shared.content.base import (
     TextResource,
 )
 from codelab.shared.content.embedded import EmbeddedResourceContent
-from codelab.shared.content.image import ImageContent, ALLOWED_IMAGE_MIME_TYPES
+from codelab.shared.content.image import ALLOWED_IMAGE_MIME_TYPES, ImageContent
 from codelab.shared.content.resource_link import ResourceLinkContent
 from codelab.shared.content.text import TextContent
 

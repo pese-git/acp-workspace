@@ -20,7 +20,6 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
-
 # Тип идентификатора JSON-RPC сообщения
 type JsonRpcId = str | int
 
