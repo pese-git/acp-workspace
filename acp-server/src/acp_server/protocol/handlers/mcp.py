@@ -87,15 +87,15 @@ async def session_mcp_add(
     
     # Валидация обязательных параметров
     if "name" not in params:
-        return ACPMessage.error(
-            id=request_id,
+        return ACPMessage.error_response(
+            request_id,
             code=-32602,
             message="Missing required parameter: name",
         )
     
     if "command" not in params:
-        return ACPMessage.error(
-            id=request_id,
+        return ACPMessage.error_response(
+            request_id,
             code=-32602,
             message="Missing required parameter: command",
         )
@@ -132,9 +132,9 @@ async def session_mcp_add(
             tools_count=len(tools),
         )
         
-        return ACPMessage.result(
-            id=request_id,
-            result={
+        return ACPMessage.response(
+            request_id,
+            {
                 "server_id": config.name,
                 "tools_count": len(tools),
                 "tools": tools_info,
@@ -147,8 +147,8 @@ async def session_mcp_add(
             session_id=session.session_id,
             error=str(e),
         )
-        return ACPMessage.error(
-            id=request_id,
+        return ACPMessage.error_response(
+            request_id,
             code=-32000,
             message=str(e),
         )
@@ -159,8 +159,8 @@ async def session_mcp_add(
             session_id=session.session_id,
             error=str(e),
         )
-        return ACPMessage.error(
-            id=request_id,
+        return ACPMessage.error_response(
+            request_id,
             code=-32000,
             message=f"Failed to add MCP server: {e}",
         )
@@ -170,8 +170,8 @@ async def session_mcp_add(
             "Unexpected error adding MCP server",
             session_id=session.session_id,
         )
-        return ACPMessage.error(
-            id=request_id,
+        return ACPMessage.error_response(
+            request_id,
             code=-32603,
             message=f"Internal error: {e}",
         )
@@ -213,8 +213,8 @@ async def session_mcp_remove(
     server_id = params.get("server_id")
     
     if not server_id:
-        return ACPMessage.error(
-            id=request_id,
+        return ACPMessage.error_response(
+            request_id,
             code=-32602,
             message="Missing required parameter: server_id",
         )
@@ -223,8 +223,8 @@ async def session_mcp_remove(
     mcp_manager = session.mcp_manager
     
     if mcp_manager is None:
-        return ACPMessage.error(
-            id=request_id,
+        return ACPMessage.error_response(
+            request_id,
             code=-32000,
             message="No MCP servers connected to this session",
         )
@@ -238,9 +238,9 @@ async def session_mcp_remove(
             server_id=server_id,
         )
         
-        return ACPMessage.result(
-            id=request_id,
-            result={
+        return ACPMessage.response(
+            request_id,
+            {
                 "server_id": server_id,
                 "success": True,
             },
@@ -252,8 +252,8 @@ async def session_mcp_remove(
             session_id=session.session_id,
             server_id=server_id,
         )
-        return ACPMessage.error(
-            id=request_id,
+        return ACPMessage.error_response(
+            request_id,
             code=-32000,
             message=str(e),
         )
@@ -265,8 +265,8 @@ async def session_mcp_remove(
             server_id=server_id,
             error=str(e),
         )
-        return ACPMessage.error(
-            id=request_id,
+        return ACPMessage.error_response(
+            request_id,
             code=-32000,
             message=f"Failed to remove MCP server: {e}",
         )
@@ -276,8 +276,8 @@ async def session_mcp_remove(
             "Unexpected error removing MCP server",
             session_id=session.session_id,
         )
-        return ACPMessage.error(
-            id=request_id,
+        return ACPMessage.error_response(
+            request_id,
             code=-32603,
             message=f"Internal error: {e}",
         )
@@ -322,10 +322,7 @@ async def session_mcp_list(
     
     if mcp_manager is None:
         # Нет MCPManager — нет серверов
-        return ACPMessage.result(
-            id=request_id,
-            result={"servers": []},
-        )
+        return ACPMessage.response(request_id, {"servers": []})
     
     try:
         servers_info = mcp_manager.get_servers_info()
@@ -336,18 +333,15 @@ async def session_mcp_list(
             servers_count=len(servers_info),
         )
         
-        return ACPMessage.result(
-            id=request_id,
-            result={"servers": servers_info},
-        )
+        return ACPMessage.response(request_id, {"servers": servers_info})
         
     except Exception as e:
         logger.exception(
             "Unexpected error listing MCP servers",
             session_id=session.session_id,
         )
-        return ACPMessage.error(
-            id=request_id,
+        return ACPMessage.error_response(
+            request_id,
             code=-32603,
             message=f"Internal error: {e}",
         )

@@ -16,6 +16,7 @@ from .handlers import (
     auth,
     config,
     legacy,
+    mcp,
     permissions,
     prompt,
     session,
@@ -338,6 +339,49 @@ class ACPProtocol:
                 self._sessions,
                 self._config_specs,
             )
+
+        # MCP методы: session/mcp/add, session/mcp/remove, session/mcp/list
+        if method == "session/mcp/add":
+            session_id = params.get("sessionId")
+            session_state = self._sessions.get(session_id) if session_id else None
+            if session_state is None:
+                return ProtocolOutcome(
+                    response=ACPMessage.error_response(
+                        message.id,
+                        code=-32602,
+                        message=f"Session not found: {session_id}",
+                    )
+                )
+            response = await mcp.session_mcp_add(message.id, params, session_state)
+            return ProtocolOutcome(response=response)
+
+        if method == "session/mcp/remove":
+            session_id = params.get("sessionId")
+            session_state = self._sessions.get(session_id) if session_id else None
+            if session_state is None:
+                return ProtocolOutcome(
+                    response=ACPMessage.error_response(
+                        message.id,
+                        code=-32602,
+                        message=f"Session not found: {session_id}",
+                    )
+                )
+            response = await mcp.session_mcp_remove(message.id, params, session_state)
+            return ProtocolOutcome(response=response)
+
+        if method == "session/mcp/list":
+            session_id = params.get("sessionId")
+            session_state = self._sessions.get(session_id) if session_id else None
+            if session_state is None:
+                return ProtocolOutcome(
+                    response=ACPMessage.error_response(
+                        message.id,
+                        code=-32602,
+                        message=f"Session not found: {session_id}",
+                    )
+                )
+            response = await mcp.session_mcp_list(message.id, params, session_state)
+            return ProtocolOutcome(response=response)
 
         if method == "ping":
             return ProtocolOutcome(response=legacy.ping(message.id))
