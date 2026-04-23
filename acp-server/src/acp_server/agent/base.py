@@ -25,12 +25,25 @@ class AgentContext:
 
 @dataclass
 class AgentResponse:
-    """Ответ агента после обработки prompt."""
+    """Ответ агента после обработки prompt.
+    
+    Attributes:
+        text: Текстовый ответ агента
+        tool_calls: Список вызовов инструментов
+        stop_reason: Причина остановки ("end_turn", "tool_use", "max_tokens", "error")
+        metadata: Дополнительные метаданные
+        plan: План выполнения задач (опционально). Список словарей с полями:
+            - content: Описание задачи
+            - priority: "low" | "medium" | "high"
+            - status: "pending" | "in_progress" | "completed" | "cancelled"
+            - description: Детальное описание (опционально)
+    """
 
     text: str
     tool_calls: list[LLMToolCall]
     stop_reason: str  # "end_turn", "tool_use", "max_tokens", "error"
     metadata: dict[str, Any] = field(default_factory=dict)
+    plan: list[dict[str, str]] | None = None  # План выполнения задач
 
 
 class LLMAgent(ABC):

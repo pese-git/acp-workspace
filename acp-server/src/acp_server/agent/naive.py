@@ -5,6 +5,7 @@ from typing import Any
 import structlog
 
 from acp_server.agent.base import AgentContext, AgentResponse, LLMAgent
+from acp_server.agent.plan_extractor import PlanExtractor
 from acp_server.llm.base import LLMMessage, LLMProvider
 from acp_server.tools.base import ToolRegistry
 
@@ -122,11 +123,16 @@ class NaiveAgent(LLMAgent):
                     LLMMessage(role="assistant", content=response.text)
                 )
 
+                # Извлечь план из текстового ответа LLM
+                plan_extractor = PlanExtractor()
+                extracted_plan = plan_extractor.extract_from_text(response.text)
+
                 return AgentResponse(
                     text=response.text,
                     tool_calls=[],
                     stop_reason=response.stop_reason,
                     metadata={"iterations": iteration},
+                    plan=extracted_plan,
                 )
 
             # АРХИТЕКТУРНОЕ ИЗМЕНЕНИЕ (Вариант A - Clean Architecture):
@@ -163,11 +169,20 @@ class NaiveAgent(LLMAgent):
             # 1. Проверит разрешения (session policy -> global policy -> ask user)
             # 2. Выполнит tool или отклонит его
             # 3. Отправит notifications клиенту
+            
+            # Извлечь план из текста или tool call update_plan
+            plan_extractor = PlanExtractor()
+            extracted_plan = plan_extractor.extract_from_text(response.text)
+            if extracted_plan is None:
+                # Попытка извлечь из tool call update_plan
+                extracted_plan = plan_extractor.extract_from_tool_call(response.tool_calls)
+            
             return AgentResponse(
                 text=response.text,
                 tool_calls=response.tool_calls,
                 stop_reason=response.stop_reason,
                 metadata={"iterations": iteration},
+                plan=extracted_plan,
             )
 
         # Достигнут лимит итераций
@@ -181,6 +196,7 @@ class NaiveAgent(LLMAgent):
             tool_calls=[],
             stop_reason="max_iterations",
             metadata={"iterations": iteration},
+            plan=None,
         )
 
     async def cancel_prompt(self, session_id: str) -> None:

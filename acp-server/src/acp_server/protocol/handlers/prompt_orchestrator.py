@@ -97,9 +97,11 @@ class PromptOrchestrator:
             # Импортировать только при необходимости для избежания циклических импортов
             from ...tools.definitions import (
                 FileSystemToolDefinitions,
+                PlanToolDefinitions,
                 TerminalToolDefinitions,
             )
             from ...tools.executors.filesystem_executor import FileSystemToolExecutor
+            from ...tools.executors.plan_executor import PlanToolExecutor
             from ...tools.executors.terminal_executor import TerminalToolExecutor
             from ...tools.integrations.client_rpc_bridge import ClientRPCBridge
             from ...tools.integrations.permission_checker import PermissionChecker
@@ -110,18 +112,28 @@ class PromptOrchestrator:
             # Создать executors для встроенных инструментов
             fs_executor = FileSystemToolExecutor(bridge, checker)
             terminal_executor = TerminalToolExecutor(bridge, checker)
+            plan_executor = PlanToolExecutor()
 
             # Зарегистрировать встроенные инструменты
             FileSystemToolDefinitions.register_all(tool_registry, fs_executor)
             TerminalToolDefinitions.register_all(tool_registry, terminal_executor)
+            PlanToolDefinitions.register_all(tool_registry, plan_executor)
 
             logger.debug(
                 "PromptOrchestrator initialized with tool executors",
                 tools_registered=len(tool_registry.get_available_tools("")),
             )
         else:
+            # Даже без client_rpc_service, регистрируем plan tool
+            # так как он не требует client_rpc
+            from ...tools.definitions import PlanToolDefinitions
+            from ...tools.executors.plan_executor import PlanToolExecutor
+
+            plan_executor = PlanToolExecutor()
+            PlanToolDefinitions.register_all(tool_registry, plan_executor)
+
             logger.debug(
-                "PromptOrchestrator initialized without tool executors (client_rpc_service is None)"
+                "PromptOrchestrator initialized with plan tool only (client_rpc_service is None)"
             )
 
     def set_global_policy_manager(
@@ -492,11 +504,22 @@ class PromptOrchestrator:
                 )
                 continue
 
-            # Применить decision logic через fallback chain
-            decision = await self._decide_tool_execution(
-                session=session,
-                tool_kind=tool_kind,
-            )
+            # Проверить requires_permission из tool_definition
+            # Если tool не требует permission (например update_plan), сразу разрешить
+            if tool_definition is not None and not tool_definition.requires_permission:
+                logger.debug(
+                    "tool does not require permission, auto-allowing",
+                    session_id=session_id,
+                    tool_name=tool_name,
+                    tool_kind=tool_kind,
+                )
+                decision = "allow"
+            else:
+                # Применить decision logic через fallback chain
+                decision = await self._decide_tool_execution(
+                    session=session,
+                    tool_kind=tool_kind,
+                )
 
             if decision == "allow":
                 # Выполнить tool - переходим к execution ниже
@@ -995,6 +1018,30 @@ class PromptOrchestrator:
                     _build_agent_response_notification(session_id, agent_response_text)
                 )
             
+            # Обработка плана из agent_response (если есть)
+            # Используем getattr для обратной совместимости с mock объектами
+            agent_plan = getattr(agent_response, "plan", None) if agent_response else None
+            if agent_plan:
+                validated_plan = self.plan_builder.validate_plan_entries(agent_plan)
+                if validated_plan:
+                    # Обновить состояние сессии
+                    session.latest_plan = validated_plan
+                    
+                    # Построить и отправить notification
+                    plan_notification = self.plan_builder.build_plan_notification(
+                        session_id, validated_plan
+                    )
+                    notifications.append(plan_notification)
+                    
+                    # Сохранить в events_history для replay
+                    self.replay_manager.save_plan(session, validated_plan)
+                    
+                    logger.debug(
+                        "plan processed and published",
+                        session_id=session_id,
+                        num_entries=len(validated_plan),
+                    )
+            
             # Если нет tool_calls - выходим из цикла
             if not has_tool_calls:
                 logger.debug(
@@ -1185,8 +1232,19 @@ class PromptOrchestrator:
                 status="pending",
             )
             
-            # Применить decision logic
-            decision = await self._decide_tool_execution(session, tool_kind)
+            # Проверить requires_permission из tool_definition
+            # Если tool не требует permission (например update_plan), сразу разрешить
+            if tool_definition is not None and not tool_definition.requires_permission:
+                logger.debug(
+                    "tool does not require permission, auto-allowing",
+                    session_id=session_id,
+                    tool_name=tool_name,
+                    tool_kind=tool_kind,
+                )
+                decision = "allow"
+            else:
+                # Применить decision logic
+                decision = await self._decide_tool_execution(session, tool_kind)
             
             if decision == "ask":
                 # Запросить разрешение - прервать loop
