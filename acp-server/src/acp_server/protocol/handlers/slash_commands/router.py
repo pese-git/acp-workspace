@@ -6,7 +6,7 @@ SlashCommandRouter направляет slash-команды к соответс
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import structlog
 
@@ -120,17 +120,17 @@ class SlashCommandRouter:
                 )
             )
 
-        # Добавляем основной контент как content update
-        if result.content:
+        # Добавляем основной контент как agent_message_chunk для отображения в UI
+        # Клиент ожидает sessionUpdate: "agent_message_chunk" с content block
+        for content_block in result.content:
             messages.append(
                 ACPMessage.notification(
                     "session/update",
                     {
                         "sessionId": session.session_id,
                         "update": {
-                            "sessionUpdate": "content",
-                            "role": "assistant",
-                            "content": result.content,
+                            "sessionUpdate": "agent_message_chunk",
+                            "content": content_block,
                         },
                     },
                 )
@@ -154,12 +154,10 @@ class SlashCommandRouter:
         Returns:
             ProtocolOutcome с сообщением об ошибке
         """
-        error_content: list[dict[str, Any]] = [
-            {
-                "type": "text",
-                "text": f"❌ Ошибка выполнения команды /{command}: {error}",
-            }
-        ]
+        error_content = {
+            "type": "text",
+            "text": f"❌ Ошибка выполнения команды /{command}: {error}",
+        }
 
         return ProtocolOutcome(
             notifications=[
@@ -168,8 +166,7 @@ class SlashCommandRouter:
                     {
                         "sessionId": session.session_id,
                         "update": {
-                            "sessionUpdate": "content",
-                            "role": "assistant",
+                            "sessionUpdate": "agent_message_chunk",
                             "content": error_content,
                         },
                     },

@@ -140,12 +140,12 @@ class TestSlashCommandRouter:
 
         assert outcome is not None
         assert len(outcome.notifications) == 1
-        # Проверяем содержимое notification
+        # Проверяем содержимое notification - формат agent_message_chunk
         notif = outcome.notifications[0]
         assert notif.params is not None
         update = notif.params["update"]
-        assert update["sessionUpdate"] == "content"
-        assert "Dummy executed" in update["content"][0]["text"]
+        assert update["sessionUpdate"] == "agent_message_chunk"
+        assert "Dummy executed" in update["content"]["text"]
 
     def test_route_unknown_command_returns_none(
         self, registry: CommandRegistry, session: SessionState
