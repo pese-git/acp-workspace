@@ -89,17 +89,11 @@ class PlanBuilder:
             if status not in allowed_statuses:
                 status = "pending"
 
-            # Нормализуем description (опциональное поле)
-            description = entry.get("description", "")
-            if not isinstance(description, str):
-                description = ""
-
             normalized_entries.append(
                 {
                     "content": content.strip(),
                     "priority": priority,
                     "status": status,
-                    "description": description.strip(),
                 }
             )
 

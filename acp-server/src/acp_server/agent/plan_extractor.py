@@ -29,13 +29,11 @@ class PlanEntry:
         content: Краткое описание задачи
         priority: Важность задачи (low, medium, high)
         status: Текущий статус (pending, in_progress, completed)
-        description: Детальное описание (опционально)
     """
     
     content: str
     priority: Literal["low", "medium", "high"]
     status: Literal["pending", "in_progress", "completed"]
-    description: str = ""
     
     def to_dict(self) -> dict[str, str]:
         """Преобразовать в словарь для notification."""
@@ -43,7 +41,6 @@ class PlanEntry:
             "content": self.content,
             "priority": self.priority,
             "status": self.status,
-            "description": self.description,
         }
 
 
@@ -260,16 +257,11 @@ class PlanExtractor:
             status = raw_status if raw_status in ALLOWED_STATUSES else "pending"
             
             # Опциональное description
-            description = raw.get("description", "")
-            if not isinstance(description, str):
-                description = ""
-            
             valid_entries.append(
                 PlanEntry(
                     content=content.strip(),
                     priority=priority,  # type: ignore[arg-type]
                     status=status,  # type: ignore[arg-type]
-                    description=description.strip(),
                 )
             )
         

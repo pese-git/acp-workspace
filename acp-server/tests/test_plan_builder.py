@@ -138,7 +138,6 @@ class TestPlanBuilderValidation:
                 "content": "Complex task",
                 "priority": "high",
                 "status": "in_progress",
-                "description": "This is a complex task",
             }
         ]
         result = plan_builder.validate_plan_entries(entries)
@@ -318,14 +317,14 @@ class TestPlanBuilderSessionUpdate:
     ) -> None:
         """Обновляет latest_plan в сессии."""
         entries = [
-            {"content": "Step 1", "description": "First"},
-            {"content": "Step 2", "description": "Second"},
+            {"content": "Step 1", "priority": "high", "status": "pending"},
+            {"content": "Step 2", "priority": "medium", "status": "pending"},
         ]
         plan_builder.update_session_plan(session, entries)
 
         assert len(session.latest_plan) == 2
         assert session.latest_plan[0]["title"] == "Step 1"
-        assert session.latest_plan[0]["description"] == "First"
+        assert session.latest_plan[1]["title"] == "Step 2"
 
     def test_update_session_plan_empty(
         self,

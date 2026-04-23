@@ -19,7 +19,6 @@ class TestPlanEntry:
             content="Test task",
             priority="high",
             status="pending",
-            description="Test description",
         )
         result = entry.to_dict()
         
@@ -27,17 +26,7 @@ class TestPlanEntry:
             "content": "Test task",
             "priority": "high",
             "status": "pending",
-            "description": "Test description",
         }
-
-    def test_plan_entry_default_description(self) -> None:
-        """Проверить значение по умолчанию для description."""
-        entry = PlanEntry(
-            content="Task",
-            priority="medium",
-            status="in_progress",
-        )
-        assert entry.description == ""
 
 
 class TestPlanExtractor:
@@ -100,27 +89,6 @@ class TestPlanExtractor:
         text = '```json\n{"plan": [broken json]}\n```'
         result = extractor.extract_from_text(text)
         assert result is None
-
-    def test_extract_from_text_with_description(self, extractor: PlanExtractor) -> None:
-        """Извлечение плана с опциональным description."""
-        text = """
-```json
-{
-  "plan": [
-    {
-      "content": "Main task",
-      "priority": "high",
-      "status": "in_progress",
-      "description": "Detailed info"
-    }
-  ]
-}
-```
-"""
-        result = extractor.extract_from_text(text)
-        
-        assert result is not None
-        assert result[0]["description"] == "Detailed info"
 
     def test_extract_from_tool_call(self, extractor: PlanExtractor) -> None:
         """Извлечение плана из tool call update_plan."""

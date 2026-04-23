@@ -66,10 +66,6 @@ class PlanToolDefinitions:
                                     "enum": ["pending", "in_progress", "completed"],
                                     "description": "Current task status",
                                 },
-                                "description": {
-                                    "type": "string",
-                                    "description": "Optional detailed description",
-                                },
                             },
                             "required": ["content", "priority", "status"],
                         },

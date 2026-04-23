@@ -35,7 +35,6 @@ class TestPlanToolDefinitions:
         assert "content" in item_schema["properties"]
         assert "priority" in item_schema["properties"]
         assert "status" in item_schema["properties"]
-        assert "description" in item_schema["properties"]
         
         # Проверить enum для priority
         priority_enum = item_schema["properties"]["priority"]["enum"]
@@ -81,29 +80,6 @@ class TestPlanToolExecutor:
         assert result.metadata is not None
         assert result.metadata["entries_count"] == 2
         assert "Plan updated with 2 entries" in (result.output or "")
-
-    @pytest.mark.asyncio
-    async def test_execute_with_description(
-        self, executor: PlanToolExecutor, session: SessionState
-    ) -> None:
-        """Выполнение с опциональным description."""
-        arguments = {
-            "entries": [
-                {
-                    "content": "Main task",
-                    "priority": "high",
-                    "status": "pending",
-                    "description": "Detailed description",
-                }
-            ]
-        }
-        
-        result = await executor.execute(session, arguments)
-        
-        assert result.success is True
-        assert result.metadata is not None
-        validated = result.metadata["validated_entries"]
-        assert validated[0]["description"] == "Detailed description"
 
     @pytest.mark.asyncio
     async def test_execute_empty_entries(
