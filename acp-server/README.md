@@ -603,6 +603,61 @@ uv run python -m pytest tests/test_permission_policy_persistence.py -v
 **Протокол:**
 - [`doc/Agent Client Protocol/protocol/05-Prompt Turn.md`](../doc/Agent%20Client%20Protocol/protocol/05-Prompt%20Turn.md) - Permission request/response flow
 
+## Планирование задач (Agent Plan)
+
+Агент поддерживает создание планов выполнения через инструмент `update_plan`.
+
+### Как это работает
+
+1. Агент получает сложную задачу
+2. Вызывает `update_plan` с планом выполнения
+3. План отображается в UI клиента
+4. По мере выполнения агент обновляет статусы задач
+
+### Тестирование flow планирования
+
+**1. Запустить сервер:**
+```bash
+cd acp-server
+cp .env.example .env  # настроить API ключ
+uv run acp-server --log-level DEBUG
+```
+
+**2. Запустить клиент (в другом терминале):**
+```bash
+cd acp-client
+uv run python -m acp_client.tui
+```
+
+**3. Отправить задачу для инициирования плана:**
+```
+Создай структуру проекта для REST API на FastAPI с файлами main.py, routes.py, models.py
+```
+
+Агент должен вызвать `update_plan` и план появится в панели.
+
+### Формат плана
+
+```json
+{
+  "entries": [
+    {"content": "Создать main.py", "priority": "high", "status": "pending"},
+    {"content": "Создать routes.py", "priority": "medium", "status": "pending"},
+    {"content": "Создать models.py", "priority": "medium", "status": "pending"}
+  ]
+}
+```
+
+**Поля:**
+- `priority`: `high`, `medium`, `low`
+- `status`: `pending`, `in_progress`, `completed`, `cancelled`
+
+### Unit тесты
+
+```bash
+uv run python -m pytest tests/test_plan*.py -v
+```
+
 ## Проверки
 
 ```bash
