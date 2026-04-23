@@ -126,30 +126,26 @@ class PlanBuilder:
     ) -> ACPMessage:
         """Строит session/update notification с планом.
 
+        Формат соответствует протоколу ACP (Agent Client Protocol):
+        - sessionUpdate: "plan"
+        - entries: список {content, priority, status}
+
         Args:
             session_id: ID сессии
             plan_entries: Нормализованные entries с content, priority, status
 
         Returns:
-            ACPMessage с типом session/update и planUpdate
+            ACPMessage с типом session/update и plan
         """
-        # Преобразуем entries в формат для notification
-        # Отправляем в формате title + description для клиента
-        formatted_entries = [
-            {
-                "title": entry.get("content", ""),
-                "description": entry.get("description", ""),
-            }
-            for entry in plan_entries
-        ]
-
+        # Используем entries напрямую — они уже в правильном формате ACP
+        # {content, priority, status}
         notification = ACPMessage.notification(
             "session/update",
             {
                 "sessionId": session_id,
                 "update": {
-                    "sessionUpdate": "planUpdate",
-                    "plan": formatted_entries,
+                    "sessionUpdate": "plan",
+                    "entries": plan_entries,
                 },
             },
         )
@@ -157,7 +153,7 @@ class PlanBuilder:
         logger.debug(
             "plan notification built",
             session_id=session_id,
-            plan_entries_count=len(formatted_entries),
+            plan_entries_count=len(plan_entries),
         )
         return notification
 

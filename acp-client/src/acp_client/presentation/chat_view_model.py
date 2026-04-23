@@ -76,6 +76,7 @@ class ChatViewModel(BaseViewModel):
         history_dir: Path | str | None = None,
         fs_executor: Any | None = None,  # FileSystemExecutor
         terminal_executor: Any | None = None,  # TerminalExecutor
+        plan_vm: Any | None = None,  # PlanViewModel для обработки plan updates
     ) -> None:
         """Инициализировать ChatViewModel.
 
@@ -87,11 +88,13 @@ class ChatViewModel(BaseViewModel):
                 (приоритет: аргумент history_dir -> ACP_CLIENT_HISTORY_DIR -> ~/.acp-client/history)
             fs_executor: FileSystemExecutor для обработки fs/* callbacks (синхронно)
             terminal_executor: TerminalExecutor для обработки terminal/* callbacks (синхронно)
+            plan_vm: PlanViewModel для обработки plan updates из session/update
         """
         super().__init__(event_bus, logger)
         self.coordinator = coordinator
         self._fs_executor = fs_executor
         self._terminal_executor = terminal_executor
+        self._plan_vm = plan_vm
 
         # Локальный storage истории нужен для восстановления UI без network roundtrip.
         # Порядок приоритета: явный аргумент -> переменная окружения -> путь по умолчанию.
@@ -342,7 +345,33 @@ class ChatViewModel(BaseViewModel):
                         has_result=bool(result),
                     )
 
-            # Можно добавить обработку других типов: plan_update и т.д.
+            # Обработка plan - обновление плана агента через PlanViewModel
+            elif session_update_type == "plan":
+                entries = update.get("entries", [])
+                self.logger.info(
+                    "plan_session_update_received",
+                    session_id=target_session_id,
+                    entries_count=len(entries),
+                    has_plan_vm=self._plan_vm is not None,
+                    raw_entries=entries[:2] if entries else None,  # First 2 for debug
+                )
+
+                if self._plan_vm is not None and entries:
+                    # Форматируем план для отображения в UI
+                    plan_lines = ["План:"]
+                    for entry in entries:
+                        content = entry.get("content", "")
+                        priority = entry.get("priority", "medium")
+                        status = entry.get("status", "pending")
+                        plan_lines.append(f"- [{status}] ({priority}) {content}")
+                    plan_text = "\n".join(plan_lines)
+                    self._plan_vm.set_plan(plan_text)
+
+                    self.logger.info(
+                        "plan_update_received",
+                        session_id=target_session_id,
+                        entries_count=len(entries),
+                    )
 
         except Exception as e:
             self.logger.error(

@@ -218,44 +218,56 @@ class TestPlanBuilderNotification:
         self,
         plan_builder: PlanBuilder,
     ) -> None:
-        """Строит notification с правильной структурой."""
+        """Строит notification с правильной структурой ACP.
+        
+        Согласно протоколу ACP, формат должен быть:
+        - sessionUpdate: "plan"
+        - entries: список {content, priority, status}
+        """
         entries = [
-            {"content": "Step 1", "description": "First step"},
-            {"content": "Step 2", "description": "Second step"},
+            {"content": "Step 1", "priority": "high", "status": "pending"},
+            {"content": "Step 2", "priority": "medium", "status": "pending"},
         ]
         notification = plan_builder.build_plan_notification("sess_1", entries)
 
         assert isinstance(notification, ACPMessage)
         assert notification.method == "session/update"
         assert notification.params["sessionId"] == "sess_1"
-        assert "plan" in notification.params["update"]
+        # Проверяем формат соответствует протоколу ACP
+        assert notification.params["update"]["sessionUpdate"] == "plan"
+        assert "entries" in notification.params["update"]
 
     def test_build_notification_plan_format(
         self,
         plan_builder: PlanBuilder,
     ) -> None:
-        """Строит plan с правильным форматом."""
+        """Строит plan с правильным форматом ACP.
+        
+        Entries передаются напрямую без трансформации.
+        """
         entries = [
-            {"content": "Step 1", "description": "Desc 1"},
+            {"content": "Step 1", "priority": "high", "status": "pending"},
         ]
         notification = plan_builder.build_plan_notification("sess_1", entries)
-        plan = notification.params["update"]["plan"]
+        plan_entries = notification.params["update"]["entries"]
 
-        assert len(plan) == 1
-        assert plan[0]["title"] == "Step 1"
-        assert plan[0]["description"] == "Desc 1"
+        assert len(plan_entries) == 1
+        assert plan_entries[0]["content"] == "Step 1"
+        assert plan_entries[0]["priority"] == "high"
+        assert plan_entries[0]["status"] == "pending"
 
-    def test_build_notification_empty_description(
+    def test_build_notification_preserves_entry_fields(
         self,
         plan_builder: PlanBuilder,
     ) -> None:
-        """Обрабатывает entries без description."""
-        entries = [{"content": "Step 1"}]
+        """Передаёт entries напрямую без изменений."""
+        entries = [{"content": "Step 1", "priority": "low", "status": "in_progress"}]
         notification = plan_builder.build_plan_notification("sess_1", entries)
-        plan = notification.params["update"]["plan"]
+        plan_entries = notification.params["update"]["entries"]
 
-        assert plan[0]["title"] == "Step 1"
-        assert "description" in plan[0]
+        assert plan_entries[0]["content"] == "Step 1"
+        assert plan_entries[0]["priority"] == "low"
+        assert plan_entries[0]["status"] == "in_progress"
 
 
 class TestPlanBuilderExtraction:
@@ -417,8 +429,8 @@ class TestPlanBuilderEdgeCases:
     ) -> None:
         """Обрабатывает entries со спецсимволами."""
         entries = [
-            {"content": "Task with *special* & chars!", "description": "Desc"},
+            {"content": "Task with *special* & chars!", "priority": "high", "status": "pending"},
         ]
         notification = plan_builder.build_plan_notification("sess_1", entries)
-        plan = notification.params["update"]["plan"]
-        assert plan[0]["title"] == "Task with *special* & chars!"
+        plan_entries = notification.params["update"]["entries"]
+        assert plan_entries[0]["content"] == "Task with *special* & chars!"

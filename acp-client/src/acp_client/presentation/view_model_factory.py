@@ -98,9 +98,27 @@ class ViewModelFactory:
             scope="SINGLETON",
         )
 
+        # Регистрируем PlanViewModel - синглтон для управления планом
+        # Создаём ДО ChatViewModel, т.к. ChatViewModel зависит от PlanViewModel
+        plan_vm = PlanViewModel(event_bus=event_bus, logger=logger)
+        container.register(PlanViewModel, plan_vm, Scope.SINGLETON)
+        logger.debug(
+            "registered_view_model",
+            vm_class="PlanViewModel",
+            scope="SINGLETON",
+        )
+
         # Регистрируем ChatViewModel - синглтон для управления чатом
-        fs_executor = container.resolve(FileSystemExecutor)
-        terminal_executor = container.resolve(TerminalExecutor)
+        # Получает PlanViewModel для обработки plan updates из session/update
+        # Executors опциональны - могут отсутствовать в тестовом окружении
+        try:
+            fs_executor = container.resolve(FileSystemExecutor)
+        except Exception:
+            fs_executor = None
+        try:
+            terminal_executor = container.resolve(TerminalExecutor)
+        except Exception:
+            terminal_executor = None
         chat_vm = ChatViewModel(
             coordinator=session_coordinator,
             event_bus=event_bus,
@@ -108,20 +126,12 @@ class ViewModelFactory:
             history_dir=history_dir,
             fs_executor=fs_executor,
             terminal_executor=terminal_executor,
+            plan_vm=plan_vm,
         )
         container.register(ChatViewModel, chat_vm, Scope.SINGLETON)
         logger.debug(
             "registered_view_model",
             vm_class="ChatViewModel",
-            scope="SINGLETON",
-        )
-
-        # Регистрируем PlanViewModel - синглтон для управления планом
-        plan_vm = PlanViewModel(event_bus=event_bus, logger=logger)
-        container.register(PlanViewModel, plan_vm, Scope.SINGLETON)
-        logger.debug(
-            "registered_view_model",
-            vm_class="PlanViewModel",
             scope="SINGLETON",
         )
 
