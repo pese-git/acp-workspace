@@ -1,8 +1,40 @@
 # План доработки ACP до полного соответствия спецификации
 
+## Текущий статус
+
+**Дата обновления:** 2026-04-23  
+**Уровень соответствия:** ~85%
+
+### ✅ Полностью реализовано:
+- Initialization (version negotiation, capabilities, authMethods)
+- Session Setup (session/new, session/load, history replay, configOptions)
+- Session List (session/list, pagination, notifications)
+- Prompt Turn (session/prompt, session/cancel, все chunks и stopReasons)
+- Content Types (Text, Image, Audio, EmbeddedResource, ResourceLink, Diff)
+- Tool Calls (tool_call/update, permissions flow, все tool kinds)
+- File System (fs/read_text_file, fs/write_text_file)
+- Terminal (create, output, wait_for_exit, kill, release)
+- Agent Plan (plan updates, PlanEntry, replay)
+- Session Modes и Config Options
+- Slash Commands
+- Extensibility (_meta, custom methods)
+- WebSocket Transport
+
+### ⚠️ Частично реализовано:
+- promptCapabilities (готово, но image/audio выключены)
+- rawInput/rawOutput в tool calls
+
+### 🔴 Не реализовано:
+- MCP Integration (mcpServers в session/new) — **Высокий приоритет**
+- Global Policy Storage (~/.acp/global_permissions.json) — **Высокий приоритет**
+- stdio transport — Средний приоритет
+- Policy versioning и аудит — Средний приоритет
+
+---
+
 ## Обзор
 
-Этот план детализирует разработку 9 этапов доработки протокола ACP для достижения полного соответствия официальной спецификации в [`doc/Agent Client Protocol/`](../doc/Agent Client Protocol/). Текущий уровень соответствия: **~75%**.
+Этот план детализирует разработку 9 этапов доработки протокола ACP для достижения полного соответствия официальной спецификации в [`doc/Agent Client Protocol/`](../doc/Agent Client Protocol/). Текущий уровень соответствия: **~85%**.
 
 Подход основан на:
 1. **Минимальных целевых изменениях** — только то, что требует спецификация
@@ -18,15 +50,15 @@
 
 ```mermaid
 graph TB
-    CT["Этап 1: Content типы<br/>(базовая инфраструктура)"]
-    SUN["Этап 2: Session Update<br/>Notifications"]
-    TC["Этап 3: Tool Calls<br/>Интеграция"]
-    FS["Этап 4: File System<br/>методы"]
-    TM["Этап 5: Terminal<br/>методы"]
-    SLR["Этап 6: Session Load<br/>Replay"]
-    AP["Этап 7: Agent Plan<br/>Генерация"]
-    MCP["Этап 8: MCP<br/>Интеграция"]
-    SC["Этап 9: Slash<br/>Commands"]
+    CT["Этап 1: Content типы<br/>✅ Выполнено"]
+    SUN["Этап 2: Session Update<br/>✅ Выполнено"]
+    TC["Этап 3: Tool Calls<br/>✅ Выполнено"]
+    FS["Этап 4: File System<br/>✅ Выполнено"]
+    TM["Этап 5: Terminal<br/>✅ Выполнено"]
+    SLR["Этап 6: Session Load<br/>✅ Выполнено"]
+    AP["Этап 7: Agent Plan<br/>✅ Выполнено"]
+    MCP["Этап 8: MCP<br/>⏳ В работе"]
+    SC["Этап 9: Slash<br/>✅ Выполнено"]
 
     CT --> SUN
     CT --> FS
@@ -40,15 +72,15 @@ graph TB
     TC --> MCP
     SUN --> SLR
 
-    style CT fill:#ff9999
-    style SUN fill:#ff9999
-    style TC fill:#ff9999
-    style FS fill:#ffcc99
-    style TM fill:#ffcc99
-    style SLR fill:#ffcc99
-    style AP fill:#ffcc99
-    style MCP fill:#99ccff
-    style SC fill:#99ccff
+    style CT fill:#90EE90
+    style SUN fill:#90EE90
+    style TC fill:#90EE90
+    style FS fill:#90EE90
+    style TM fill:#90EE90
+    style SLR fill:#90EE90
+    style AP fill:#90EE90
+    style MCP fill:#ff9999
+    style SC fill:#90EE90
 ```
 
 ---
@@ -660,9 +692,9 @@ sequenceDiagram
 
 ## Этап 8: MCP Интеграция
 
-**Приоритет:** Средний  
+**Приоритет:** Высокий  
 **Трудозатраты:** 3-4 дня  
-**Зависимости:** Этап 3 (Tool Calls)
+**Зависимости:** Этап 3 (Tool Calls) ✅
 
 ### Цели
 
@@ -784,14 +816,87 @@ sequenceDiagram
 
 ### Критерии приемки
 
-- [ ] Command Registry реализован
-- [ ] Встроенные команды (минимум 2-3) реализованы
-- [ ] `available_commands_update` отправляется при session create/load
-- [ ] Slash commands правильно парсятся
-- [ ] Встроенные команды выполняются без отправки в LLM
-- [ ] Client может отобразить список доступных команд
+- [x] Command Registry реализован
+- [x] Встроенные команды (минимум 2-3) реализованы
+- [x] `available_commands_update` отправляется при session create/load
+- [x] Slash commands правильно парсятся
+- [x] Встроенные команды выполняются без отправки в LLM
+- [x] Client может отобразить список доступных команд
+- [x] Интеграционные тесты проходят
+- [x] ruff check и ty check без ошибок
+
+---
+
+## Этап 10: Global Policy Storage
+
+**Приоритет:** Высокий  
+**Трудозатраты:** 2-3 дня  
+**Зависимости:** —
+
+### Цели
+
+Реализовать глобальное хранилище политик разрешений в `~/.acp/global_permissions.json`.
+
+### Задачи
+
+1. **Реализовать Global Policy Storage**
+   - Файлы:
+     - [`acp-server/src/acp_server/storage/global_policy_storage.py`](../acp-server/src/acp_server/storage/global_policy_storage.py)
+   - Описание:
+     - Чтение/запись политик из `~/.acp/global_permissions.json`
+     - Атомарные операции записи
+     - Валидация схемы политик
+   - Тесты: Unit тесты CRUD операций
+
+2. **Интегрировать в Permission Manager**
+   - Файлы:
+     - [`acp-server/src/acp_server/protocol/handlers/permission_manager.py`](../acp-server/src/acp_server/protocol/handlers/permission_manager.py)
+   - Описание:
+     - При проверке разрешений сначала проверять глобальные политики
+     - При сохранении "Always Allow" записывать в глобальное хранилище
+   - Тесты: Интеграционные тесты permission flow
+
+3. **Добавить CLI для управления политиками**
+   - Файлы:
+     - [`acp-server/src/acp_server/cli.py`](../acp-server/src/acp_server/cli.py)
+   - Описание:
+     - `acp-server policy list` — список глобальных политик
+     - `acp-server policy clear` — очистка политик
+     - `acp-server policy export/import` — backup
+   - Тесты: Интеграционные тесты CLI
+
+### Критерии приемки
+
+- [ ] Политики сохраняются в `~/.acp/global_permissions.json`
+- [ ] Permission Manager учитывает глобальные политики
+- [ ] CLI позволяет управлять политиками
 - [ ] Интеграционные тесты проходят
 - [ ] ruff check и ty check без ошибок
+
+---
+
+## Этап 11: Дополнительные улучшения
+
+**Приоритет:** Низкий  
+**Трудозатраты:** 2-3 дня  
+**Зависимости:** —
+
+### Задачи
+
+1. **promptCapabilities для image/audio**
+   - Статус: ⚠️ Код готов, но выключен
+   - Описание: Активировать image и audio в capabilities ответе
+
+2. **rawInput/rawOutput в Tool Calls**
+   - Статус: ⚠️ Частично реализовано
+   - Описание: Поддержка raw форматов ввода/вывода для tools
+
+3. **stdio Transport** (опционально)
+   - Описание: Альтернативный транспорт через stdin/stdout
+
+4. **Policy Versioning и аудит**
+   - Зависимости: Этап 10
+   - Описание: История изменений и аудит-лог политик
 
 ---
 
@@ -850,17 +955,19 @@ uv run --directory acp-client python -m pytest
 
 | Этап | Название | Приоритет | Зависимости | Дни | Статус |
 |------|----------|-----------|-------------|------|--------|
-| 1 | Content типы | 🔴 Критический | — | 2-3 | ⏳ Pending |
-| 2 | Session Updates | 🔴 Критический | 1 | 2-3 | ⏳ Pending |
-| 3 | Tool Calls | 🔴 Критический | 1, 2 | 3-4 | ⏳ Pending |
-| 4 | File System | 🟠 Высокий | 1, 3 | 2 | ⏳ Pending |
-| 5 | Terminal | 🟠 Высокий | 1, 3 | 3 | ⏳ Pending |
-| 6 | Session Load | 🟡 Средний | 1, 2 | 2 | ⏳ Pending |
-| 7 | Agent Plan | 🟡 Средний | 1, 2, 3 | 2-3 | ⏳ Pending |
-| 8 | MCP | 🟡 Средний | 3 | 3-4 | ⏳ Pending |
-| 9 | Slash Commands | 🔵 Низкий | 1, 2 | 2 | ⏳ Pending |
+| 1 | Content типы | 🔴 Критический | — | 2-3 | ✅ Done |
+| 2 | Session Updates | 🔴 Критический | 1 | 2-3 | ✅ Done |
+| 3 | Tool Calls | 🔴 Критический | 1, 2 | 3-4 | ✅ Done |
+| 4 | File System | 🟠 Высокий | 1, 3 | 2 | ✅ Done |
+| 5 | Terminal | 🟠 Высокий | 1, 3 | 3 | ✅ Done |
+| 6 | Session Load | 🟡 Средний | 1, 2 | 2 | ✅ Done |
+| 7 | Agent Plan | 🟡 Средний | 1, 2, 3 | 2-3 | ✅ Done |
+| 8 | MCP | 🔴 Высокий | 3 | 3-4 | ⏳ Pending |
+| 9 | Slash Commands | 🔵 Низкий | 1, 2 | 2 | ✅ Done |
+| 10 | Global Policy Storage | 🔴 Высокий | — | 2-3 | ⏳ Pending |
+| 11 | Дополнительные улучшения | 🔵 Низкий | 10 | 2-3 | ⚠️ Partial |
 
-**Итого:** 20-28 дней работы (в зависимости от параллелизма и сложности)
+**Оставшиеся задачи:** MCP Integration (Этап 8), Global Policy Storage (Этап 10), promptCapabilities image/audio, rawInput/rawOutput, Policy versioning
 
 ---
 
