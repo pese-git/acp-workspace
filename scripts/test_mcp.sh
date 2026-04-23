@@ -130,8 +130,10 @@ SESSION_MSG=$(cat <<EOF
 EOF
 )
 
-# Сообщение session/mcp/list — получение списка доступных MCP инструментов
-MCP_LIST_MSG='{"jsonrpc":"2.0","id":2,"method":"session/mcp/list","params":{}}'
+# Примечание: методы session/mcp/* определены в handlers/mcp.py, но пока
+# не зарегистрированы в core.py. Для полного тестирования MCP используйте
+# интерактивный режим или TUI клиент, где можно отправить session/prompt
+# с sessionId из ответа session/new.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Вывод конфигурации
@@ -167,8 +169,7 @@ echo -e "${YELLOW}2. Session/new:${NC}"
 echo "   $SESSION_MSG" | head -c 200
 echo "..."
 echo ""
-echo -e "${YELLOW}3. Session/mcp/list:${NC}"
-echo "   $MCP_LIST_MSG"
+info "Для отправки session/prompt нужен sessionId из ответа session/new"
 echo ""
 
 info "Подключение к WebSocket: $WS_URL"
@@ -178,15 +179,15 @@ echo ""
 # Выполняем подключение и отправку сообщений
 # - Отправляем initialize, ждём 1 сек
 # - Отправляем session/new, ждём 5 сек (для инициализации MCP сервера)
-# - Отправляем session/mcp/list, ждём 3 сек для ответа
-# - Держим соединение открытым ещё 10 сек для получения всех ответов
+# - Держим соединение открытым для получения ответов
+#
+# Примечание: для отправки session/prompt нужен sessionId из ответа session/new.
+# Для полного теста MCP используйте интерактивный режим или TUI клиент.
 (
     echo "$INIT_MSG"
     sleep 1
     echo "$SESSION_MSG"
     sleep 5  # Ожидание запуска и инициализации MCP сервера
-    echo "$MCP_LIST_MSG"
-    sleep 3  # Ожидание ответа
     # Дополнительное время для просмотра ответов
     sleep 10
 ) | websocat "$WS_URL" 2>&1
