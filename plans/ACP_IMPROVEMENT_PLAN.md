@@ -3,7 +3,7 @@
 ## Текущий статус
 
 **Дата обновления:** 2026-04-23  
-**Уровень соответствия:** ~85%
+**Уровень соответствия:** ~90%
 
 ### ✅ Полностью реализовано:
 - Initialization (version negotiation, capabilities, authMethods)
@@ -25,7 +25,6 @@
 - rawInput/rawOutput в tool calls
 
 ### 🔴 Не реализовано:
-- MCP Integration (mcpServers в session/new) — **Высокий приоритет**
 - Global Policy Storage (~/.acp/global_permissions.json) — **Высокий приоритет**
 - stdio transport — Средний приоритет
 - Policy versioning и аудит — Средний приоритет
@@ -57,7 +56,7 @@ graph TB
     TM["Этап 5: Terminal<br/>✅ Выполнено"]
     SLR["Этап 6: Session Load<br/>✅ Выполнено"]
     AP["Этап 7: Agent Plan<br/>✅ Выполнено"]
-    MCP["Этап 8: MCP<br/>⏳ В работе"]
+    MCP["Этап 8: MCP<br/>✅ Выполнено"]
     SC["Этап 9: Slash<br/>✅ Выполнено"]
 
     CT --> SUN
@@ -79,7 +78,7 @@ graph TB
     style TM fill:#90EE90
     style SLR fill:#90EE90
     style AP fill:#90EE90
-    style MCP fill:#ff9999
+    style MCP fill:#90EE90
     style SC fill:#90EE90
 ```
 

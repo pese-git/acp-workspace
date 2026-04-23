@@ -4,6 +4,21 @@
 
 Формат основан на [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), проект следует [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **MCP Integration (Stage 8)**: Поддержка Model Context Protocol
+  - Модуль `acp-server/src/acp_server/mcp/` с компонентами:
+    - [`models.py`](acp-server/src/acp_server/mcp/models.py) — Pydantic модели MCP протокола
+    - [`transport.py`](acp-server/src/acp_server/mcp/transport.py) — StdioTransport для запуска MCP серверов
+    - [`client.py`](acp-server/src/acp_server/mcp/client.py) — MCPClient с полным жизненным циклом
+    - [`tool_adapter.py`](acp-server/src/acp_server/mcp/tool_adapter.py) — MCPToolAdapter для интеграции с ToolRegistry
+    - [`manager.py`](acp-server/src/acp_server/mcp/manager.py) — MCPManager для управления несколькими серверами
+  - Поддержка параметра `mcpServers` в `session/new` и `session/load`
+  - 27 unit-тестов для MCP модуля
+
+---
+
 ## Этап 5: Advanced Permission Management
 
 ### Phase 2: Cross-Session Policy Restoration (2026-04-16) ✅

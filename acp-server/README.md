@@ -148,6 +148,82 @@ uv run acp-server --log-level DEBUG --log-json
 - **request received** — входящий ACP запрос (method, request_id, session_id)
 - **request parse error** — ошибка парсинга запроса (request_id, error, traceback)
 - **deferred prompt completed** — завершение отложенного prompt (connection_id, session_id)
+
+## MCP Support
+
+Сервер поддерживает подключение [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) серверов через параметр `mcpServers` в `session/new` и `session/load`.
+
+### Конфигурация MCP серверов
+
+```json
+{
+  "method": "session/new",
+  "params": {
+    "mcpServers": {
+      "filesystem": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/directory"]
+      },
+      "database": {
+        "command": "/usr/local/bin/mcp-postgres",
+        "args": ["--connection-string", "postgresql://..."],
+        "env": {
+          "POSTGRES_PASSWORD": "secret"
+        }
+      }
+    }
+  }
+}
+```
+
+### Как это работает
+
+1. При создании сессии ACP сервер запускает указанные MCP серверы как subprocess
+2. Выполняет MCP handshake (initialize) и получает список доступных tools
+3. MCP tools регистрируются в ToolRegistry с namespace `mcp:{server_name}:{tool_name}`
+4. LLM может вызывать MCP tools как обычные инструменты
+5. При завершении сессии MCP процессы корректно завершаются
+
+### Архитектура MCP интеграции
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         ACP Server                              │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │                     ToolRegistry                          │  │
+│  │  ┌─────────────────┐  ┌─────────────────────────────────┐│  │
+│  │  │  Built-in Tools │  │        MCP Tools                 ││  │
+│  │  │  - fs/read      │  │  - mcp:filesystem:read_file     ││  │
+│  │  │  - terminal/run │  │  - mcp:database:query           ││  │
+│  │  └─────────────────┘  └─────────────────────────────────┘│  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                              │                                  │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │                      MCPManager                           │  │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐   │  │
+│  │  │  MCPClient   │  │  MCPClient   │  │  MCPClient   │   │  │
+│  │  │  (filesystem)│  │  (database)  │  │  (custom)    │   │  │
+│  │  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘   │  │
+│  └─────────┼─────────────────┼─────────────────┼────────────┘  │
+└────────────┼─────────────────┼─────────────────┼────────────────┘
+             │ stdio           │ stdio           │ stdio
+     ┌───────▼───────┐ ┌───────▼───────┐ ┌───────▼───────┐
+     │  MCP Server   │ │  MCP Server   │ │  MCP Server   │
+     │  (filesystem) │ │  (postgres)   │ │  (custom)     │
+     └───────────────┘ └───────────────┘ └───────────────┘
+```
+
+### Модуль MCP
+
+Реализация находится в `src/acp_server/mcp/`:
+
+| Файл | Описание |
+|------|----------|
+| `models.py` | Pydantic модели MCP протокола |
+| `transport.py` | StdioTransport для stdio коммуникации |
+| `client.py` | MCPClient — клиент для MCP сервера |
+| `tool_adapter.py` | Адаптер MCP tools → ToolDefinition |
+| `manager.py` | MCPManager — управление несколькими серверами |
 - **deferred prompt cancelled** — отмена отложенного prompt (connection_id, session_id)
 
 ## Content Types
