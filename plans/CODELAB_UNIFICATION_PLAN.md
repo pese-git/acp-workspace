@@ -255,8 +255,50 @@ flowchart LR
 | `--log-level` | Уровень логирования | все |
 | `--log-json` | JSON формат логов | все |
 | `--log-file` | Файл логов | все |
+| `--home-dir` | Домашняя директория приложения (default: ~/.codelab) | все |
 
-### 4.4 Диаграмма режимов работы
+### 4.4 Домашняя директория приложения
+
+По умолчанию CodeLab создаёт домашнюю директорию `~/.codelab/` для хранения:
+
+```
+~/.codelab/
+├── config/           # Конфигурационные файлы
+│   ├── config.toml   # Основная конфигурация
+│   └── modes/        # Конфигурации режимов
+├── logs/             # Файлы логов
+│   ├── codelab.log   # Основной лог
+│   └── debug.log     # Debug лог (при --log-level DEBUG)
+├── data/             # Данные приложения
+│   ├── sessions/     # Сохранённые сессии (JsonFileStorage)
+│   └── history/      # История чатов
+└── cache/            # Кэш
+    └── mcp/          # Кэш MCP серверов
+```
+
+**Смена директории через аргумент:**
+
+```bash
+# Использовать кастомную директорию
+codelab --home-dir /path/to/custom/dir
+
+# Все данные будут в /path/to/custom/dir/
+codelab serve --home-dir ~/projects/myproject/.codelab
+```
+
+**Переменная окружения:**
+
+```bash
+export CODELAB_HOME=~/my-codelab-dir
+codelab  # Использует CODELAB_HOME
+```
+
+**Приоритет:**
+1. `--home-dir` аргумент (высший приоритет)
+2. `CODELAB_HOME` переменная окружения
+3. `~/.codelab/` (по умолчанию)
+
+### 4.5 Диаграмма режимов работы
 
 ```mermaid
 flowchart TD
@@ -279,7 +321,7 @@ flowchart TD
     CONNECT --> TUI_ONLY[TUI в терминале]
 ```
 
-### 4.5 Транспортный слой
+### 4.6 Транспортный слой
 
 **Текущая реализация (WebSocket):**
 
