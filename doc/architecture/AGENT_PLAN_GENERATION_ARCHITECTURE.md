@@ -162,7 +162,6 @@ class PlanEntry:
     content: str
     priority: Literal["low", "medium", "high"]
     status: Literal["pending", "in_progress", "completed"]
-    description: str = ""
 
 
 class PlanExtractor:
@@ -278,8 +277,7 @@ PLAN_GENERATION_INSTRUCTIONS = """
     {
       "content": "Описание задачи",
       "priority": "high|medium|low",
-      "status": "pending|in_progress|completed",
-      "description": "Детальное описание (опционально)"
+      "status": "pending|in_progress|completed"
     }
   ]
 }
@@ -315,7 +313,6 @@ classDiagram
         +str content
         +str priority
         +str status
-        +str description
     }
     
     class PlanBuilder {
@@ -397,8 +394,7 @@ UPDATE_PLAN_TOOL = {
                         "properties": {
                             "content": {"type": "string"},
                             "priority": {"enum": ["low", "medium", "high"]},
-                            "status": {"enum": ["pending", "in_progress", "completed"]},
-                            "description": {"type": "string"}
+                            "status": {"enum": ["pending", "in_progress", "completed"]}
                         },
                         "required": ["content", "priority", "status"]
                     }
@@ -595,7 +591,7 @@ UPDATE_PLAN_TOOL = {
 | ✅ Persistence в events_history | ❌ Сложнее парсинг из текста |
 | ✅ Replay при session/load | ❌ Overhead на notification |
 | ✅ Валидация через PlanBuilder | ❌ Требует system prompt tuning |
-| ✅ Priority + Status + Description | ❌ Больше кода для поддержки |
+| ✅ Priority + Status | ❌ Больше кода для поддержки |
 | ✅ UI-ready формат | |
 | ✅ Соответствует протоколу ACP | |
 
