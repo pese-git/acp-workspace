@@ -74,6 +74,7 @@ class ACPHttpServer:
         auth_api_key: str | None = None,
         storage: SessionStorage | None = None,
         config: AppConfig | None = None,
+        enable_web: bool = True,
     ) -> None:
         """Создает транспортный сервер с адресом прослушивания.
 
@@ -84,6 +85,7 @@ class ACPHttpServer:
             auth_api_key: API ключ для аутентификации.
             storage: Backend для хранения сессий (по умолчанию InMemoryStorage).
             config: Глобальная конфигурация приложения (LLM, агент и т.д.).
+            enable_web: Включить Web UI на корневом пути "/" (по умолчанию True).
 
         Пример использования:
             ACPHttpServer(host="0.0.0.0", port=8080)
@@ -95,6 +97,7 @@ class ACPHttpServer:
         self.auth_api_key = auth_api_key
         self.storage = storage
         self.config = config or AppConfig()
+        self.enable_web = enable_web
         # Оркестратор агента инициализируется в методе run()
         self._agent_orchestrator: AgentOrchestrator | None = None
         # Реестр инструментов инициализируется в методе run()
@@ -107,6 +110,7 @@ class ACPHttpServer:
             port=port,
             require_auth=require_auth,
             has_auth_key=bool(auth_api_key),
+            enable_web=enable_web,
         )
 
     async def _initialize_llm_provider(self) -> LLMProvider | None:
@@ -199,6 +203,14 @@ class ACPHttpServer:
 
         app = web.Application()
         app.router.add_get("/acp/ws", self.handle_ws_request)
+        
+        # Добавляем роут для Web UI если включён
+        if self.enable_web:
+            app.router.add_get("/", self.handle_web_ui_request)
+            logger.info(
+                "web ui enabled",
+                url=f"http://{self.host}:{self.port}/",
+            )
 
         runner = web.AppRunner(app)
         await runner.setup()
@@ -220,6 +232,87 @@ class ACPHttpServer:
             # Логируем остановку сервера
             logger.info("server shutting down")
             await runner.cleanup()
+
+    async def handle_web_ui_request(self, request: web.Request) -> web.Response:
+        """Обрабатывает запрос на Web UI.
+        
+        Если textual-web установлен, возвращает Web UI.
+        Иначе возвращает информативную страницу с инструкциями.
+        
+        Пример использования:
+            # вызывается aiohttp автоматически на GET /
+        """
+        from .web_app import get_fallback_html, is_web_ui_available
+        
+        if is_web_ui_available():
+            # TODO: Интеграция с textual-web когда API станет стабильным
+            # На данный момент textual-web запускается отдельно как CLI
+            # Показываем страницу с инструкциями по запуску
+            html = f"""<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CodeLab - Web UI</title>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #e4e4e4;
+        }}
+        .container {{
+            max-width: 600px;
+            padding: 40px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }}
+        h1 {{ font-size: 2rem; margin-bottom: 16px; color: #00d4ff; }}
+        .status {{
+            display: inline-block;
+            padding: 4px 12px;
+            background: #00ff88;
+            color: #1a1a2e;
+            border-radius: 20px;
+            font-size: 0.875rem;
+            font-weight: 600;
+            margin-bottom: 24px;
+        }}
+        p {{ line-height: 1.7; margin-bottom: 16px; color: #b4b4b4; }}
+        pre {{
+            background: #0d1117;
+            padding: 16px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 16px 0;
+        }}
+        code {{ font-family: 'Fira Code', monospace; }}
+        .url {{ color: #00ff88; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <span class="status">✅ Готов к работе</span>
+        <h1>🔬 CodeLab Web UI</h1>
+        <p>Textual Web установлен. Запустите Web UI командой:</p>
+        <pre><code>textual-web serve codelab.client.tui.app:ACPClientApp</code></pre>
+        <p>Или подключитесь через TUI клиент:</p>
+        <pre><code>codelab connect --host {self.host} --port {self.port}</code></pre>
+        <p>WebSocket endpoint: <span class="url">ws://{self.host}:{self.port}/acp/ws</span></p>
+    </div>
+</body>
+</html>
+"""
+            return web.Response(text=html, content_type="text/html")
+        else:
+            # Textual Web не установлен, показываем fallback страницу
+            html = get_fallback_html(self.host, self.port)
+            return web.Response(text=html, content_type="text/html")
 
     async def handle_ws_request(self, request: web.Request) -> web.WebSocketResponse:
         """Обрабатывает WebSocket-сессию с поддержкой update-потока.

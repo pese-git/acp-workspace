@@ -113,7 +113,7 @@ def main() -> None:
     serve_parser.add_argument(
         "--no-web",
         action="store_true",
-        help="Отключить Web UI (зарезервировано для будущего)",
+        help="Отключить Web UI на корневом пути /",
     )
 
     # codelab connect - режим клиента
@@ -236,17 +236,25 @@ def run_serve(args: argparse.Namespace) -> None:
     """Режим сервера: запускает только WebSocket API.
 
     Args:
-        args: Аргументы командной строки с host и port
+        args: Аргументы командной строки с host, port и no_web
     """
     from codelab.server.http_server import ACPHttpServer
 
     host = args.host
     port = args.port
+    enable_web = not getattr(args, "no_web", False)
 
-    logger.info("starting_server_mode", host=host, port=port)
+    logger.info("starting_server_mode", host=host, port=port, enable_web=enable_web)
+
+    # Логируем доступные endpoints
+    logger.info(
+        "endpoints_available",
+        ws_api=f"ws://{host}:{port}/acp/ws",
+        web_ui=f"http://{host}:{port}/" if enable_web else "disabled",
+    )
 
     # Создаём и запускаем сервер
-    server = ACPHttpServer(host=host, port=port)
+    server = ACPHttpServer(host=host, port=port, enable_web=enable_web)
 
     try:
         asyncio.run(server.run())

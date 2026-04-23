@@ -16,6 +16,9 @@ uv pip install -e ".[tui]"
 
 # Полная установка
 uv pip install -e ".[full]"
+
+# С поддержкой Web UI (браузер)
+uv pip install -e ".[web]"
 ```
 
 ## Структура проекта
@@ -43,8 +46,28 @@ codelab --help
 codelab serve --port 8765
 
 # Запуск TUI клиента
-codelab client ws://localhost:8765
+codelab connect --host localhost --port 8765
 ```
+
+### Web UI
+
+При запуске сервера командой `codelab serve` доступен Web UI на корневом пути `/`:
+
+```bash
+# Запуск сервера с Web UI
+codelab serve --port 4096
+# Откройте http://127.0.0.1:4096/ в браузере
+
+# Запуск сервера без Web UI
+codelab serve --port 4096 --no-web
+```
+
+**Примечание:** Web UI требует установки дополнительного пакета `textual-web`:
+```bash
+pip install 'codelab[web]'
+```
+
+Если `textual-web` не установлен, на корневом пути будет отображаться информативная страница с инструкциями по установке.
 
 ## Использование
 
