@@ -71,13 +71,25 @@ Screen {
 
 #prompt-input {
     height: 6;
+    width: 100%;
+}
+
+#prompt-textarea {
+    width: 1fr;
+    height: 100%;
     border: round #6d7f9a;
     background: #ffffff;
 }
 
-#prompt-input:focus {
+#prompt-textarea:focus {
     border: round #1d4ed8;
     background: #f8fbff;
+}
+
+#submit-button {
+    width: 10;
+    height: 100%;
+    margin-left: 1;
 }
 
 #footer {

@@ -5,6 +5,7 @@
 - Отправку prompt через ChatViewModel
 - Управление историей промптов по сессиям
 - Отключение/включение при streaming
+- Кнопка отправки сообщения
 """
 
 from __future__ import annotations
@@ -12,15 +13,40 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from textual import events
+from textual.app import ComposeResult
+from textual.containers import Horizontal
 from textual.message import Message
-from textual.widgets import TextArea
+from textual.widgets import Button, TextArea
 
 if TYPE_CHECKING:
     from codelab.client.presentation.chat_view_model import ChatViewModel
 
 
-class PromptInput(TextArea):
-    """Многострочное поле ввода с MVVM интеграцией.
+class PromptTextArea(TextArea):
+    """Многострочное поле ввода текста промпта."""
+
+    def __init__(self) -> None:
+        """Инициализирует поле ввода."""
+        super().__init__(id="prompt-textarea")
+
+    def _on_key(self, event: events.Key) -> None:
+        """Обработка клавиш: Ctrl+Enter отправляет, Enter - новая строка."""
+        # Ctrl+Enter - отправка сообщения через родителя
+        key = event.key
+        if key in ("ctrl+enter", "ctrl+j", "ctrl+m"):
+            # Находим родительский PromptInput и вызываем action_submit
+            parent = self.parent
+            while parent is not None:
+                if isinstance(parent, PromptInput):
+                    parent.action_submit()
+                    event.prevent_default()
+                    event.stop()
+                    return
+                parent = parent.parent
+
+
+class PromptInput(Horizontal):
+    """Компонент ввода промпта с кнопкой отправки.
     
     Обязательно требует ChatViewModel для работы. Подписывается на Observable свойства:
     - is_streaming: флаг для disable/enable поля при streaming
@@ -36,8 +62,6 @@ class PromptInput(TextArea):
 
     BINDINGS = [
         ("ctrl+enter", "submit", "Send"),
-        ("up", "history_previous", "Prev Prompt"),
-        ("down", "history_next", "Next Prompt"),
         ("ctrl+up", "history_previous", "Prev Prompt"),
         ("ctrl+down", "history_next", "Next Prompt"),
     ]
@@ -58,26 +82,47 @@ class PromptInput(TextArea):
         """
         super().__init__(id="prompt-input")
         self.chat_vm = chat_vm
-        self.border_title = "Prompt"
-        self.tooltip = "Ctrl+Enter - отправить, Up/Down - история"
         self._active_session_id: str | None = None
         self._history_by_session: dict[str, list[str]] = {}
         self._history_index: int | None = None
         self._draft_text: str = ""
+        self._text_area: PromptTextArea | None = None
+        self._submit_button: Button | None = None
         
         # Подписываемся на изменения в ChatViewModel
         self.chat_vm.is_streaming.subscribe(self._on_streaming_changed)
 
+    def compose(self) -> ComposeResult:
+        """Создаёт поле ввода и кнопку отправки."""
+        self._text_area = PromptTextArea()
+        self._text_area.border_title = "Prompt"
+        self._text_area.tooltip = "Ctrl+Enter - отправить, Ctrl+Up/Down - история"
+        yield self._text_area
+        
+        self._submit_button = Button("Send", id="submit-button", variant="primary")
+        yield self._submit_button
+
+    @property
+    def text(self) -> str:
+        """Возвращает текст из поля ввода."""
+        if self._text_area is not None:
+            return self._text_area.text
+        return ""
+
+    @text.setter
+    def text(self, value: str) -> None:
+        """Устанавливает текст в поле ввода."""
+        if self._text_area is not None:
+            self._text_area.text = value
+
     def set_active_session(self, session_id: str | None) -> None:
         """Переключает активный контекст истории промптов для текущей сессии."""
-
         self._active_session_id = session_id
         self._history_index = None
         self._draft_text = ""
 
     def remember_prompt(self, text: str) -> None:
         """Сохраняет отправленный prompt в историю активной сессии."""
-
         normalized = text.strip()
         if not normalized:
             return
@@ -92,7 +137,6 @@ class PromptInput(TextArea):
 
     def action_submit(self) -> None:
         """Отправляет текст, если поле не пустое."""
-
         normalized = self.text.strip()
         if not normalized:
             return
@@ -100,7 +144,6 @@ class PromptInput(TextArea):
 
     def action_history_previous(self) -> None:
         """Подставляет предыдущий prompt из истории активной сессии."""
-
         history = self._active_history()
         if not history:
             return
@@ -113,7 +156,6 @@ class PromptInput(TextArea):
 
     def action_history_next(self) -> None:
         """Переходит к более новому prompt или возвращает сохраненный черновик."""
-
         history = self._active_history()
         if not history or self._history_index is None:
             return
@@ -125,20 +167,21 @@ class PromptInput(TextArea):
         self.text = self._draft_text
         self._draft_text = ""
 
-    def on_key(self, event: events.Key) -> None:
-        """Сохраняет Enter как перенос строки внутри поля ввода."""
-
-        # Явно оставляем стандартное поведение TextArea для Enter.
-        if event.key == "enter":
-            return
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Обработка нажатия кнопки Submit."""
+        if event.button.id == "submit-button":
+            self.action_submit()
 
     def _on_streaming_changed(self, is_streaming: bool) -> None:
-        """Обновить статус поля при изменении streaming.
+        """Обновить статус полей при изменении streaming.
         
         Args:
             is_streaming: True если идет streaming, False иначе
         """
-        self.disabled = is_streaming
+        if self._text_area is not None:
+            self._text_area.disabled = is_streaming
+        if self._submit_button is not None:
+            self._submit_button.disabled = is_streaming
 
     def _active_history(self) -> list[str]:
         """Возвращает список истории для активной сессии."""
