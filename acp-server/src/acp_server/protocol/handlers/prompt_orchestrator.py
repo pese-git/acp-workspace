@@ -22,6 +22,12 @@ from .client_rpc_handler import ClientRPCHandler
 from .permission_manager import PermissionManager
 from .plan_builder import PlanBuilder
 from .replay_manager import ReplayManager
+from .slash_commands import CommandRegistry, SlashCommandRouter
+from .slash_commands.builtin import (
+    HelpCommandHandler,
+    ModeCommandHandler,
+    StatusCommandHandler,
+)
 from .state_manager import StateManager
 from .tool_call_handler import ToolCallHandler
 from .turn_lifecycle_manager import TurnLifecycleManager
@@ -136,6 +142,21 @@ class PromptOrchestrator:
                 "PromptOrchestrator initialized with plan tool only (client_rpc_service is None)"
             )
 
+        # Инициализация slash commands
+        self._command_registry = CommandRegistry()
+        self._slash_router = SlashCommandRouter(self._command_registry)
+
+        # Регистрация встроенных команд
+        self._command_registry.register(StatusCommandHandler())
+        self._command_registry.register(ModeCommandHandler())
+        # HelpCommandHandler требует registry для отображения всех команд
+        self._command_registry.register(HelpCommandHandler(self._command_registry))
+
+        logger.debug(
+            "Slash commands initialized",
+            commands=self._command_registry.registered_commands,
+        )
+
     def set_global_policy_manager(
         self, manager: GlobalPolicyManager | None
     ) -> None:
@@ -150,6 +171,46 @@ class PromptOrchestrator:
         self._global_policy_manager = manager
         if manager:
             logger.debug("GlobalPolicyManager injected into PromptOrchestrator")
+
+    def _try_handle_slash_command(
+        self,
+        prompt_text: str,
+        session: SessionState,
+    ) -> ProtocolOutcome | None:
+        """Проверяет и обрабатывает slash-команду.
+
+        Если prompt_text начинается с '/', пытается найти handler
+        и выполнить команду. Возвращает None если команда не найдена
+        (для fallback в LLM) или если prompt_text не является командой.
+
+        Args:
+            prompt_text: Текст промпта
+            session: Состояние сессии
+
+        Returns:
+            ProtocolOutcome если команда обработана, None для fallback
+        """
+        prompt_stripped = prompt_text.strip()
+
+        # Проверяем, начинается ли с '/'
+        if not prompt_stripped.startswith("/"):
+            return None
+
+        # Парсим команду и аргументы
+        parts = prompt_stripped[1:].split(maxsplit=1)
+        if not parts:
+            return None
+
+        command_name = parts[0].lower()
+        args = parts[1].split() if len(parts) > 1 else []
+
+        # Пробуем обработать через router
+        return self._slash_router.route(command_name, args, session)
+
+    @property
+    def command_registry(self) -> CommandRegistry:
+        """Возвращает реестр slash-команд для динамического управления."""
+        return self._command_registry
 
     async def handle_prompt(
         self,
@@ -214,6 +275,31 @@ class PromptOrchestrator:
         # Шаг 4: Отправить ACK notification
         ack_notification = _build_ack_notification(session_id, text_preview)
         notifications.append(ack_notification)
+
+        # Шаг 4.5: Проверить, является ли prompt slash-командой
+        # Согласно спецификации ACP (14-Slash Commands.md):
+        # "Commands are included as regular user messages in prompt requests"
+        # "The Agent recognizes the command prefix and processes it accordingly"
+        slash_outcome = self._try_handle_slash_command(prompt_text, session)
+        if slash_outcome is not None:
+            logger.info(
+                "Slash command executed",
+                prompt=prompt_text[:50],
+                session_id=session_id,
+            )
+            # Добавляем ACK notification к результату slash-команды
+            all_notifications = notifications + list(slash_outcome.notifications)
+            # Финализируем turn
+            session.active_turn = None
+            # Формируем response
+            response = ACPMessage.response(
+                request_id,
+                {"stop": {"reason": "end_turn"}},
+            )
+            return ProtocolOutcome(
+                response=response,
+                notifications=all_notifications,
+            )
 
         # Шаг 5: Запустить LLM loop для обработки промпта и tool calls
         # Согласно ACP протоколу (05-Prompt Turn.md):
