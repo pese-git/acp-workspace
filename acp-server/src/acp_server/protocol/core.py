@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from ..mcp import MCPManager, MCPManagerError
+from ..mcp.models import MCPServerConfig
 from ..messages import ACPMessage, JsonRpcId
 from ..storage import SessionStorage
 from .handlers import (
@@ -260,6 +262,12 @@ class ACPProtocol:
                         runtime_capabilities=self._runtime_capabilities,
                         session_id=session_id,
                     )
+                    
+                    # Инициализация MCP серверов если они указаны в параметрах
+                    mcp_servers = params.get("mcpServers", [])
+                    if mcp_servers and isinstance(mcp_servers, list):
+                        await self._initialize_mcp_servers(session_state, mcp_servers)
+                    
                     await self._storage.save_session(session_state)
                     # Обновляем внутренний кэш для синхронной работы handlers
                     self._sessions[session_id] = session_state
@@ -273,6 +281,14 @@ class ACPProtocol:
                 session_obj = await self._get_session_for_runtime(session_id)
                 if session_obj is not None:
                     session_obj.runtime_capabilities = self._runtime_capabilities
+                    
+                    # Инициализация MCP серверов если они указаны при загрузке сессии
+                    # Согласно спецификации ACP (03-Session Setup.md), mcpServers
+                    # передаются при session/load для переподключения к MCP серверам
+                    mcp_servers = params.get("mcpServers", [])
+                    if mcp_servers and isinstance(mcp_servers, list):
+                        await self._initialize_mcp_servers(session_obj, mcp_servers)
+                        
             return session.session_load(
                 message.id,
                 params,
@@ -759,3 +775,88 @@ class ACPProtocol:
             tool_call_id=tool_call_id,
             agent_orchestrator=self._agent_orchestrator,
         )
+
+    async def _initialize_mcp_servers(
+        self,
+        session_state: SessionState,
+        mcp_servers: list[dict[str, Any]],
+    ) -> None:
+        """Инициализирует MCP серверы для сессии.
+        
+        Создаёт MCPManager, подключается к каждому MCP серверу,
+        получает инструменты и регистрирует их в ToolRegistry.
+        
+        Args:
+            session_state: Состояние сессии для сохранения MCPManager.
+            mcp_servers: Список конфигураций MCP серверов из параметров session/new.
+        
+        Примечание:
+            При ошибке подключения к серверу, ошибка логируется,
+            но не прерывает инициализацию других серверов (graceful degradation).
+        """
+        if not mcp_servers:
+            return
+        
+        # Создаём MCPManager для этой сессии
+        mcp_manager = MCPManager(session_state.session_id)
+        session_state.mcp_manager = mcp_manager
+        
+        for server_config_dict in mcp_servers:
+            # Пропускаем невалидные конфигурации
+            if not isinstance(server_config_dict, dict):
+                logger.warning(
+                    "invalid mcp server config, skipping",
+                    session_id=session_state.session_id,
+                    config=server_config_dict,
+                )
+                continue
+            
+            # Проверяем обязательные поля
+            name = server_config_dict.get("name")
+            command = server_config_dict.get("command")
+            if not name or not command:
+                logger.warning(
+                    "mcp server config missing name or command",
+                    session_id=session_state.session_id,
+                    config=server_config_dict,
+                )
+                continue
+            
+            try:
+                # Преобразуем dict в MCPServerConfig
+                config = MCPServerConfig(
+                    name=name,
+                    command=command,
+                    args=server_config_dict.get("args", []),
+                    env=server_config_dict.get("env", []),
+                )
+                
+                # Добавляем сервер и получаем список инструментов
+                # MCP инструменты НЕ регистрируются в глобальном ToolRegistry,
+                # т.к. они привязаны к сессии. Доступ к ним через session_state.mcp_manager.
+                tool_definitions = await mcp_manager.add_server(config)
+                
+                logger.info(
+                    "mcp server initialized",
+                    session_id=session_state.session_id,
+                    server=name,
+                    tools_count=len(tool_definitions),
+                    tool_names=[td.name for td in tool_definitions],
+                )
+                
+            except MCPManagerError as e:
+                # Graceful degradation: логируем ошибку, но продолжаем
+                logger.error(
+                    "failed to initialize mcp server",
+                    session_id=session_state.session_id,
+                    server=name,
+                    error=str(e),
+                )
+            except Exception as e:
+                # Непредвиденные ошибки также логируем без прерывания
+                logger.exception(
+                    "unexpected error initializing mcp server",
+                    session_id=session_state.session_id,
+                    server=name,
+                    error=str(e),
+                )

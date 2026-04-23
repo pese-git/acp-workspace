@@ -492,3 +492,207 @@ class TestMCPModels:
 
         assert caps.tools == {"listChanged": True}
         assert caps.resources is None
+
+
+# ===== Тесты интеграции с session/new =====
+
+
+class TestSessionMCPIntegration:
+    """Тесты интеграции MCP с методами session/new и session/load."""
+
+    @pytest.mark.asyncio
+    async def test_session_new_with_mcp_servers_initializes_mcp_manager(
+        self,
+    ) -> None:
+        """Проверяет, что session/new с mcpServers инициализирует MCPManager.
+        
+        При передаче mcpServers в session/new, протокол должен:
+        1. Создать MCPManager для сессии
+        2. Попытаться подключиться к каждому серверу (graceful degradation при ошибках)
+        3. Сохранить MCPManager в session_state.mcp_manager
+        """
+        from acp_server.messages import ACPMessage
+        from acp_server.protocol.core import ACPProtocol
+        
+        # Создаём протокол
+        protocol = ACPProtocol(require_auth=False)
+        
+        # Инициализируем протокол
+        init_msg = ACPMessage.request(
+            request_id=0,
+            method="initialize",
+            params={
+                "protocolVersion": 1,
+                "clientCapabilities": {
+                    "fsRead": True,
+                    "fsWrite": True,
+                    "terminal": True,
+                },
+            },
+        )
+        await protocol.handle(init_msg)
+        
+        # Создаём сессию с MCP серверами (намеренно используем несуществующий сервер
+        # для проверки graceful degradation)
+        session_new_msg = ACPMessage.request(
+            request_id=1,
+            method="session/new",
+            params={
+                "cwd": "/tmp",
+                "mcpServers": [
+                    {
+                        "name": "test-server",
+                        "command": "nonexistent-mcp-server",
+                        "args": ["--stdio"],
+                        "env": [],
+                    }
+                ],
+            },
+        )
+        
+        # Выполняем session/new - ожидаем успех даже при ошибке подключения к MCP
+        # (graceful degradation: ошибка логируется, но не прерывает создание сессии)
+        outcome = await protocol.handle(session_new_msg)
+        
+        # Проверяем успешный ответ session/new
+        assert outcome.response is not None
+        assert outcome.response.result is not None
+        assert "sessionId" in outcome.response.result
+        
+        session_id = outcome.response.result["sessionId"]
+        
+        # Проверяем, что сессия создана и MCPManager инициализирован
+        session_state = protocol._sessions.get(session_id)
+        assert session_state is not None
+        assert session_state.mcp_manager is not None
+        assert isinstance(session_state.mcp_manager, MCPManager)
+        
+        # Проверяем, что MCPManager привязан к правильной сессии
+        assert session_state.mcp_manager.session_id == session_id
+
+    @pytest.mark.asyncio
+    async def test_session_new_without_mcp_servers_no_manager(
+        self,
+    ) -> None:
+        """Проверяет, что session/new без mcpServers не создаёт MCPManager."""
+        from acp_server.messages import ACPMessage
+        from acp_server.protocol.core import ACPProtocol
+        
+        # Создаём протокол
+        protocol = ACPProtocol(require_auth=False)
+        
+        # Инициализируем протокол
+        init_msg = ACPMessage.request(
+            request_id=0,
+            method="initialize",
+            params={"protocolVersion": 1},
+        )
+        await protocol.handle(init_msg)
+        
+        # Создаём сессию БЕЗ MCP серверов
+        session_new_msg = ACPMessage.request(
+            request_id=1,
+            method="session/new",
+            params={
+                "cwd": "/tmp",
+            },
+        )
+        
+        outcome = await protocol.handle(session_new_msg)
+        
+        # Проверяем успешный ответ
+        assert outcome.response is not None
+        assert outcome.response.result is not None
+        session_id = outcome.response.result["sessionId"]
+        
+        # Проверяем, что MCPManager НЕ создан (нет mcpServers)
+        session_state = protocol._sessions.get(session_id)
+        assert session_state is not None
+        assert session_state.mcp_manager is None
+
+    @pytest.mark.asyncio
+    async def test_session_new_with_empty_mcp_servers_no_manager(
+        self,
+    ) -> None:
+        """Проверяет, что пустой список mcpServers не создаёт MCPManager."""
+        from acp_server.messages import ACPMessage
+        from acp_server.protocol.core import ACPProtocol
+        
+        protocol = ACPProtocol(require_auth=False)
+        
+        init_msg = ACPMessage.request(
+            request_id=0,
+            method="initialize",
+            params={"protocolVersion": 1},
+        )
+        await protocol.handle(init_msg)
+        
+        # Создаём сессию с пустым списком MCP серверов
+        session_new_msg = ACPMessage.request(
+            request_id=1,
+            method="session/new",
+            params={
+                "cwd": "/tmp",
+                "mcpServers": [],
+            },
+        )
+        
+        outcome = await protocol.handle(session_new_msg)
+        
+        assert outcome.response is not None
+        session_id = outcome.response.result["sessionId"]
+        
+        # Пустой список - MCPManager не создаётся
+        session_state = protocol._sessions.get(session_id)
+        assert session_state is not None
+        assert session_state.mcp_manager is None
+
+    @pytest.mark.asyncio
+    async def test_session_new_with_invalid_mcp_config_graceful(
+        self,
+    ) -> None:
+        """Проверяет graceful degradation при невалидной конфигурации MCP."""
+        from acp_server.messages import ACPMessage
+        from acp_server.protocol.core import ACPProtocol
+        
+        protocol = ACPProtocol(require_auth=False)
+        
+        init_msg = ACPMessage.request(
+            request_id=0,
+            method="initialize",
+            params={"protocolVersion": 1},
+        )
+        await protocol.handle(init_msg)
+        
+        # Создаём сессию с невалидной конфигурацией (отсутствует name)
+        session_new_msg = ACPMessage.request(
+            request_id=1,
+            method="session/new",
+            params={
+                "cwd": "/tmp",
+                "mcpServers": [
+                    {
+                        # name отсутствует - невалидная конфигурация
+                        "command": "some-command",
+                    },
+                    {
+                        # command отсутствует - невалидная конфигурация
+                        "name": "incomplete",
+                    },
+                ],
+            },
+        )
+        
+        # Сессия должна создаться успешно (graceful degradation)
+        outcome = await protocol.handle(session_new_msg)
+        
+        assert outcome.response is not None
+        assert outcome.response.result is not None
+        session_id = outcome.response.result["sessionId"]
+        
+        # MCPManager создан, но без серверов (все были невалидные)
+        session_state = protocol._sessions.get(session_id)
+        assert session_state is not None
+        # MCPManager создаётся, но без успешных подключений
+        assert session_state.mcp_manager is not None
+        assert session_state.mcp_manager.server_count == 0
