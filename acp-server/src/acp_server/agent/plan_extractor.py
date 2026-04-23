@@ -18,7 +18,7 @@ logger = structlog.get_logger()
 
 # Допустимые значения для полей плана
 ALLOWED_PRIORITIES = frozenset({"low", "medium", "high"})
-ALLOWED_STATUSES = frozenset({"pending", "in_progress", "completed", "cancelled"})
+ALLOWED_STATUSES = frozenset({"pending", "in_progress", "completed"})
 
 
 @dataclass
@@ -28,13 +28,13 @@ class PlanEntry:
     Attributes:
         content: Краткое описание задачи
         priority: Важность задачи (low, medium, high)
-        status: Текущий статус (pending, in_progress, completed, cancelled)
+        status: Текущий статус (pending, in_progress, completed)
         description: Детальное описание (опционально)
     """
     
     content: str
     priority: Literal["low", "medium", "high"]
-    status: Literal["pending", "in_progress", "completed", "cancelled"]
+    status: Literal["pending", "in_progress", "completed"]
     description: str = ""
     
     def to_dict(self) -> dict[str, str]:

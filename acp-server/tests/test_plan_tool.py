@@ -43,7 +43,7 @@ class TestPlanToolDefinitions:
         
         # Проверить enum для status
         status_enum = item_schema["properties"]["status"]["enum"]
-        assert set(status_enum) == {"pending", "in_progress", "completed", "cancelled"}
+        assert set(status_enum) == {"pending", "in_progress", "completed"}
 
 
 class TestPlanToolExecutor:

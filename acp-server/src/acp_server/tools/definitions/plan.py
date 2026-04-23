@@ -63,7 +63,7 @@ class PlanToolDefinitions:
                                 },
                                 "status": {
                                     "type": "string",
-                                    "enum": ["pending", "in_progress", "completed", "cancelled"],
+                                    "enum": ["pending", "in_progress", "completed"],
                                     "description": "Current task status",
                                 },
                                 "description": {

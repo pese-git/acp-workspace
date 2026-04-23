@@ -61,7 +61,7 @@ class PlanBuilder:
 
         normalized_entries: list[dict[str, str]] = []
         allowed_priorities = {"low", "medium", "high"}
-        allowed_statuses = {"pending", "in_progress", "completed", "cancelled"}
+        allowed_statuses = {"pending", "in_progress", "completed"}
 
         for entry in raw_entries:
             if not isinstance(entry, dict):

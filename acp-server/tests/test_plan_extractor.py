@@ -238,5 +238,5 @@ class TestConstants:
 
     def test_allowed_statuses(self) -> None:
         """Проверить допустимые статусы."""
-        expected_statuses = {"pending", "in_progress", "completed", "cancelled"}
+        expected_statuses = {"pending", "in_progress", "completed"}
         assert expected_statuses == ALLOWED_STATUSES
