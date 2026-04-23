@@ -4,7 +4,9 @@
 - MCPClient — клиент для взаимодействия с MCP серверами (mock транспорт)
 - MCPToolAdapter — преобразование MCP инструментов в ToolDefinition
 - MCPManager — управление несколькими MCP серверами
-- Обработчики протокола session/mcp/*
+
+Примечание: Методы session/mcp/* НЕ входят в официальную спецификацию ACP протокола.
+MCP серверы подключаются через параметр mcpServers при session/new и session/load.
 """
 
 from __future__ import annotations
@@ -26,12 +28,6 @@ from acp_server.mcp.models import (
     MCPToolInputSchema,
 )
 from acp_server.mcp.tool_adapter import MCPToolAdapter
-from acp_server.protocol.handlers.mcp import (
-    session_mcp_add,
-    session_mcp_list,
-    session_mcp_remove,
-)
-from acp_server.protocol.state import SessionState
 from acp_server.tools.base import ToolDefinition
 
 # ===== Фикстуры =====
@@ -97,16 +93,6 @@ def mock_transport() -> MagicMock:
     transport.send_request = AsyncMock()
     transport.send_notification = AsyncMock()
     return transport
-
-
-@pytest.fixture
-def session_state() -> SessionState:
-    """Создаёт тестовое состояние сессии."""
-    return SessionState(
-        session_id="test_session_123",
-        cwd="/test/cwd",
-        mcp_servers=[],
-    )
 
 
 # ===== Тесты MCPToolAdapter =====
@@ -447,208 +433,6 @@ class TestMCPManager:
 
 
 # ===== Тесты обработчиков протокола =====
-
-
-class TestMCPProtocolHandlers:
-    """Тесты для обработчиков session/mcp/* протокола."""
-
-    @pytest.mark.asyncio
-    async def test_session_mcp_add_missing_name(
-        self,
-        session_state: SessionState,
-    ) -> None:
-        """Проверяет ошибку при отсутствии параметра name."""
-        params = {"command": "test-mcp"}
-
-        response = await session_mcp_add(
-            request_id=1,
-            params=params,
-            session=session_state,
-        )
-
-        # Проверяем ошибку
-        assert response.error is not None
-        assert response.error.code == -32602
-        assert "name" in response.error.message
-
-    @pytest.mark.asyncio
-    async def test_session_mcp_add_missing_command(
-        self,
-        session_state: SessionState,
-    ) -> None:
-        """Проверяет ошибку при отсутствии параметра command."""
-        params = {"name": "test-server"}
-
-        response = await session_mcp_add(
-            request_id=1,
-            params=params,
-            session=session_state,
-        )
-
-        # Проверяем ошибку
-        assert response.error is not None
-        assert response.error.code == -32602
-        assert "command" in response.error.message
-
-    @pytest.mark.asyncio
-    async def test_session_mcp_add_success(
-        self,
-        session_state: SessionState,
-        sample_mcp_tools: list[MCPTool],
-    ) -> None:
-        """Проверяет успешное добавление MCP сервера."""
-        params = {
-            "name": "test-server",
-            "command": "test-mcp",
-            "args": ["--stdio"],
-        }
-
-        # Mock MCPManager.add_server
-        mock_manager = MagicMock()
-        mock_manager.add_server = AsyncMock(
-            return_value=[
-                ToolDefinition(
-                    name="mcp:test-server:read_file",
-                    description="Читает файл",
-                    parameters={},
-                    kind="other",
-                )
-            ]
-        )
-
-        with patch(
-            "acp_server.protocol.handlers.mcp.MCPManager",
-            return_value=mock_manager,
-        ):
-            response = await session_mcp_add(
-                request_id=1,
-                params=params,
-                session=session_state,
-            )
-
-        # Проверяем успешный ответ
-        assert response.error is None
-        assert response.result is not None
-        assert response.result["server_id"] == "test-server"
-        assert response.result["tools_count"] == 1
-
-    @pytest.mark.asyncio
-    async def test_session_mcp_remove_missing_server_id(
-        self,
-        session_state: SessionState,
-    ) -> None:
-        """Проверяет ошибку при отсутствии server_id."""
-        params = {}
-
-        response = await session_mcp_remove(
-            request_id=1,
-            params=params,
-            session=session_state,
-        )
-
-        # Проверяем ошибку
-        assert response.error is not None
-        assert response.error.code == -32602
-        assert "server_id" in response.error.message
-
-    @pytest.mark.asyncio
-    async def test_session_mcp_remove_no_manager(
-        self,
-        session_state: SessionState,
-    ) -> None:
-        """Проверяет ошибку при отсутствии MCPManager."""
-        params = {"server_id": "test-server"}
-        session_state.mcp_manager = None
-
-        response = await session_mcp_remove(
-            request_id=1,
-            params=params,
-            session=session_state,
-        )
-
-        # Проверяем ошибку
-        assert response.error is not None
-        assert response.error.code == -32000
-        assert "No MCP servers" in response.error.message
-
-    @pytest.mark.asyncio
-    async def test_session_mcp_remove_success(
-        self,
-        session_state: SessionState,
-    ) -> None:
-        """Проверяет успешное удаление MCP сервера."""
-        params = {"server_id": "test-server"}
-
-        # Создаём mock менеджер
-        mock_manager = MagicMock()
-        mock_manager.remove_server = AsyncMock()
-        session_state.mcp_manager = mock_manager
-
-        response = await session_mcp_remove(
-            request_id=1,
-            params=params,
-            session=session_state,
-        )
-
-        # Проверяем успешный ответ
-        assert response.error is None
-        assert response.result is not None
-        assert response.result["server_id"] == "test-server"
-        assert response.result["success"] is True
-
-    @pytest.mark.asyncio
-    async def test_session_mcp_list_no_manager(
-        self,
-        session_state: SessionState,
-    ) -> None:
-        """Проверяет пустой список при отсутствии MCPManager."""
-        session_state.mcp_manager = None
-
-        response = await session_mcp_list(
-            request_id=1,
-            params={},
-            session=session_state,
-        )
-
-        # Проверяем пустой список
-        assert response.error is None
-        assert response.result is not None
-        assert response.result["servers"] == []
-
-    @pytest.mark.asyncio
-    async def test_session_mcp_list_returns_servers(
-        self,
-        session_state: SessionState,
-    ) -> None:
-        """Проверяет возврат списка серверов."""
-        # Создаём mock менеджер с информацией о серверах
-        mock_manager = MagicMock()
-        mock_manager.get_servers_info = MagicMock(
-            return_value=[
-                {
-                    "id": "test-server",
-                    "name": "test-server",
-                    "command": "test-mcp",
-                    "state": "ready",
-                    "tools_count": 2,
-                }
-            ]
-        )
-        session_state.mcp_manager = mock_manager
-
-        response = await session_mcp_list(
-            request_id=1,
-            params={},
-            session=session_state,
-        )
-
-        # Проверяем ответ
-        assert response.error is None
-        assert response.result is not None
-        assert len(response.result["servers"]) == 1
-        assert response.result["servers"][0]["id"] == "test-server"
-        assert response.result["servers"][0]["tools_count"] == 2
-
 
 # ===== Тесты моделей =====
 
