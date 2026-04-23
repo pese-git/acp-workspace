@@ -31,6 +31,21 @@ codelab/
 │   └── client/           # Клиентская часть (TUI)
 ```
 
+## CLI
+
+После установки доступна команда `codelab`:
+
+```bash
+# Справка
+codelab --help
+
+# Запуск сервера агента
+codelab serve --port 8765
+
+# Запуск TUI клиента
+codelab client ws://localhost:8765
+```
+
 ## Использование
 
 ### Shared модули
