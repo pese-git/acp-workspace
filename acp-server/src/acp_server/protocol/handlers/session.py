@@ -511,14 +511,16 @@ def session_info_notification(
 
 
 def build_default_commands() -> list[dict[str, Any]]:
-    """Возвращает базовый набор команд для demo-сессий.
+    """Возвращает базовый набор команд для сессий.
+
+    Возвращает список встроенных slash-команд в формате, соответствующем
+    спецификации ACP Protocol 14-Slash Commands.
 
     Пример использования:
         commands = build_default_commands()
     """
-
-    # Базовый список slash-команд для демонстрации протокольного update.
-    # Возвращаем list[dict[str, Any]] которая совместима с list[AvailableCommand | dict[str, Any]]
+    # Встроенные slash-команды согласно спецификации ACP Protocol.
+    # Формат соответствует AvailableCommand: name, description, input? (с hint).
     return [
         {
             "name": "status",
@@ -526,6 +528,12 @@ def build_default_commands() -> list[dict[str, Any]]:
         },
         {
             "name": "mode",
-            "description": "Показать и изменить режим сессии",
+            "description": "Показать или изменить режим сессии",
+            "input": {"hint": "имя режима (code, architect, ask, debug)"},
         },
-    ]  # type: ignore[return-value]
+        {
+            "name": "help",
+            "description": "Показать список доступных команд",
+            "input": {"hint": "имя команды для подробной справки"},
+        },
+    ]

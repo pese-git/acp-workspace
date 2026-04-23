@@ -31,24 +31,45 @@ class HistoryMessage(BaseModel):
 
 
 # Модели для команд (available_commands)
-class CommandParameter(BaseModel):
-    """Параметр команды."""
+# Соответствует спецификации ACP Protocol 14-Slash Commands
+class AvailableCommandInput(BaseModel):
+    """Спецификация ввода для slash-команды.
 
-    name: str
-    type: str
-    description: str
-    required: bool = True
-    default: Any = None
+    Соответствует спецификации ACP Protocol 14-Slash Commands.
+    Определяет подсказку для неструктурированного текстового ввода.
+
+    Пример использования:
+        input_spec = AvailableCommandInput(hint="query to search for")
+    """
+
+    hint: str
+    """Подсказка для пользователя о формате ввода."""
 
 
 class AvailableCommand(BaseModel):
-    """Доступная команда (slash command)."""
+    """Доступная slash-команда.
+
+    Соответствует спецификации ACP Protocol 14-Slash Commands.
+    Команды объявляются агентом и отображаются клиенту для автодополнения.
+
+    Пример использования:
+        cmd = AvailableCommand(
+            name="web",
+            description="Search the web for information",
+            input=AvailableCommandInput(hint="query to search for")
+        )
+    """
 
     model_config = ConfigDict(extra="allow")
 
     name: str
+    """Имя команды без слеша, например: 'status', 'web'."""
+
     description: str
-    parameters: list[CommandParameter] = Field(default_factory=list)
+    """Человекочитаемое описание команды."""
+
+    input: AvailableCommandInput | None = None
+    """Опциональная спецификация ввода для команды."""
 
 
 # Модели для плана агента (latest_plan)
