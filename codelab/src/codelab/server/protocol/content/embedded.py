@@ -44,7 +44,6 @@ class EmbeddedResourceContent(BaseModel):
 
     model_config = ConfigDict(
         populate_by_name=True,
-        discriminator="type",  # В зависимости от структуры может не работать
     )
 
     @field_validator("resource", mode="before")

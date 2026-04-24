@@ -1,7 +1,7 @@
 """Mock LLM провайдер для тестирования."""
 # mypy: ignore-errors
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import structlog
@@ -70,12 +70,12 @@ class MockLLMProvider(LLMProvider):
 
         return response
 
-    async def stream_completion(  # type: ignore[override]
+    async def stream_completion(
         self,
         messages: list[LLMMessage],
         tools: list[dict[str, Any]] | None = None,
         **kwargs: Any,
-    ) -> AsyncIterator[LLMResponse]:
+    ) -> AsyncGenerator[LLMResponse, None]:
         """Вернуть mock потоковый ответ."""
         self.last_messages = messages
         self.last_tools = tools

@@ -2,7 +2,7 @@
 # mypy: ignore-errors
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import structlog
@@ -159,12 +159,12 @@ class OpenAIProvider(LLMProvider):
             )
             raise
 
-    async def stream_completion(  # type: ignore[no-untyped-def,override]
+    async def stream_completion(
         self,
         messages: list[LLMMessage],
         tools: list[dict[str, Any]] | None = None,
         **kwargs: Any,
-    ) -> AsyncIterator[LLMResponse]:
+    ) -> AsyncGenerator[LLMResponse, None]:
         """Потоковое получение ответа от OpenAI API.
 
         Генерирует промежуточные LLMResponse при получении данных.

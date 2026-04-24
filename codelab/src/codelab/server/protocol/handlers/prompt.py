@@ -324,7 +324,7 @@ async def session_prompt(
             directives=directives,
             text_preview=text_preview,
         )
-        session.latest_plan = plan_entries  # type: ignore[assignment]
+        session.latest_plan = list(plan_entries)  # Преобразуем в list[dict[str, Any]]
         notifications.append(
             ACPMessage.notification(
                 "session/update",

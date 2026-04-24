@@ -250,7 +250,7 @@ class ClientRPCBridge:
                 },
             )
             
-            result = await self._service.wait_for_exit(
+            output, exit_code = await self._service.wait_for_exit(
                 session_id=session.session_id,
                 terminal_id=terminal_id,
             )
@@ -260,13 +260,13 @@ class ClientRPCBridge:
                 extra={
                     "session_id": session.session_id,
                     "terminal_id": terminal_id,
-                    "exit_code": result.exit_code,
+                    "exit_code": exit_code,
                 },
             )
             
             return {
-                "exit_code": result.exit_code,
-                "output": result.output,
+                "exit_code": exit_code,
+                "output": output,
             }
             
         except ClientCapabilityMissingError as e:
@@ -312,7 +312,7 @@ class ClientRPCBridge:
                 },
             )
             
-            success = await self._service.release(
+            success = await self._service.release_terminal(
                 session_id=session.session_id,
                 terminal_id=terminal_id,
             )

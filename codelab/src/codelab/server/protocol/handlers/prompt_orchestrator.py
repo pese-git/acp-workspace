@@ -1111,7 +1111,7 @@ class PromptOrchestrator:
                 validated_plan = self.plan_builder.validate_plan_entries(agent_plan)
                 if validated_plan:
                     # Обновить состояние сессии
-                    session.latest_plan = validated_plan
+                    session.latest_plan = list(validated_plan)
                     
                     # Построить и отправить notification
                     plan_notification = self.plan_builder.build_plan_notification(

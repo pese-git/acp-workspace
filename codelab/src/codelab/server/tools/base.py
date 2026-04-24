@@ -50,6 +50,20 @@ class ToolRegistry(ABC):
     """Реестр инструментов с механизмом выполнения."""
 
     @abstractmethod
+    def register(
+        self,
+        tool: ToolDefinition,
+        handler: Callable,
+    ) -> None:
+        """Регистрация инструмента и его обработчика.
+
+        Args:
+            tool: Определение инструмента (ToolDefinition)
+            handler: Callable обработчик инструмента
+        """
+        pass
+
+    @abstractmethod
     def register_tool(
         self,
         name: str,
