@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import structlog
+from dotenv import load_dotenv
 
 if TYPE_CHECKING:
     from codelab.server.http_server import ACPHttpServer
@@ -93,7 +94,21 @@ def main() -> None:
     """Главная точка входа CLI.
 
     Парсит аргументы командной строки и запускает соответствующий режим.
+    
+    Загрузка переменных окружения (порядок приоритета, от низкого к высокому):
+    1. ~/.codelab/config/.env (глобальные настройки)
+    2. .env в текущей директории (локальный проект)
+    3. Переменные окружения системы (самый высокий приоритет)
     """
+    # Загружаем .env файлы (load_dotenv не перезаписывает существующие переменные)
+    # Сначала загружаем глобальный конфиг, затем локальный для правильного приоритета
+    home_env = CODELAB_HOME / "config" / ".env"
+    if home_env.exists():
+        load_dotenv(home_env)
+    
+    # Локальный .env перезаписывает глобальный (override=True)
+    load_dotenv(override=True)
+    
     parser = argparse.ArgumentParser(
         prog="codelab",
         description="CodeLab - AI-powered coding assistant",
