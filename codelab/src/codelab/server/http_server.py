@@ -11,6 +11,8 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
+import sys
 import time
 import uuid
 from typing import TYPE_CHECKING
@@ -102,6 +104,10 @@ class ACPHttpServer:
         self._agent_orchestrator: AgentOrchestrator | None = None
         # Реестр инструментов инициализируется в методе run()
         self._tool_registry: ToolRegistry | None = None
+        # Subprocess для textual-serve (Web UI)
+        self._web_ui_process: subprocess.Popen | None = None  # type: ignore[type-arg]
+        # URL для Web UI (локальный адрес)
+        self._web_ui_url: str | None = None
 
         # Логируем инициализацию сервера
         logger.debug(
@@ -112,6 +118,77 @@ class ACPHttpServer:
             has_auth_key=bool(auth_api_key),
             enable_web=enable_web,
         )
+
+    def _start_web_ui_subprocess(self) -> bool:
+        """Запускает textual-serve как subprocess для локального Web UI.
+        
+        textual-serve запускает локальный веб-сервер на указанном порту.
+        Web UI доступен по адресу http://host:web_ui_port/
+        
+        Returns:
+            True если subprocess успешно запущен, False иначе.
+        """
+        from .web_app import is_web_ui_available
+        
+        if not is_web_ui_available():
+            logger.debug("web ui subprocess not started - textual-serve not available")
+            return False
+        
+        try:
+            # Порт для Web UI = основной порт + 1000 (избегаем заблокированные порты типа 6666-6669)
+            web_ui_port = self.port + 1000
+            
+            # Python скрипт для запуска textual-serve Server
+            serve_script = f'''
+from textual_serve.server import Server
+server = Server(
+    command="{sys.executable} -m codelab.client.tui --host {self.host} --port {self.port}",
+    host="{self.host}",
+    port={web_ui_port},
+    title="CodeLab TUI",
+)
+server.serve()
+'''
+            
+            # Запускаем subprocess
+            self._web_ui_process = subprocess.Popen(
+                [sys.executable, "-c", serve_script],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            
+            self._web_ui_url = f"http://{self.host}:{web_ui_port}/"
+            
+            logger.info(
+                "web ui subprocess started",
+                pid=self._web_ui_process.pid,
+                url=self._web_ui_url,
+            )
+            return True
+            
+        except Exception as e:
+            logger.warning(
+                "failed to start web ui subprocess",
+                error=str(e),
+            )
+            return False
+    
+    def _stop_web_ui_subprocess(self) -> None:
+        """Останавливает subprocess с Web UI."""
+        if self._web_ui_process is not None:
+            try:
+                self._web_ui_process.terminate()
+                self._web_ui_process.wait(timeout=5)
+                logger.info("web ui subprocess stopped")
+            except Exception as e:
+                logger.warning("failed to stop web ui subprocess", error=str(e))
+                try:
+                    self._web_ui_process.kill()
+                except Exception:
+                    pass
+            finally:
+                self._web_ui_process = None
 
     async def _initialize_llm_provider(self) -> LLMProvider | None:
         """Инициализирует LLM провайдера на основе конфигурации.
@@ -207,10 +284,19 @@ class ACPHttpServer:
         # Добавляем роут для Web UI если включён
         if self.enable_web:
             app.router.add_get("/", self.handle_web_ui_request)
-            logger.info(
-                "web ui enabled",
-                url=f"http://{self.host}:{self.port}/",
-            )
+            # Запускаем textual-web subprocess для Web UI
+            web_ui_started = self._start_web_ui_subprocess()
+            if web_ui_started and self._web_ui_url:
+                logger.info(
+                    "web ui enabled with textual-web",
+                    main_url=f"http://{self.host}:{self.port}/",
+                    web_ui_url=self._web_ui_url,
+                )
+            else:
+                logger.info(
+                    "web ui enabled (fallback mode)",
+                    url=f"http://{self.host}:{self.port}/",
+                )
 
         runner = web.AppRunner(app)
         await runner.setup()
@@ -229,6 +315,8 @@ class ACPHttpServer:
             while True:
                 await asyncio.sleep(3600)
         finally:
+            # Останавливаем Web UI subprocess если запущен
+            self._stop_web_ui_subprocess()
             # Логируем остановку сервера
             logger.info("server shutting down")
             await runner.cleanup()
@@ -244,10 +332,77 @@ class ACPHttpServer:
         """
         from .web_app import get_fallback_html, is_web_ui_available
         
-        if is_web_ui_available():
-            # TODO: Интеграция с textual-web когда API станет стабильным
-            # На данный момент textual-web запускается отдельно как CLI
-            # Показываем страницу с инструкциями по запуску
+        # Если subprocess с textual-web запущен и URL получен - показываем redirect/iframe
+        if self._web_ui_process is not None and self._web_ui_process.poll() is None and self._web_ui_url:
+            # Subprocess работает - редиректим на облачный URL или показываем iframe
+            web_ui_url = self._web_ui_url
+            html = f"""<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CodeLab - Web UI</title>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        html, body {{ height: 100%; overflow: hidden; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0d1117;
+        }}
+        .loading {{
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #e4e4e4;
+            text-align: center;
+        }}
+        .loading h2 {{ margin-bottom: 16px; color: #00d4ff; }}
+        .spinner {{
+            width: 40px;
+            height: 40px;
+            border: 3px solid #333;
+            border-top-color: #00d4ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 16px;
+        }}
+        @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+        iframe {{
+            width: 100%;
+            height: 100%;
+            border: none;
+        }}
+        .fallback-link {{
+            margin-top: 24px;
+            font-size: 0.875rem;
+            color: #666;
+        }}
+        .fallback-link a {{ color: #00d4ff; }}
+    </style>
+</head>
+<body>
+    <div class="loading" id="loading">
+        <div class="spinner"></div>
+        <h2>🔬 CodeLab Web UI</h2>
+        <p>Загрузка TUI интерфейса...</p>
+        <p class="fallback-link">
+            Не загружается? <a href="{web_ui_url}" target="_blank">Открыть напрямую</a>
+        </p>
+    </div>
+    <iframe 
+        id="webui" 
+        src="{web_ui_url}"
+        onload="document.getElementById('loading').style.display='none';"
+        style="display: block;">
+    </iframe>
+</body>
+</html>
+"""
+            return web.Response(text=html, content_type="text/html")
+        
+        elif is_web_ui_available():
+            # textual-web установлен, но subprocess не запущен
             html = f"""<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -276,7 +431,7 @@ class ACPHttpServer:
         .status {{
             display: inline-block;
             padding: 4px 12px;
-            background: #00ff88;
+            background: #ffaa00;
             color: #1a1a2e;
             border-radius: 20px;
             font-size: 0.875rem;
@@ -297,11 +452,12 @@ class ACPHttpServer:
 </head>
 <body>
     <div class="container">
-        <span class="status">✅ Готов к работе</span>
-        <h1>🔬 CodeLab Web UI</h1>
-        <p>Textual Web установлен. Запустите Web UI командой:</p>
-        <pre><code>textual-web serve codelab.client.tui.app:ACPClientApp</code></pre>
-        <p>Или подключитесь через TUI клиент:</p>
+        <span class="status">⚠️ Web UI не запущен</span>
+        <h1>🔬 CodeLab</h1>
+        <p>Textual Web установлен, но процесс Web UI не запустился.</p>
+        <p>Запустите вручную (публикация через Ganglion):</p>
+        <pre><code>textual-web --run "python -m codelab.client.tui.app --host {self.host} --port {self.port}"</code></pre>
+        <p>Или используйте TUI клиент:</p>
         <pre><code>codelab connect --host {self.host} --port {self.port}</code></pre>
         <p>WebSocket endpoint: <span class="url">ws://{self.host}:{self.port}/acp/ws</span></p>
     </div>

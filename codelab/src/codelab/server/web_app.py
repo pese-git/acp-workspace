@@ -1,10 +1,9 @@
-"""Web UI сервер на базе Textual Web.
+"""Web UI сервер на базе textual-serve.
 
-Позволяет запустить TUI клиент в браузере.
-Модуль предоставляет graceful fallback если textual-web не установлен.
+Позволяет запустить TUI клиент в браузере через локальный веб-сервер.
+Модуль предоставляет graceful fallback если textual-serve не установлен.
 
-ПРИМЕЧАНИЕ: textual-web работает как CLI инструмент (textual serve),
-а не как библиотека. Для Web UI используется отдельный процесс.
+textual-serve запускает локальный веб-сервер и не требует внешних сервисов.
 """
 
 from __future__ import annotations
@@ -15,44 +14,43 @@ import structlog
 
 logger = structlog.get_logger(__name__)
 
-# Проверяем наличие пакета textual-web через importlib
-# textual-web работает как CLI (textual serve), а не как библиотека
-TEXTUAL_WEB_AVAILABLE = importlib.util.find_spec("textual_web") is not None
+# Проверяем наличие пакета textual-serve через importlib
+# textual-serve запускает локальный веб-сервер для Textual приложений
+TEXTUAL_SERVE_AVAILABLE = importlib.util.find_spec("textual_serve") is not None
 
-if TEXTUAL_WEB_AVAILABLE:
-    logger.debug("textual_web_available", version=">=0.5")
+if TEXTUAL_SERVE_AVAILABLE:
+    logger.debug("textual_serve_available", version=">=1.1.0")
 else:
-    logger.debug("textual_web_not_available")
+    logger.debug("textual_serve_not_available")
 
 
 def is_web_ui_available() -> bool:
     """Проверяет доступность Web UI.
     
     Returns:
-        True если textual-web установлен и доступен
+        True если textual-serve установлен и доступен
     """
-    return TEXTUAL_WEB_AVAILABLE
+    return TEXTUAL_SERVE_AVAILABLE
 
 
 def create_web_app(server_url: str = "ws://localhost:8765/acp/ws"):
     """Создать веб-приложение для TUI.
     
-    ПРИМЕЧАНИЕ: textual-web работает через CLI команду 'textual serve',
-    а не как библиотека. Эта функция возвращает конфигурацию для запуска.
+    ПРИМЕЧАНИЕ: textual-serve запускает локальный веб-сервер для Textual.
     
     Args:
         server_url: URL WebSocket сервера для подключения
         
     Returns:
-        Словарь с конфигурацией для запуска textual serve
+        Словарь с конфигурацией для запуска textual-serve
         
     Raises:
-        RuntimeError: если textual-web не установлен
+        RuntimeError: если textual-serve не установлен
     """
-    if not TEXTUAL_WEB_AVAILABLE:
+    if not TEXTUAL_SERVE_AVAILABLE:
         raise RuntimeError(
-            "textual-web не установлен. "
-            "Установите: pip install 'codelab[web]' или pip install textual-web"
+            "textual-serve не установлен. "
+            "Установите: pip install 'codelab[web]' или pip install textual-serve"
         )
     
     # Извлекаем host и port из server_url для TUI приложения

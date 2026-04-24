@@ -14,8 +14,8 @@ dependencies = [
   "rich>=13.0.0",
   "python-dotenv>=1.0.0",
   "openai>=1.50.0",
-  "textual>=0.40",
-  "textual-web>=0.5",
+  "textual>=0.66.0",
+  "textual-serve>=1.1.0",
 ]
 
 [project.scripts]
@@ -31,7 +31,7 @@ tui = [
   "textual>=0.40",
 ]
 web = [
-  "textual-web>=0.5",
+  "textual-serve>=1.1.0",
 ]
 full = [
   "codelab[server,tui,web]",
