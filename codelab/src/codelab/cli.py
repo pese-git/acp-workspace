@@ -65,39 +65,27 @@ def ensure_home_directory() -> None:
 
 
 def _configure_logging(verbose: bool = False) -> None:
-    """Настраивает structlog для CLI.
+    """Настраивает structlog для CLI с записью логов в файл.
 
     Args:
         verbose: Включить подробное логирование (DEBUG уровень)
     """
+    # Импортируем setup_logging из shared модуля
+    from codelab.shared.logging import setup_logging
+
     # Приоритет: флаг --verbose > CODELAB_LOG_LEVEL > INFO
     env_log_level = os.getenv("CODELAB_LOG_LEVEL", "INFO").upper()
     if verbose:
-        level = logging.DEBUG
+        level = "DEBUG"
     else:
-        level = getattr(logging, env_log_level, logging.INFO)
+        level = env_log_level
 
-    # Базовая конфигурация logging
-    logging.basicConfig(
-        format="%(message)s",
+    # Используем setup_logging из shared модуля с записью в файл
+    # Логи сохраняются в ~/.codelab/logs/codelab.log с ротацией
+    setup_logging(
         level=level,
-        stream=sys.stderr,
-    )
-
-    # Настройка structlog для красивого вывода в консоль
-    structlog.configure(
-        processors=[
-            structlog.contextvars.merge_contextvars,
-            structlog.processors.add_log_level,
-            structlog.processors.StackInfoRenderer(),
-            structlog.dev.set_exc_info,
-            structlog.processors.TimeStamper(fmt="%H:%M:%S"),
-            structlog.dev.ConsoleRenderer(colors=True),
-        ],
-        wrapper_class=structlog.make_filtering_bound_logger(level),
-        context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),
-        cache_logger_on_first_use=True,
+        json_format=False,  # Человекочитаемый формат
+        log_file="default",  # ~/.codelab/logs/codelab.log
     )
 
 
