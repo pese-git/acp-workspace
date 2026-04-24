@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING
 
 import structlog
 
-from codelab.client.tui.components.inline_permission_widget import InlinePermissionWidget
 from codelab.client.messages import PermissionOption, PermissionToolCall
+from codelab.client.tui.components.inline_permission_widget import InlinePermissionWidget
 
 if TYPE_CHECKING:
     from codelab.client.presentation.permission_view_model import PermissionViewModel

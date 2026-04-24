@@ -12,7 +12,7 @@ def test_import_shared_messages():
 
 def test_import_shared_content():
     """Проверка импорта shared.content."""
-    from codelab.shared.content import TextContent, ImageContent
+    from codelab.shared.content import ImageContent, TextContent
     assert TextContent is not None
     assert ImageContent is not None
 

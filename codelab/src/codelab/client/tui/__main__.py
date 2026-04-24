@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 
 from codelab.shared.logging import setup_logging
+
 from .app import run_tui_app
 
 

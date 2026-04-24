@@ -19,6 +19,7 @@ from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 
 from codelab.client.infrastructure.di_bootstrapper import DIBootstrapper
+from codelab.client.messages import PermissionOption, PermissionToolCall
 from codelab.client.presentation.chat_view_model import ChatViewModel
 from codelab.client.presentation.file_viewer_view_model import FileViewerViewModel
 from codelab.client.presentation.filesystem_view_model import FileSystemViewModel
@@ -29,7 +30,6 @@ from codelab.client.presentation.terminal_log_view_model import TerminalLogViewM
 from codelab.client.presentation.terminal_view_model import TerminalViewModel
 from codelab.client.presentation.ui_view_model import ConnectionStatus, SidebarTab, UIViewModel
 from codelab.client.tui.navigation import NavigationManager
-from codelab.client.messages import PermissionOption, PermissionToolCall
 
 from .components import (
     ChatView,
