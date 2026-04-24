@@ -21,11 +21,28 @@
 - ToolCallCard: карточка tool call
 - ToolCallList: список tool calls
 - FileChangePreview, DiffLine: предпросмотр изменений файла
+
+Фаза 4 (Advanced Features):
+- Toast, ToastContainer, ToastType, ToastData: всплывающие уведомления
+- Tab, TabBar, TabPanel, TabbedContainer, TabData: компоненты табов
+- SearchInput: поле поиска с debounce
+- ProgressBar, ProgressVariant: индикатор прогресса
+- Spinner, LoadingIndicator, SpinnerSize, SpinnerVariant: индикаторы загрузки
+- ContextMenu, ContextMenuScreen, MenuItem, MenuSeparator, MenuGroup: контекстное меню
+- TerminalPanel, TerminalSession, TerminalOutput, TerminalToolbar: панель терминала
 """
 
 from .action_bar import ActionBar
 from .action_button import ActionButton, ButtonVariant, IconButton
 from .chat_view import ChatView
+from .context_menu import (
+    ContextMenu,
+    ContextMenuItem,
+    ContextMenuScreen,
+    MenuGroup,
+    MenuItem,
+    MenuSeparator,
+)
 from .chat_view_permission_manager import ChatViewPermissionManager
 from .container import Card, ContainerVariant, StyledContainer
 from .file_change_preview import DiffLine, FileChangePreview
@@ -44,12 +61,18 @@ from .permission_badge import PermissionBadge, PermissionStatus
 from .permission_modal import PermissionModal
 from .permission_request import PermissionRequest, PermissionType
 from .plan_panel import PlanPanel
+from .progress import ProgressBar, ProgressVariant
 from .prompt_input import PromptInput
+from .search_input import SearchInput
 from .session_turn import SessionTurn, TurnData, TurnStatus
 from .sidebar import Sidebar
+from .spinner import LoadingIndicator, Spinner, SpinnerSize, SpinnerVariant
 from .streaming_text import StreamingText, ThinkingIndicator, TypewriterText
+from .tabs import Tab, TabBar, TabbedContainer, TabData, TabPanel
 from .terminal_log_modal import TerminalLogModal
 from .terminal_output import TerminalOutputPanel
+from .terminal_panel import TerminalOutput, TerminalPanel, TerminalSession, TerminalToolbar
+from .toast import Toast, ToastContainer, ToastData, ToastType
 from .tool_call_card import ToolCallCard, ToolCallStatus
 from .tool_call_list import ToolCallList
 from .tool_panel import ToolPanel
@@ -117,4 +140,31 @@ __all__ = [
     "ToolCallList",
     "FileChangePreview",
     "DiffLine",
+    # Фаза 4: Advanced компоненты
+    "Toast",
+    "ToastContainer",
+    "ToastType",
+    "ToastData",
+    "Tab",
+    "TabBar",
+    "TabPanel",
+    "TabbedContainer",
+    "TabData",
+    "SearchInput",
+    "ProgressBar",
+    "ProgressVariant",
+    "Spinner",
+    "LoadingIndicator",
+    "SpinnerSize",
+    "SpinnerVariant",
+    "ContextMenu",
+    "ContextMenuItem",
+    "ContextMenuScreen",
+    "MenuItem",
+    "MenuSeparator",
+    "MenuGroup",
+    "TerminalPanel",
+    "TerminalSession",
+    "TerminalOutput",
+    "TerminalToolbar",
 ]
