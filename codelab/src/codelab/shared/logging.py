@@ -63,11 +63,13 @@ def setup_logging(
     json_format: bool = False,
     log_file: str | None = None,
     log_dir: Path | None = None,
+    console_output: bool = False,
 ) -> structlog.BoundLogger:
     """Настраивает структурированное логирование для CodeLab.
 
-    Логи выводятся только в файл (если указан), вывод в stdout/stderr отключен,
-    чтобы не мешать работе TUI и других интерфейсов.
+    По умолчанию логи выводятся только в файл (если указан), вывод в stdout/stderr
+    отключен, чтобы не мешать работе TUI. Для серверного режима (serve) можно
+    включить console_output для вывода логов в терминал.
 
     Args:
         level: Уровень логирования (DEBUG, INFO, WARNING, ERROR).
@@ -78,6 +80,8 @@ def setup_logging(
                   - абсолютный или относительный путь
         log_dir: Кастомная директория для логов (опционально).
                  Используется вместо ~/.codelab/logs/ если указана.
+        console_output: Выводить логи в консоль (stdout). По умолчанию False.
+                        Включите для режима serve, где TUI не используется.
 
     Returns:
         Настроенный структурированный logger.
@@ -94,10 +98,11 @@ def setup_logging(
             log_file="default"
         )
 
-        # С кастомной директорией
+        # Серверный режим с выводом в консоль и файл
         logger = setup_logging(
-            level="DEBUG",
-            log_dir=Path("/var/log/codelab")
+            level="INFO",
+            log_file="default",
+            console_output=True
         )
     """
     # Настройка уровня логирования
@@ -115,9 +120,13 @@ def setup_logging(
             file_path = Path(log_file)
             file_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Настройка стандартного logging только для файлового вывода
-    # StreamHandler удалён — логи выводятся только в файл, не в stdout
+    # Настройка обработчиков логирования
     handlers: list[logging.Handler] = []
+
+    # Добавляем консольный обработчик для режима serve (где нет TUI)
+    if console_output:
+        stream_handler = logging.StreamHandler()
+        handlers.append(stream_handler)
 
     # Добавляем файловый обработчик, если указан путь
     if file_path:

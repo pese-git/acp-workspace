@@ -113,11 +113,12 @@ def ensure_home_directory() -> None:
         print("💡 Отредактируйте его и добавьте CODELAB_LLM_API_KEY для работы с LLM.")
 
 
-def _configure_logging(verbose: bool = False) -> None:
+def _configure_logging(verbose: bool = False, console_output: bool = False) -> None:
     """Настраивает structlog для CLI с записью логов в файл.
 
     Args:
         verbose: Включить подробное логирование (DEBUG уровень)
+        console_output: Выводить логи в консоль (для режима serve)
     """
     # Импортируем setup_logging из shared модуля
     from codelab.shared.logging import setup_logging
@@ -128,10 +129,12 @@ def _configure_logging(verbose: bool = False) -> None:
 
     # Используем setup_logging из shared модуля с записью в файл
     # Логи сохраняются в ~/.codelab/logs/codelab.log с ротацией
+    # Для режима serve включаем вывод в консоль
     setup_logging(
         level=level,
         json_format=False,  # Человекочитаемый формат
         log_file="default",  # ~/.codelab/logs/codelab.log
+        console_output=console_output,  # Вывод в консоль для serve режима
     )
 
 
@@ -230,7 +233,12 @@ def main() -> None:
     ensure_home_directory()
 
     # Настраиваем логирование
-    _configure_logging(verbose=getattr(args, "verbose", False))
+    # Для режима serve включаем вывод в консоль (TUI не используется)
+    is_serve_mode = args.command == "serve"
+    _configure_logging(
+        verbose=getattr(args, "verbose", False),
+        console_output=is_serve_mode,
+    )
 
     try:
         if args.command == "serve":
