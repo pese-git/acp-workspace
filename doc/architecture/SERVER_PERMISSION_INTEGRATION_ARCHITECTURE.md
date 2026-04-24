@@ -1,4 +1,4 @@
-# Архитектура интеграции Permissions на acp-server
+# Архитектура интеграции Permissions сервера
 
 **Версия**: 1.0  
 **Дата**: 2026-04-17  
@@ -12,9 +12,9 @@
 ### 1.1 Проблема
 
 Сервер ACP имеет полностью реализованную систему управления разрешениями:
-- [`PermissionManager`](../../acp-server/src/acp_server/protocol/handlers/permission_manager.py) готов создавать `session/request_permission` запросы
-- [`GlobalPolicyManager`](../../acp-server/src/acp_server/protocol/handlers/global_policy_manager.py) готов проверять глобальные политики
-- [`SessionState`](../../acp-server/src/acp_server/protocol/state.py) хранит все необходимые поля
+- [`PermissionManager`](../../codelab/src/codelab/server/protocol/handlers/permission_manager.py) готов создавать `session/request_permission` запросы
+- [`GlobalPolicyManager`](../../codelab/src/codelab/server/protocol/handlers/global_policy_manager.py) готов проверять глобальные политики
+- [`SessionState`](../../codelab/src/codelab/server/protocol/state.py) хранит все необходимые поля
 
 **Однако:**
 - Отправка `session/request_permission` происходит **ручно** в обработчиках tool calls
@@ -49,7 +49,7 @@
 **Не входит:**
 - Изменение протокола ACP (используется как есть)
 - Реализация кода (только архитектура и примеры)
-- UI компоненты клиента (уже готовы в acp-client)
+- UI компоненты клиента (уже готовы в codelab.client)
 
 ---
 
@@ -57,7 +57,7 @@
 
 ### 2.1 PermissionManager
 
-**Файл**: [`acp-server/src/acp_server/protocol/handlers/permission_manager.py`](../../acp-server/src/acp_server/protocol/handlers/permission_manager.py)
+**Файл**: [`codelab/src/codelab/server/protocol/handlers/permission_manager.py`](../../codelab/src/codelab/server/protocol/handlers/permission_manager.py)
 
 **Ответственность**: Управление разрешениями и permission request flow.
 
@@ -120,7 +120,7 @@ find_session_by_permission_request_id(
 
 ### 2.2 GlobalPolicyManager
 
-**Файл**: [`acp-server/src/acp_server/protocol/handlers/global_policy_manager.py`](../../acp-server/src/acp_server/protocol/handlers/global_policy_manager.py)
+**Файл**: [`codelab/src/codelab/server/protocol/handlers/global_policy_manager.py`](../../codelab/src/codelab/server/protocol/handlers/global_policy_manager.py)
 
 **Ответственность**: Singleton для управления глобальными permission policies.
 
@@ -147,8 +147,8 @@ async def delete_global_policy(self, tool_kind: str) -> None
 
 **Использование в flow**: 
 - Fallback chain: `session policy` → `global policy` → `ask user`
-- Инициализируется в [`ACPProtocol.__init__()`](../../acp-server/src/acp_server/protocol/core.py)
-- Передается в [`PromptOrchestrator`](../../acp-server/src/acp_server/protocol/handlers/prompt_orchestrator.py)
+- Инициализируется в [`ACPProtocol.__init__()`](../../codelab/src/codelab/server/protocol/core.py)
+- Передается в [`PromptOrchestrator`](../../codelab/src/codelab/server/protocol/handlers/prompt_orchestrator.py)
 
 **Состояние**: ✅ Готов. Требует инъекции в компоненты для fallback chain.
 
@@ -156,7 +156,7 @@ async def delete_global_policy(self, tool_kind: str) -> None
 
 ### 2.3 SessionState
 
-**Файл**: [`acp-server/src/acp_server/protocol/state.py`](../../acp-server/src/acp_server/protocol/state.py)
+**Файл**: [`codelab/src/codelab/server/protocol/state.py`](../../codelab/src/codelab/server/protocol/state.py)
 
 **Ключевые поля для permissions**:
 
@@ -196,7 +196,7 @@ class ActiveTurnState:
 
 ### 2.4 ToolCallHandler
 
-**Файл**: [`acp-server/src/acp_server/protocol/handlers/tool_call_handler.py`](../../acp-server/src/acp_server/protocol/handlers/tool_call_handler.py)
+**Файл**: [`codelab/src/codelab/server/protocol/handlers/tool_call_handler.py`](../../codelab/src/codelab/server/protocol/handlers/tool_call_handler.py)
 
 **Ответственность**: Управление жизненным циклом tool calls.
 
@@ -237,7 +237,7 @@ build_tool_call_notification(...) -> ACPMessage
 
 ### 2.5 PromptOrchestrator
 
-**Файл**: [`acp-server/src/acp_server/protocol/handlers/prompt_orchestrator.py`](../../acp-server/src/acp_server/protocol/handlers/prompt_orchestrator.py)
+**Файл**: [`codelab/src/codelab/server/protocol/handlers/prompt_orchestrator.py`](../../codelab/src/codelab/server/protocol/handlers/prompt_orchestrator.py)
 
 **Ответственность**: Главный оркестратор обработки prompt-turn.
 
@@ -286,7 +286,7 @@ async def _process_tool_calls(
 
 ### 2.6 ACPProtocol (основной диспетчер)
 
-**Файл**: [`acp-server/src/acp_server/protocol/core.py`](../../acp-server/src/acp_server/protocol/core.py)
+**Файл**: [`codelab/src/codelab/server/protocol/core.py`](../../codelab/src/codelab/server/protocol/core.py)
 
 **Ответственность**: Диспетчер ACP-методов и управление сессиями.
 
@@ -456,8 +456,8 @@ if session.active_turn.permission_request_id:
 ```mermaid
 sequenceDiagram
     actor User
-    participant Client as acp-client
-    participant Server as acp-server
+    participant Client as codelab.client
+    participant Server as codelab.server
     participant Agent as LLM Agent
 
     User->>Client: session/prompt (инструкция)
@@ -570,7 +570,7 @@ graph TB
         TCP["TCP Handler"]
     end
     
-    subgraph Protocol["Protocol Layer (acp-server)"]
+    subgraph Protocol["Protocol Layer (codelab)"]
         Core["ACPProtocol<br/>(диспетчер)"]
         
         subgraph Handlers["Handlers"]
@@ -597,7 +597,7 @@ graph TB
     
     subgraph Client["Client Side"]
         CM["Client Connection"]
-        PH["PermissionHandler<br/>(acp-client)"]
+        PH["PermissionHandler<br/>(codelab)"]
         PM_UI["PermissionModal<br/>(UI)"]
     end
     
@@ -641,7 +641,7 @@ graph TB
 
 ### 5.1 PromptOrchestrator._process_tool_calls() - Decision Logic
 
-**Файл**: `acp-server/src/acp_server/protocol/handlers/prompt_orchestrator.py`
+**Файл**: `codelab/src/codelab/server/protocol/handlers/prompt_orchestrator.py`
 
 **Текущее состояние**: Метод существует, но decision logic не реализована
 
@@ -759,7 +759,7 @@ async def _decide_tool_execution(
 
 ### 5.2 ACPProtocol - Инъекция GlobalPolicyManager
 
-**Файл**: `acp-server/src/acp_server/protocol/core.py`
+**Файл**: `codelab/src/codelab/server/protocol/core.py`
 
 **Текущее состояние**: `_global_policy_manager` инициализируется как `None`
 
@@ -862,7 +862,7 @@ async def _handle_permission_response(
 
 ### 5.3 PromptOrchestrator - Добавить инъекцию GlobalPolicyManager
 
-**Файл**: `acp-server/src/acp_server/protocol/handlers/prompt_orchestrator.py`
+**Файл**: `codelab/src/codelab/server/protocol/handlers/prompt_orchestrator.py`
 
 **Изменение**:
 
@@ -1246,12 +1246,12 @@ async def set_global_policy(self, tool_kind: str, decision: str) -> None:
 
 ### 9.1 Unit Tests для PermissionManager
 
-**Файл**: `acp-server/tests/test_permission_manager.py`
+**Файл**: `codelab/tests/server/test_permission_manager.py`
 
 ```python
 import pytest
-from acp_server.protocol.handlers.permission_manager import PermissionManager
-from acp_server.protocol.state import SessionState
+from codelab.server.protocol.handlers.permission_manager import PermissionManager
+from codelab.server.protocol.state import SessionState
 
 class TestPermissionManager:
     """Unit tests для PermissionManager."""
@@ -1335,7 +1335,7 @@ class TestPermissionManager:
     # [TEST 5] build_permission_acceptance_updates()
     def test_build_permission_acceptance_allow_always(self):
         """Если выбрана 'allow_always' - сохранить policy."""
-        from acp_server.protocol.state import ToolCallState
+        from codelab.server.protocol.state import ToolCallState
         
         self.session.tool_calls["call_001"] = ToolCallState(
             tool_call_id="call_001",
@@ -1358,7 +1358,7 @@ class TestPermissionManager:
     
     def test_build_permission_acceptance_allow_once(self):
         """Если выбрана 'allow_once' - НЕ сохранять policy."""
-        from acp_server.protocol.state import ToolCallState
+        from codelab.server.protocol.state import ToolCallState
         
         self.session.tool_calls["call_001"] = ToolCallState(
             tool_call_id="call_001",
@@ -1381,7 +1381,7 @@ class TestPermissionManager:
     # [TEST 6] find_session_by_permission_request_id()
     def test_find_session_by_permission_request_id(self):
         """Найти сессию по permission request ID."""
-        from acp_server.protocol.state import ActiveTurnState
+        from codelab.server.protocol.state import ActiveTurnState
         
         perm_req_id = "perm_123"
         self.session.active_turn = ActiveTurnState(
@@ -1405,13 +1405,13 @@ class TestPermissionManager:
 
 ### 9.2 Integration Tests
 
-**Файл**: `acp-server/tests/test_permission_integration.py`
+**Файл**: `codelab/tests/server/test_permission_integration.py`
 
 ```python
 import pytest
-from acp_server.protocol.core import ACPProtocol
-from acp_server.messages import ACPMessage
-from acp_server.storage import InMemoryStorage
+from codelab.server.protocol.core import ACPProtocol
+from codelab.server.messages import ACPMessage
+from codelab.server.storage import InMemoryStorage
 
 class TestPermissionIntegration:
     """Integration tests для permission flow."""
@@ -1511,13 +1511,13 @@ class TestPermissionIntegration:
 **Приоритет**: ВЫСОКИЙ
 
 1. **[TASK 1] Инъекция GlobalPolicyManager**
-   - **Файл**: `acp-server/src/acp_server/protocol/core.py`
+   - **Файл**: `codelab/src/codelab/server/protocol/core.py`
    - **Изменение**: Добавить параметр `global_policy_manager` в `__init__()`
    - **Тесты**: Unit тесты на инъекцию
    - **Оценка**: Small
 
 2. **[TASK 2] Метод _decide_tool_execution() в PromptOrchestrator**
-   - **Файл**: `acp-server/src/acp_server/protocol/handlers/prompt_orchestrator.py`
+   - **Файл**: `codelab/src/codelab/server/protocol/handlers/prompt_orchestrator.py`
    - **Изменение**: Реализовать fallback chain (session → global → ask)
    - **Тесты**: Unit тесты на decision logic
    - **Оценка**: Small
@@ -1527,13 +1527,13 @@ class TestPermissionIntegration:
 **Приоритет**: ВЫСОКИЙ
 
 3. **[TASK 3] Decision Logic в _process_tool_calls()**
-   - **Файл**: `acp-server/src/acp_server/protocol/handlers/prompt_orchestrator.py`
+   - **Файл**: `codelab/src/codelab/server/protocol/handlers/prompt_orchestrator.py`
    - **Изменение**: Вызывать `_decide_tool_execution()` для каждого tool call
    - **Тесты**: Integration тесты на tool call handling
    - **Оценка**: Medium
 
 4. **[TASK 4] Обработчик session/request_permission_response**
-   - **Файл**: `acp-server/src/acp_server/protocol/core.py`
+   - **Файл**: `codelab/src/codelab/server/protocol/core.py`
    - **Изменение**: Добавить `_handle_permission_response()` метод
    - **Тесты**: Integration тесты на response handling
    - **Оценка**: Medium
@@ -1543,20 +1543,20 @@ class TestPermissionIntegration:
 **Приоритет**: СРЕДНИЙ
 
 5. **[TASK 5] Timeout Handling (опциональный)**
-   - **Файл**: `acp-server/src/acp_server/protocol/handlers/prompt_orchestrator.py`
+   - **Файл**: `codelab/src/codelab/server/protocol/handlers/prompt_orchestrator.py`
    - **Изменение**: Добавить `_wait_for_permission_response()` с опциональным timeout
    - **Тесты**: Unit тесты на ожидание ответа (без timeout)
    - **Оценка**: Small
    - **Примечание**: Реализовать базовый вариант без timeout (соответствие протоколу), timeout может быть добавлен позже как конфигурируемый параметр
 
 6. **[TASK 6] Cancellation Handling (session/cancel)**
-   - **Файл**: `acp-server/src/acp_server/protocol/core.py`
+   - **Файл**: `codelab/src/codelab/server/protocol/core.py`
    - **Изменение**: Обновить `_handle_session_cancel()` для permission requests
    - **Тесты**: Integration тесты на cancellation
    - **Оценка**: Small
 
 7. **[TASK 7] Late Response Handling**
-   - **Файл**: `acp-server/src/acp_server/protocol/core.py`
+   - **Файл**: `codelab/src/codelab/server/protocol/core.py`
    - **Изменение**: Использовать `cancelled_permission_requests` tombstone
    - **Тесты**: Unit тесты на tombstone logic
    - **Оценка**: Small
@@ -1566,7 +1566,7 @@ class TestPermissionIntegration:
 **Приоритет**: СРЕДНИЙ
 
 8. **[TASK 8] Comprehensive Test Suite**
-   - **Файлы**: `acp-server/tests/test_permission_*.py`
+   - **Файлы**: `codelab/tests/server/test_permission_*.py`
    - **Охват**: Unit + integration тесты для всех сценариев
    - **Оценка**: Large
 

@@ -27,8 +27,8 @@
 
 **КРИТИЧЕСКИ ВАЖНО:** fs/* и terminal/* методы вызываются **агентом на клиенте**, а не клиентом на агенте.
 
-- **Инициатор:** Agent (acp-server)
-- **Исполнитель:** Client (acp-client)
+- **Инициатор:** Agent (codelab)
+- **Исполнитель:** Client (codelab)
 - **Транспорт:** Bidirectional JSON-RPC
 - **Место выполнения:** Client Environment (локальная машина пользователя)
 
@@ -65,13 +65,13 @@
 ### Поток управления
 
 ```
-Agent (acp-server)
+Agent (codelab)
     ↓
     └─→ ClientRPCService
             ↓
             └─→ Bidirectional JSON-RPC Transport
                     ↓
-                    └─→ Client (acp-client)
+                    └─→ Client (codelab)
                             ↓
                             └─→ Handler Registry
                                     ↓
@@ -569,13 +569,13 @@ Agent (acp-server)
 4. **Security First** — защита на каждом слое (validation, permission, path traversal)
 5. **Error Handling** — структурированная обработка ошибок с JSON-RPC error codes
 
-### Сторона агента (acp-server)
+### Сторона агента (codelab)
 
 #### ClientRPCService
 
 **Назначение:** Инициирование RPC вызовов на клиенте для доступа к локальной среде.
 
-**Местоположение:** `acp-server/src/acp_server/client_rpc/service.py` (будет создано)
+**Местоположение:** `codelab/src/codelab/server/client_rpc/service.py` (будет создано)
 
 **Ответственность:**
 - Инициирование RPC запросов (fs/* и terminal/* методы)
@@ -631,12 +631,12 @@ def check_capability(
     # Вернуть True/False
 ```
 
-### Сторона клиента (acp-client)
+### Сторона клиента (codelab)
 
 #### Общая архитектура
 
 ```
-acp-client/src/acp_client/infrastructure/
+codelab/src/codelab/client/infrastructure/
 ├── handler_registry.py  (расширить для RPC handlers)
 ├── transport.py         (bidirectional support)
 ├── services/
@@ -648,7 +648,7 @@ acp-client/src/acp_client/infrastructure/
     ├── file_system_handler.py
     └── terminal_handler.py
 
-acp-client/src/acp_client/infrastructure/executors/ (новая директория)
+codelab/src/codelab/client/infrastructure/executors/ (новая директория)
 ├── __init__.py
 ├── file_system_executor.py
 └── terminal_executor.py
@@ -658,7 +658,7 @@ acp-client/src/acp_client/infrastructure/executors/ (новая директор
 
 **Назначение:** Обработка входящих fs/* запросов от агента.
 
-**Местоположение:** `acp-client/src/acp_client/infrastructure/handlers/file_system_handler.py`
+**Местоположение:** `codelab/src/codelab/client/infrastructure/handlers/file_system_handler.py`
 
 **Ответственность:**
 - Обработка `fs/read_text_file` requests
@@ -707,7 +707,7 @@ class FileSystemHandler:
 
 **Назначение:** Выполнение файловых операций на локальной файловой системе.
 
-**Местоположение:** `acp-client/src/acp_client/infrastructure/executors/file_system_executor.py`
+**Местоположение:** `codelab/src/codelab/client/infrastructure/executors/file_system_executor.py`
 
 **Ответственность:**
 - Чтение файлов (с поддержкой line/limit)
@@ -747,7 +747,7 @@ class FileSystemExecutor:
 
 **Назначение:** Обработка входящих terminal/* запросов от агента.
 
-**Местоположение:** `acp-client/src/acp_client/infrastructure/handlers/terminal_handler.py`
+**Местоположение:** `codelab/src/codelab/client/infrastructure/handlers/terminal_handler.py`
 
 **Ответственность:**
 - Обработка `terminal/create` requests
@@ -800,7 +800,7 @@ class TerminalHandler:
 
 **Назначение:** Выполнение и управление shell процессами.
 
-**Местоположение:** `acp-client/src/acp_client/infrastructure/executors/terminal_executor.py`
+**Местоположение:** `codelab/src/codelab/client/infrastructure/executors/terminal_executor.py`
 
 **Ответственность:**
 - Запуск shell процессов (subprocess.Popen)
@@ -894,7 +894,7 @@ Server                          Transport                       Client
 
 ### Механизм маршрутизации
 
-#### На стороне сервера (acp-server)
+#### На стороне сервера (codelab)
 
 ```python
 class ClientRPCHandler:
@@ -946,7 +946,7 @@ class ClientRPCHandler:
                 future.set_exception(RpcError(message["error"]))
 ```
 
-#### На стороне клиента (acp-client)
+#### На стороне клиента (codelab)
 
 ```python
 class HandlerRegistry:
@@ -1382,7 +1382,7 @@ async def execute_build_tool(
 
 ```mermaid
 graph TB
-    subgraph Agent["Agent (acp-server)"]
+    subgraph Agent["Agent (codelab)"]
         ACPProtocol["ACPProtocol<br/>(core.py)"]
         ToolHandler["ToolCallHandler<br/>(tool_call_handler.py)"]
         ClientRPCService["ClientRPCService<br/>(client_rpc/service.py)"]
@@ -1393,7 +1393,7 @@ graph TB
         WebSocket["WebSocket<br/>(JSON-RPC)"]
     end
     
-    subgraph Client["Client (acp-client)"]
+    subgraph Client["Client (codelab)"]
         MessageRouter["MessageRouter<br/>(message_router.py)"]
         HandlerReg["HandlerRegistry<br/>(handler_registry.py)"]
         FSHandler["FileSystemHandler<br/>(handlers/file_system_handler.py)"]
@@ -1444,7 +1444,7 @@ graph TB
 
 ```mermaid
 sequenceDiagram
-    participant Agent as Agent<br/>(acp-server)
+    participant Agent as Agent<br/>(codelab)
     participant RPC as ClientRPCService
     participant Transport as WebSocket<br/>(JSON-RPC)
     participant Router as MessageRouter
@@ -1509,7 +1509,7 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    participant Agent as Agent<br/>(acp-server)
+    participant Agent as Agent<br/>(codelab)
     participant RPC as ClientRPCService
     participant Transport as WebSocket
     participant Router as MessageRouter
@@ -1570,7 +1570,7 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    participant Agent as Agent<br/>(acp-server)
+    participant Agent as Agent<br/>(codelab)
     participant RPC as ClientRPCService
     participant Transport as WebSocket
     participant Handler as FileSystemHandler
@@ -1791,7 +1791,7 @@ classDiagram
 **Цель:** Создать базовую инфраструктуру для отправки RPC запросов на клиент.
 
 **Задачи:**
-1. Создать `acp-server/src/acp_server/client_rpc/` директорию
+1. Создать `codelab/src/codelab/server/client_rpc/` директорию
 2. Реализовать `ClientRPCService` с поддержкой:
    - Формирования JSON-RPC requests
    - Отправки через transport
@@ -1802,11 +1802,11 @@ classDiagram
 5. Добавить unit tests для ClientRPCService
 
 **Файлы:**
-- `acp-server/src/acp_server/client_rpc/__init__.py`
-- `acp-server/src/acp_server/client_rpc/service.py`
-- `acp-server/src/acp_server/client_rpc/models.py`
-- `acp-server/src/acp_server/client_rpc/exceptions.py`
-- `acp-server/tests/test_client_rpc_service.py`
+- `codelab/src/codelab/server/client_rpc/__init__.py`
+- `codelab/src/codelab/server/client_rpc/service.py`
+- `codelab/src/codelab/server/client_rpc/models.py`
+- `codelab/src/codelab/server/client_rpc/exceptions.py`
+- `codelab/tests/server/test_client_rpc_service.py`
 
 ### Фаза 2: Подготовка инфраструктуры (Client-side handler support)
 
@@ -1821,10 +1821,10 @@ classDiagram
 6. Добавить unit tests для MessageRouter и HandlerRegistry
 
 **Файлы:**
-- Расширение `acp-client/src/acp_client/infrastructure/handler_registry.py`
-- Расширение `acp-client/src/acp_client/infrastructure/services/message_router.py`
-- `acp-client/tests/test_message_router_inbound.py`
-- `acp-client/tests/test_handler_registry_rpc.py`
+- Расширение `codelab/src/codelab/client/infrastructure/handler_registry.py`
+- Расширение `codelab/src/codelab/client/infrastructure/services/message_router.py`
+- `codelab/tests/client/test_message_router_inbound.py`
+- `codelab/tests/client/test_handler_registry_rpc.py`
 
 ### Фаза 3: File System методы (реализация)
 
@@ -1832,7 +1832,7 @@ classDiagram
 
 **Задачи:**
 
-**На стороне acp-server:**
+**На стороне сервера:**
 1. Добавить методы в `ClientRPCService`:
    - `read_text_file(sessionId, path, line, limit)`
    - `write_text_file(sessionId, path, content)`
@@ -1840,7 +1840,7 @@ classDiagram
 3. Обработка responses/errors
 4. Unit tests
 
-**На стороне acp-client:**
+**На стороне клиента:**
 1. Создать `FileSystemHandler` в `infrastructure/handlers/`
 2. Создать `FileSystemExecutor` в `infrastructure/executors/`
 3. Реализовать методы:
@@ -1851,13 +1851,13 @@ classDiagram
 6. Unit tests + integration tests
 
 **Файлы:**
-- `acp-server/src/acp_server/client_rpc/service.py` (fs methods)
-- `acp-client/src/acp_client/infrastructure/handlers/file_system_handler.py`
-- `acp-client/src/acp_client/infrastructure/executors/file_system_executor.py`
-- `acp-client/src/acp_client/infrastructure/security/path_validator.py`
-- `acp-server/tests/test_client_rpc_fs_methods.py`
-- `acp-client/tests/test_file_system_handler.py`
-- `acp-client/tests/test_file_system_executor.py`
+- `codelab/src/codelab/server/client_rpc/service.py` (fs methods)
+- `codelab/src/codelab/client/infrastructure/handlers/file_system_handler.py`
+- `codelab/src/codelab/client/infrastructure/executors/file_system_executor.py`
+- `codelab/src/codelab/client/infrastructure/security/path_validator.py`
+- `codelab/tests/server/test_client_rpc_fs_methods.py`
+- `codelab/tests/client/test_file_system_handler.py`
+- `codelab/tests/client/test_file_system_executor.py`
 
 ### Фаза 4: Terminal методы (реализация)
 
@@ -1865,7 +1865,7 @@ classDiagram
 
 **Задачи:**
 
-**На стороне acp-server:**
+**На стороне сервера:**
 1. Добавить методы в `ClientRPCService`:
    - `create_terminal(sessionId, command, args, env, cwd, outputByteLimit)`
    - `get_terminal_output(sessionId, terminalId)`
@@ -1875,7 +1875,7 @@ classDiagram
 2. Проверка `clientCapabilities.terminal`
 3. Unit tests
 
-**На стороне acp-client:**
+**На стороне клиента:**
 1. Создать `TerminalHandler` в `infrastructure/handlers/`
 2. Создать `TerminalExecutor` в `infrastructure/executors/`
 3. Создать `TerminalState` dataclass
@@ -1891,20 +1891,20 @@ classDiagram
 8. Unit + integration tests
 
 **Файлы:**
-- `acp-server/src/acp_server/client_rpc/service.py` (terminal methods)
-- `acp-client/src/acp_client/infrastructure/handlers/terminal_handler.py`
-- `acp-client/src/acp_client/infrastructure/executors/terminal_executor.py`
-- `acp-client/src/acp_client/infrastructure/executors/terminal_state.py`
-- `acp-server/tests/test_client_rpc_terminal_methods.py`
-- `acp-client/tests/test_terminal_handler.py`
-- `acp-client/tests/test_terminal_executor.py`
+- `codelab/src/codelab/server/client_rpc/service.py` (terminal methods)
+- `codelab/src/codelab/client/infrastructure/handlers/terminal_handler.py`
+- `codelab/src/codelab/client/infrastructure/executors/terminal_executor.py`
+- `codelab/src/codelab/client/infrastructure/executors/terminal_state.py`
+- `codelab/tests/server/test_client_rpc_terminal_methods.py`
+- `codelab/tests/client/test_terminal_handler.py`
+- `codelab/tests/client/test_terminal_executor.py`
 
 ### Фаза 5: Permission Management
 
 **Цель:** Интегрировать систему разрешений для write и terminal методов.
 
 **Задачи:**
-1. Расширить `PermissionManager` в acp-client для поддержки:
+1. Расширить `PermissionManager` в codelab.client для поддержки:
    - `file_write` разрешения
    - `terminal_execute` разрешения
 2. Реализовать запрос разрешения через `session/request_permission`
@@ -1913,8 +1913,8 @@ classDiagram
 5. Unit + integration tests
 
 **Файлы:**
-- Расширение `acp-client/src/acp_client/infrastructure/handlers/permission_manager.py`
-- `acp-client/tests/test_permission_requests.py`
+- Расширение `codelab/src/codelab/client/infrastructure/handlers/permission_manager.py`
+- `codelab/tests/client/test_permission_requests.py`
 
 ### Фаза 6: Integration Tests & Documentation
 
@@ -1933,11 +1933,11 @@ classDiagram
 5. Обновить ARCHITECTURE.md на уровне проекта
 
 **Файлы:**
-- `acp-server/tests/test_client_rpc_integration.py`
-- `acp-client/tests/test_client_rpc_integration.py`
+- `codelab/tests/server/test_client_rpc_integration.py`
+- `codelab/tests/client/test_client_rpc_integration.py`
 - `README.md` обновления
-- `acp-server/README.md` обновления
-- `acp-client/README.md` обновления
+- `codelab/README.md` обновления
+- `codelab/README.md` обновления
 
 ---
 

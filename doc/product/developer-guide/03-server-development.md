@@ -1,0 +1,690 @@
+# Разработка сервера
+
+> Руководство по разработке ACP сервера CodeLab.
+
+## Обзор
+
+Сервер CodeLab реализует ACP протокол и содержит LLM агента для обработки запросов пользователей.
+
+## Структура сервера
+
+```
+server/
+├── cli.py                # CLI команды сервера
+├── config.py             # Конфигурация
+├── http_server.py        # WebSocket транспорт
+├── messages.py           # JSON-RPC сообщения
+├── protocol/             # ACP протокол
+│   ├── __init__.py
+│   ├── core.py           # ACPProtocol
+│   ├── state.py          # Состояния
+│   ├── session_factory.py
+│   └── handlers/         # Обработчики методов
+├── agent/                # LLM агенты
+│   ├── base.py
+│   ├── naive.py
+│   ├── orchestrator.py
+│   └── state.py
+├── tools/                # Инструменты
+│   ├── base.py
+│   ├── registry.py
+│   ├── definitions/
+│   └── executors/
+├── storage/              # Хранилище
+│   ├── base.py
+│   ├── memory.py
+│   └── json_file.py
+├── llm/                  # LLM провайдеры
+│   ├── base.py
+│   ├── openai_provider.py
+│   └── mock_provider.py
+├── client_rpc/           # RPC к клиенту
+│   ├── service.py
+│   ├── models.py
+│   └── exceptions.py
+└── mcp/                  # MCP интеграция
+    ├── client.py
+    └── models.py
+```
+
+## HTTP Server
+
+### ACPHttpServer
+
+```python
+from aiohttp import web, WSMsgType
+
+class ACPHttpServer:
+    """WebSocket транспорт ACP-сервера."""
+    
+    def __init__(
+        self,
+        host: str = "127.0.0.1",
+        port: int = 8080,
+        storage: SessionStorage | None = None,
+        config: AppConfig | None = None,
+    ) -> None:
+        self.host = host
+        self.port = port
+        self.storage = storage or InMemoryStorage()
+        self.config = config or AppConfig()
+        
+        # Создание aiohttp app
+        self._app = web.Application()
+        self._setup_routes()
+    
+    def _setup_routes(self) -> None:
+        """Настройка маршрутов."""
+        self._app.router.add_get("/acp/ws", self._handle_websocket)
+        self._app.router.add_get("/health", self._handle_health)
+    
+    async def _handle_websocket(self, request: web.Request) -> web.WebSocketResponse:
+        """Обработка WebSocket соединения."""
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        
+        # Создание протокола для соединения
+        protocol = ACPProtocol(
+            storage=self.storage,
+            config=self.config,
+            send_callback=ws.send_json,
+        )
+        
+        async for msg in ws:
+            if msg.type == WSMsgType.TEXT:
+                data = msg.json()
+                outcome = await protocol.handle(ACPMessage.from_dict(data))
+                await self._send_outcome(ws, outcome)
+            elif msg.type == WSMsgType.ERROR:
+                logger.error("WebSocket error", error=ws.exception())
+        
+        return ws
+    
+    async def run(self) -> None:
+        """Запуск сервера."""
+        runner = web.AppRunner(self._app)
+        await runner.setup()
+        site = web.TCPSite(runner, self.host, self.port)
+        await site.start()
+```
+
+## Protocol Layer
+
+### ACPProtocol
+
+```python
+class ACPProtocol:
+    """Главный класс протокола ACP."""
+    
+    def __init__(
+        self,
+        storage: SessionStorage,
+        config: AppConfig,
+        send_callback: Callable[[dict], Awaitable[None]],
+    ) -> None:
+        self._storage = storage
+        self._config = config
+        self._send = send_callback
+        
+        # Инициализация handlers
+        self._handlers = self._create_handlers()
+    
+    def _create_handlers(self) -> dict[str, Handler]:
+        """Создание обработчиков методов."""
+        return {
+            "initialize": AuthHandler(self._storage, self._config),
+            "session/new": SessionHandler(self._storage),
+            "session/load": SessionHandler(self._storage),
+            "session/list": SessionHandler(self._storage),
+            "session/prompt": PromptHandler(self._storage, self._agent),
+            "session/cancel": PromptHandler(self._storage, self._agent),
+            "session/request_permission": PermissionHandler(self._storage),
+            # ...
+        }
+    
+    async def handle(self, message: ACPMessage) -> ProtocolOutcome:
+        """Диспетчеризация JSON-RPC запроса."""
+        method = message.method
+        
+        if method not in self._handlers:
+            return ProtocolOutcome.error(
+                JsonRpcError.method_not_found(method)
+            )
+        
+        handler = self._handlers[method]
+        return await handler.handle(message)
+```
+
+### Protocol Outcome
+
+```python
+@dataclass
+class ProtocolOutcome:
+    """Результат обработки запроса."""
+    
+    response: dict | None = None
+    notifications: list[dict] = field(default_factory=list)
+    error: JsonRpcError | None = None
+    
+    @classmethod
+    def success(cls, result: dict) -> "ProtocolOutcome":
+        return cls(response=result)
+    
+    @classmethod
+    def error(cls, error: JsonRpcError) -> "ProtocolOutcome":
+        return cls(error=error)
+    
+    @classmethod
+    def with_notifications(
+        cls, 
+        result: dict, 
+        notifications: list[dict]
+    ) -> "ProtocolOutcome":
+        return cls(response=result, notifications=notifications)
+```
+
+## Protocol Handlers
+
+### Структура Handler
+
+```python
+from abc import ABC, abstractmethod
+
+class Handler(ABC):
+    """Базовый класс обработчика."""
+    
+    @abstractmethod
+    async def handle(self, message: ACPMessage) -> ProtocolOutcome:
+        """Обработка сообщения."""
+        ...
+
+class SessionHandler(Handler):
+    """Обработчик session/* методов."""
+    
+    def __init__(self, storage: SessionStorage) -> None:
+        self._storage = storage
+    
+    async def handle(self, message: ACPMessage) -> ProtocolOutcome:
+        method = message.method
+        
+        if method == "session/new":
+            return await self._handle_new(message)
+        elif method == "session/load":
+            return await self._handle_load(message)
+        elif method == "session/list":
+            return await self._handle_list(message)
+        
+        return ProtocolOutcome.error(
+            JsonRpcError.method_not_found(method)
+        )
+    
+    async def _handle_new(self, message: ACPMessage) -> ProtocolOutcome:
+        """Создание новой сессии."""
+        params = message.params or {}
+        
+        session = SessionState(
+            id=str(uuid.uuid4()),
+            title=params.get("title"),
+            created_at=datetime.utcnow(),
+        )
+        
+        await self._storage.save(session)
+        
+        return ProtocolOutcome.success({
+            "session_id": session.id,
+            "title": session.title,
+        })
+```
+
+### Создание нового Handler
+
+```python
+# server/protocol/handlers/my_handler.py
+
+class MyCustomHandler(Handler):
+    """Обработчик кастомных методов."""
+    
+    def __init__(
+        self,
+        storage: SessionStorage,
+        service: MyService,
+    ) -> None:
+        self._storage = storage
+        self._service = service
+    
+    async def handle(self, message: ACPMessage) -> ProtocolOutcome:
+        params = message.params or {}
+        
+        # Валидация
+        if "required_field" not in params:
+            return ProtocolOutcome.error(
+                JsonRpcError.invalid_params("required_field is required")
+            )
+        
+        # Бизнес-логика
+        result = await self._service.process(params)
+        
+        # Возврат результата
+        return ProtocolOutcome.success({"data": result})
+```
+
+## Agent Layer
+
+### Agent Orchestrator
+
+```python
+class AgentOrchestrator:
+    """Оркестратор LLM агента."""
+    
+    def __init__(
+        self,
+        agent: BaseAgent,
+        tool_registry: ToolRegistry,
+        client_rpc: ClientRPCService,
+    ) -> None:
+        self._agent = agent
+        self._tools = tool_registry
+        self._rpc = client_rpc
+    
+    async def process_prompt(
+        self,
+        session: SessionState,
+        prompt: str,
+    ) -> AsyncIterator[SessionUpdate]:
+        """Обработка промпта с потоковыми обновлениями."""
+        
+        # Подготовка контекста
+        context = self._prepare_context(session, prompt)
+        
+        # Запуск агента
+        async for event in self._agent.run(context):
+            if isinstance(event, TextChunk):
+                yield SessionUpdate.text_chunk(event.text)
+            
+            elif isinstance(event, ToolCall):
+                # Выполнение tool call
+                result = await self._execute_tool(session, event)
+                yield SessionUpdate.tool_result(event.id, result)
+            
+            elif isinstance(event, PlanUpdate):
+                yield SessionUpdate.plan_update(event.plan)
+```
+
+### BaseAgent
+
+```python
+class BaseAgent(ABC):
+    """Базовый класс агента."""
+    
+    @abstractmethod
+    async def run(
+        self,
+        context: AgentContext,
+    ) -> AsyncIterator[AgentEvent]:
+        """Запуск агента с потоковым выводом."""
+        ...
+
+class NaiveAgent(BaseAgent):
+    """Простая реализация агента."""
+    
+    def __init__(self, llm: LLMProvider) -> None:
+        self._llm = llm
+    
+    async def run(
+        self,
+        context: AgentContext,
+    ) -> AsyncIterator[AgentEvent]:
+        """Запуск с простым циклом."""
+        
+        messages = self._build_messages(context)
+        
+        async for chunk in self._llm.stream(messages):
+            if chunk.text:
+                yield TextChunk(chunk.text)
+            
+            if chunk.tool_calls:
+                for tool_call in chunk.tool_calls:
+                    yield ToolCall(
+                        id=tool_call.id,
+                        name=tool_call.name,
+                        arguments=tool_call.arguments,
+                    )
+```
+
+## LLM Providers
+
+### LLMProvider Interface
+
+```python
+class LLMProvider(ABC):
+    """Абстрактный LLM провайдер."""
+    
+    @abstractmethod
+    async def generate(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+    ) -> LLMResponse:
+        """Генерация ответа."""
+        ...
+    
+    @abstractmethod
+    async def stream(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+    ) -> AsyncIterator[LLMChunk]:
+        """Потоковая генерация."""
+        ...
+```
+
+### OpenAI Provider
+
+```python
+class OpenAIProvider(LLMProvider):
+    """OpenAI LLM провайдер."""
+    
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "gpt-4o",
+        base_url: str | None = None,
+    ) -> None:
+        self._client = AsyncOpenAI(
+            api_key=api_key,
+            base_url=base_url,
+        )
+        self._model = model
+    
+    async def stream(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+    ) -> AsyncIterator[LLMChunk]:
+        """Потоковая генерация через OpenAI API."""
+        
+        response = await self._client.chat.completions.create(
+            model=self._model,
+            messages=messages,
+            tools=tools,
+            stream=True,
+        )
+        
+        async for chunk in response:
+            delta = chunk.choices[0].delta
+            yield LLMChunk(
+                text=delta.content,
+                tool_calls=self._parse_tool_calls(delta.tool_calls),
+            )
+```
+
+### Добавление нового провайдера
+
+```python
+# server/llm/anthropic_provider.py
+
+class AnthropicProvider(LLMProvider):
+    """Anthropic Claude провайдер."""
+    
+    def __init__(self, api_key: str, model: str = "claude-3-opus-20240229"):
+        self._client = AsyncAnthropic(api_key=api_key)
+        self._model = model
+    
+    async def stream(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+    ) -> AsyncIterator[LLMChunk]:
+        # Конвертация формата сообщений
+        anthropic_messages = self._convert_messages(messages)
+        
+        async with self._client.messages.stream(
+            model=self._model,
+            messages=anthropic_messages,
+            tools=self._convert_tools(tools),
+        ) as stream:
+            async for event in stream:
+                yield self._convert_event(event)
+```
+
+## Tool System
+
+### ToolDefinition
+
+```python
+@dataclass
+class ToolDefinition:
+    """Определение инструмента."""
+    
+    name: str
+    description: str
+    parameters: dict  # JSON Schema
+    kind: Literal["read", "write", "execute"]
+    requires_permission: bool = True
+```
+
+### Tool Registry
+
+```python
+class ToolRegistry:
+    """Реестр инструментов."""
+    
+    def __init__(self) -> None:
+        self._tools: dict[str, ToolDefinition] = {}
+        self._executors: dict[str, ToolExecutor] = {}
+    
+    def register(
+        self,
+        definition: ToolDefinition,
+        executor: ToolExecutor,
+    ) -> None:
+        """Регистрация инструмента."""
+        self._tools[definition.name] = definition
+        self._executors[definition.name] = executor
+    
+    def get_definitions(self) -> list[dict]:
+        """Получение определений для LLM."""
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.parameters,
+                }
+            }
+            for tool in self._tools.values()
+        ]
+    
+    async def execute(
+        self,
+        name: str,
+        arguments: dict,
+        context: ExecutionContext,
+    ) -> ToolResult:
+        """Выполнение инструмента."""
+        executor = self._executors.get(name)
+        if not executor:
+            raise ToolNotFoundError(name)
+        
+        return await executor.execute(arguments, context)
+```
+
+### Создание нового инструмента
+
+```python
+# server/tools/definitions/my_tool.py
+
+class MyToolDefinition:
+    """Определения моих инструментов."""
+    
+    @staticmethod
+    def search_code() -> ToolDefinition:
+        return ToolDefinition(
+            name="search_code",
+            description="Search for code patterns in the project",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "Search pattern (regex)",
+                    },
+                    "file_types": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "File extensions to search",
+                    },
+                },
+                "required": ["pattern"],
+            },
+            kind="read",
+            requires_permission=True,
+        )
+
+# server/tools/executors/my_tool_executor.py
+
+class MyToolExecutor(ToolExecutor):
+    """Исполнитель моего инструмента."""
+    
+    async def execute(
+        self,
+        arguments: dict,
+        context: ExecutionContext,
+    ) -> ToolResult:
+        pattern = arguments["pattern"]
+        file_types = arguments.get("file_types", ["*"])
+        
+        # Выполнение через Client RPC
+        result = await context.client_rpc.call(
+            "code/search",
+            {"pattern": pattern, "file_types": file_types},
+        )
+        
+        return ToolResult(
+            success=True,
+            content=result,
+        )
+```
+
+## Storage Layer
+
+### SessionStorage Interface
+
+```python
+class SessionStorage(ABC):
+    """Абстрактное хранилище сессий."""
+    
+    @abstractmethod
+    async def save(self, session: SessionState) -> None:
+        """Сохранение сессии."""
+        ...
+    
+    @abstractmethod
+    async def load(self, session_id: str) -> SessionState | None:
+        """Загрузка сессии."""
+        ...
+    
+    @abstractmethod
+    async def delete(self, session_id: str) -> bool:
+        """Удаление сессии."""
+        ...
+    
+    @abstractmethod
+    async def list_all(self) -> list[SessionSummary]:
+        """Список всех сессий."""
+        ...
+```
+
+### JSON File Storage
+
+```python
+class JsonFileStorage(SessionStorage):
+    """Хранение сессий в JSON файлах."""
+    
+    def __init__(self, directory: Path) -> None:
+        self._directory = directory
+        self._directory.mkdir(parents=True, exist_ok=True)
+    
+    async def save(self, session: SessionState) -> None:
+        path = self._get_path(session.id)
+        data = session.to_dict()
+        
+        async with aiofiles.open(path, "w") as f:
+            await f.write(json.dumps(data, indent=2))
+    
+    async def load(self, session_id: str) -> SessionState | None:
+        path = self._get_path(session_id)
+        
+        if not path.exists():
+            return None
+        
+        async with aiofiles.open(path) as f:
+            data = json.loads(await f.read())
+        
+        return SessionState.from_dict(data)
+    
+    def _get_path(self, session_id: str) -> Path:
+        return self._directory / f"{session_id}.json"
+```
+
+## Тестирование
+
+### Unit тесты Handler
+
+```python
+class TestSessionHandler:
+    @pytest.fixture
+    def storage(self) -> Mock:
+        return AsyncMock(spec=SessionStorage)
+    
+    @pytest.fixture
+    def handler(self, storage) -> SessionHandler:
+        return SessionHandler(storage)
+    
+    async def test_new_session(self, handler, storage):
+        """Тест создания сессии."""
+        message = ACPMessage(
+            method="session/new",
+            params={"title": "Test"},
+        )
+        
+        outcome = await handler.handle(message)
+        
+        assert outcome.error is None
+        assert "session_id" in outcome.response
+        storage.save.assert_called_once()
+```
+
+### Интеграционные тесты
+
+```python
+class TestServerIntegration:
+    @pytest.fixture
+    async def server(self):
+        server = ACPHttpServer(port=0)  # Случайный порт
+        task = asyncio.create_task(server.run())
+        yield server
+        task.cancel()
+    
+    async def test_full_flow(self, server):
+        """Интеграционный тест полного цикла."""
+        async with aiohttp.ClientSession() as session:
+            async with session.ws_connect(
+                f"ws://localhost:{server.port}/acp/ws"
+            ) as ws:
+                # Initialize
+                await ws.send_json({
+                    "jsonrpc": "2.0",
+                    "method": "initialize",
+                    "id": 1,
+                })
+                response = await ws.receive_json()
+                assert "result" in response
+```
+
+## См. также
+
+- [Архитектура](01-architecture.md) — общая архитектура
+- [Protocol Handlers](04-protocol-handlers.md) — создание обработчиков
+- [Тестирование](05-testing.md) — руководство по тестированию

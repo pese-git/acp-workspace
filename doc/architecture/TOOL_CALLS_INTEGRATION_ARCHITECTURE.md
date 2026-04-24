@@ -26,7 +26,7 @@
 
 ## 2. Модульная структура
 
-### Директория: `acp-server/src/acp_server/tools/`
+### Директория: `codelab/src/codelab/server/tools/`
 
 ```
 tools/
@@ -1109,7 +1109,7 @@ stateDiagram-v2
 
 ## 9. Изменения в существующих модулях
 
-### 9.1 `acp_server/tools/base.py`
+### 9.1 `codelab/src/codelab/server/tools/base.py`
 
 **Добавить метаданные для executor результатов**:
 
@@ -1125,7 +1125,7 @@ class ToolExecutionResult:
     metadata: dict[str, Any] | None = None  # terminal_id, diff, etc.
 ```
 
-### 9.2 `acp_server/tools/registry.py`
+### 9.2 `codelab/src/codelab/server/tools/registry.py`
 
 **Сделать async выполнение**:
 
@@ -1147,7 +1147,7 @@ async def execute_tool(
         # ... error handling ...
 ```
 
-### 9.3 `acp_server/protocol/handlers/prompt_orchestrator.py`
+### 9.3 `codelab/src/codelab/server/protocol/handlers/prompt_orchestrator.py`
 
 **Добавить обработку tool calls**:
 
@@ -1173,7 +1173,7 @@ class PromptOrchestrator:
         # ... rest of code ...
 ```
 
-### 9.4 `acp_server/agent/orchestrator.py`
+### 9.4 `codelab/src/codelab/server/agent/orchestrator.py`
 
 **Добавить инъекцию зависимостей и регистрацию инструментов**:
 
@@ -1209,7 +1209,7 @@ class AgentOrchestrator:
         pass
 ```
 
-### 9.5 `acp_server/protocol/state.py`
+### 9.5 `codelab/src/codelab/server/protocol/state.py`
 
 **Добавить поле для pending permission requests**:
 
@@ -1224,7 +1224,7 @@ class SessionState:
     )
 ```
 
-### 9.6 `acp_server/http_server.py`
+### 9.6 `codelab/src/codelab/server/http_server.py`
 
 **Обработка session/request_permission response**:
 

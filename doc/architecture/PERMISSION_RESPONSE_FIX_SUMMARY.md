@@ -18,7 +18,7 @@
 И обработка останавливается. Tool call не выполняется.
 
 ### Корневая причина
-**Файл**: `acp-server/src/acp_server/protocol/core.py` (строки 185-192)
+**Файл**: `codelab/src/codelab/server/protocol/core.py` (строки 185-192)
 
 ```python
 async def handle(self, message: ACPMessage) -> ProtocolOutcome:
@@ -145,10 +145,10 @@ if should_allow:
 
 | № | Файл | Изменение | Тип |
 |---|------|----------|-----|
-| 1 | `acp-server/src/acp_server/protocol/core.py` | Строки 185-192: Распознавать responses | **CRITICAL** |
-| 2 | `acp-server/src/acp_server/protocol/handlers/prompt.py` | Строки 2110-2131: Возобновление execution | **CRITICAL** |
-| 3 | `acp-server/src/acp_server/protocol/handlers/prompt_orchestrator.py` | Добавить logic для resumption | **IMPORTANT** |
-| 4 | `acp-server/tests/` | Добавить unit/integration tests | **IMPORTANT** |
+| 1 | `codelab/src/codelab/server/protocol/core.py` | Строки 185-192: Распознавать responses | **CRITICAL** |
+| 2 | `codelab/src/codelab/server/protocol/handlers/prompt.py` | Строки 2110-2131: Возобновление execution | **CRITICAL** |
+| 3 | `codelab/src/codelab/server/protocol/handlers/prompt_orchestrator.py` | Добавить logic для resumption | **IMPORTANT** |
+| 4 | `codelab/tests/server/` | Добавить unit/integration tests | **IMPORTANT** |
 
 ### Фаза 1: Критическое исправление (1-2 часа)
 

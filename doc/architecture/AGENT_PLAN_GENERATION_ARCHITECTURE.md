@@ -11,7 +11,7 @@
 ### 1.2 Scope
 
 - Извлечение структурированного плана из ответа LLM
-- Расширение [`AgentResponse`](acp-server/src/acp_server/agent/base.py:27) полем `plan`
+- Расширение [`AgentResponse`](codelab/src/codelab/server/agent/base.py:27) полем `plan`
 - Интеграция публикации плана в LLM loop
 - Обновление system prompt для генерации планов
 
@@ -60,17 +60,17 @@
 
 | Компонент | Статус | Описание |
 |-----------|--------|----------|
-| [`PlanBuilder`](acp-server/src/acp_server/protocol/handlers/plan_builder.py:22) | ✅ Готов | Валидация entries, построение notifications |
-| [`ReplayManager`](acp-server/src/acp_server/protocol/handlers/replay_manager.py) | ✅ Готов | Сохранение/воспроизведение планов |
-| [`SessionState.latest_plan`](acp-server/src/acp_server/protocol/state.py:49) | ✅ Готов | Хранение текущего плана |
-| [`SessionState.events_history`](acp-server/src/acp_server/protocol/state.py:66) | ✅ Готов | Персистентная история событий |
+| [`PlanBuilder`](codelab/src/codelab/server/protocol/handlers/plan_builder.py:22) | ✅ Готов | Валидация entries, построение notifications |
+| [`ReplayManager`](codelab/src/codelab/server/protocol/handlers/replay_manager.py) | ✅ Готов | Сохранение/воспроизведение планов |
+| [`SessionState.latest_plan`](codelab/src/codelab/server/protocol/state.py:49) | ✅ Готов | Хранение текущего плана |
+| [`SessionState.events_history`](codelab/src/codelab/server/protocol/state.py:66) | ✅ Готов | Персистентная история событий |
 
 ### 2.2 Что требуется реализовать
 
 | Компонент | Статус | Описание |
 |-----------|--------|----------|
 | `PlanExtractor` | ❌ Требуется | Извлечение плана из LLM response |
-| [`AgentResponse.plan`](acp-server/src/acp_server/agent/base.py:27) | ❌ Требуется | Поле для передачи плана |
+| [`AgentResponse.plan`](codelab/src/codelab/server/agent/base.py:27) | ❌ Требуется | Поле для передачи плана |
 | System prompt | ❌ Требуется | Инструкции для LLM |
 | Интеграция в LLM loop | ❌ Требуется | Публикация плана |
 
@@ -154,7 +154,7 @@ sequenceDiagram
 
 Новый модуль для извлечения плана из ответа LLM.
 
-**Расположение:** `acp-server/src/acp_server/agent/plan_extractor.py`
+**Расположение:** `codelab/src/codelab/server/agent/plan_extractor.py`
 
 ```python
 @dataclass
@@ -187,7 +187,7 @@ class PlanExtractor:
 
 ### 4.2 Изменения в AgentResponse
 
-**Файл:** [`acp-server/src/acp_server/agent/base.py`](acp-server/src/acp_server/agent/base.py:26)
+**Файл:** [`codelab/src/codelab/server/agent/base.py`](codelab/src/codelab/server/agent/base.py:26)
 
 ```python
 @dataclass
@@ -205,7 +205,7 @@ class AgentResponse:
 
 ### 4.3 Изменения в NaiveAgent
 
-**Файл:** [`acp-server/src/acp_server/agent/naive.py`](acp-server/src/acp_server/agent/naive.py:56)
+**Файл:** [`codelab/src/codelab/server/agent/naive.py`](codelab/src/codelab/server/agent/naive.py:56)
 
 ```python
 async def process_prompt(self, context: AgentContext) -> AgentResponse:
@@ -226,9 +226,9 @@ async def process_prompt(self, context: AgentContext) -> AgentResponse:
 
 ### 4.4 Изменения в PromptOrchestrator
 
-**Файл:** [`acp-server/src/acp_server/protocol/handlers/prompt_orchestrator.py`](acp-server/src/acp_server/protocol/handlers/prompt_orchestrator.py:885)
+**Файл:** [`codelab/src/codelab/server/protocol/handlers/prompt_orchestrator.py`](codelab/src/codelab/server/protocol/handlers/prompt_orchestrator.py:885)
 
-Добавить обработку плана в [`_run_llm_loop`](acp-server/src/acp_server/protocol/handlers/prompt_orchestrator.py:885):
+Добавить обработку плана в [`_run_llm_loop`](codelab/src/codelab/server/protocol/handlers/prompt_orchestrator.py:885):
 
 ```python
 async def _run_llm_loop(self, ...) -> LLMLoopResult:
@@ -255,7 +255,7 @@ async def _run_llm_loop(self, ...) -> LLMLoopResult:
 
 ### 4.5 System Prompt для генерации планов
 
-**Файл:** `acp-server/src/acp_server/agent/prompts/plan_instructions.py`
+**Файл:** `codelab/src/codelab/server/agent/prompts/plan_instructions.py`
 
 ```python
 PLAN_GENERATION_INSTRUCTIONS = """
@@ -420,8 +420,8 @@ UPDATE_PLAN_TOOL = {
 ### Шаг 1: Создать PlanExtractor
 
 **Файлы:**
-- `acp-server/src/acp_server/agent/plan_extractor.py` — модуль извлечения
-- `acp-server/tests/test_plan_extractor.py` — тесты
+- `codelab/src/codelab/server/agent/plan_extractor.py` — модуль извлечения
+- `codelab/tests/server/test_plan_extractor.py` — тесты
 
 **Задачи:**
 - Реализовать парсинг JSON из markdown code block
@@ -431,7 +431,7 @@ UPDATE_PLAN_TOOL = {
 ### Шаг 2: Расширить AgentResponse
 
 **Файлы:**
-- `acp-server/src/acp_server/agent/base.py` — добавить поле `plan`
+- `codelab/src/codelab/server/agent/base.py` — добавить поле `plan`
 
 **Задачи:**
 - Добавить поле `plan: list[dict[str, str]] | None = None`
@@ -440,7 +440,7 @@ UPDATE_PLAN_TOOL = {
 ### Шаг 3: Интегрировать в NaiveAgent
 
 **Файлы:**
-- `acp-server/src/acp_server/agent/naive.py` — использовать PlanExtractor
+- `codelab/src/codelab/server/agent/naive.py` — использовать PlanExtractor
 
 **Задачи:**
 - Импортировать и инстанцировать PlanExtractor
@@ -450,7 +450,7 @@ UPDATE_PLAN_TOOL = {
 ### Шаг 4: Интегрировать в PromptOrchestrator
 
 **Файлы:**
-- `acp-server/src/acp_server/protocol/handlers/prompt_orchestrator.py`
+- `codelab/src/codelab/server/protocol/handlers/prompt_orchestrator.py`
 
 **Задачи:**
 - Обработать `agent_response.plan` в `_run_llm_loop`
@@ -460,7 +460,7 @@ UPDATE_PLAN_TOOL = {
 ### Шаг 5: Создать system prompt инструкции
 
 **Файлы:**
-- `acp-server/src/acp_server/agent/prompts/plan_instructions.py`
+- `codelab/src/codelab/server/agent/prompts/plan_instructions.py`
 
 **Задачи:**
 - Написать инструкции для LLM
@@ -469,7 +469,7 @@ UPDATE_PLAN_TOOL = {
 ### Шаг 6: Интеграционные тесты
 
 **Файлы:**
-- `acp-server/tests/test_plan_generation_integration.py`
+- `codelab/tests/server/test_plan_generation_integration.py`
 
 **Задачи:**
 - Тест end-to-end flow с mock LLM

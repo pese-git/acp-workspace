@@ -23,9 +23,9 @@
 - ✅ 36+ unit tests + integration tests
 
 **Компоненты:**
-- [`SessionState.permission_policy`](acp-server/src/acp_server/protocol/state.py:51) — dict[str, str]
-- [`PermissionManager`](acp-server/src/acp_server/protocol/handlers/permission_manager.py) — 6 основных методов
-- [`JsonFileStorage`](acp-server/src/acp_server/storage/json_file.py) — уже сериализует permission_policy
+- [`SessionState.permission_policy`](codelab/src/codelab/server/protocol/state.py:51) — dict[str, str]
+- [`PermissionManager`](codelab/src/codelab/server/protocol/handlers/permission_manager.py) — 6 основных методов
+- [`JsonFileStorage`](codelab/src/codelab/server/storage/json_file.py) — уже сериализует permission_policy
 
 ---
 
@@ -72,7 +72,7 @@ async def test_permission_policy_persists_across_session_reload():
 - 🔴 Нарушает expectation "allow_always" = "permanent"
 - 🔴 Особенно критично для часто используемых tools
 
-**Решение**: Фаза 2 (реализация в [Session.load handler](acp-server/src/acp_server/protocol/handlers/session.py))
+**Решение**: Фаза 2 (реализация в [Session.load handler](codelab/src/codelab/server/protocol/handlers/session.py))
 
 ---
 
@@ -254,8 +254,8 @@ gantt
 3. Новые E2E тесты подтверждают persistence
 
 **Изменяемые файлы**:
-- [`acp-server/src/acp_server/protocol/handlers/session.py`](acp-server/src/acp_server/protocol/handlers/session.py)
-- [`acp-server/src/acp_server/storage/json_file.py`](acp-server/src/acp_server/storage/json_file.py) (explicit methods)
+- [`codelab/src/codelab/server/protocol/handlers/session.py`](codelab/src/codelab/server/protocol/handlers/session.py)
+- [`codelab/src/codelab/server/storage/json_file.py`](codelab/src/codelab/server/storage/json_file.py) (explicit methods)
 
 **Тесты**:
 ```python
@@ -295,8 +295,8 @@ GlobalPolicyManager
 ```
 
 **Новые файлы**:
-- `acp-server/src/acp_server/storage/policy_storage.py` (new)
-- `acp-server/src/acp_server/protocol/handlers/global_permission_manager.py` (new)
+- `codelab/src/codelab/server/storage/policy_storage.py` (new)
+- `codelab/src/codelab/server/protocol/handlers/global_permission_manager.py` (new)
 
 **Effort**: MEDIUM (5-7 hours)
 
@@ -362,7 +362,7 @@ class PolicyMetadata:
    - добавить 3-4 E2E теста
 
 2. **Документировать Permission Management** ✅ MEDIUM
-   - Update [`acp-server/README.md`](acp-server/README.md) с Permission Management section
+   - Update [`codelab/README.md`](codelab/README.md) с Permission Management section
    - Add usage examples
    - Reference [`doc/architecture/ADVANCED_PERMISSION_MANAGEMENT_ARCHITECTURE.md`](doc/architecture/ADVANCED_PERMISSION_MANAGEMENT_ARCHITECTURE.md)
 

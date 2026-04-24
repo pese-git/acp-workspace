@@ -69,7 +69,7 @@ Permission response **получена**, но обработка останав
 
 ### 2.1. Критическая проблема в ACPProtocol.handle()
 
-**Файл**: `acp-server/src/acp_server/protocol/core.py` (строки 175-192)
+**Файл**: `codelab/src/codelab/server/protocol/core.py` (строки 175-192)
 
 ```python
 async def handle(self, message: ACPMessage) -> ProtocolOutcome:
@@ -92,7 +92,7 @@ async def handle(self, message: ACPMessage) -> ProtocolOutcome:
 
 ### 2.2. Существующий обработчик permission response
 
-**Файл**: `acp-server/src/acp_server/protocol/core.py` (строки 585-709)
+**Файл**: `codelab/src/codelab/server/protocol/core.py` (строки 585-709)
 
 ```python
 async def _handle_permission_response(
@@ -112,7 +112,7 @@ async def _handle_permission_response(
 
 ### 2.3. Логика обхода permission response в коде
 
-**Файл**: `acp-server/src/acp_server/protocol/core.py` (строки 387-438)
+**Файл**: `codelab/src/codelab/server/protocol/core.py` (строки 387-438)
 
 ```python
 async def handle_incoming_response(self, message: ACPMessage) -> ProtocolOutcome:
@@ -266,7 +266,7 @@ sequenceDiagram
 
 ### 4.1. Фаза 1: Исправление маршрутизации responses (КРИТИЧНО)
 
-**Файл**: `acp-server/src/acp_server/protocol/core.py`
+**Файл**: `codelab/src/codelab/server/protocol/core.py`
 
 **Изменение 1**: Переписать логику в `handle()`
 
@@ -290,7 +290,7 @@ async def handle(self, message: ACPMessage) -> ProtocolOutcome:
 
 ### 4.2. Фаза 2: Возобновление tool execution после permission (ВАЖНО)
 
-**Файл**: `acp-server/src/acp_server/protocol/handlers/prompt.py`
+**Файл**: `codelab/src/codelab/server/protocol/handlers/prompt.py`
 
 **Текущее поведение**: `resolve_permission_response_impl()` завершает turn после получения разрешения.
 
@@ -366,14 +366,14 @@ Turn continuation
 
 ### 5.2. Файлы, требующие изменения
 
-1. **`acp-server/src/acp_server/protocol/core.py`** (2 изменения)
+1. **`codelab/src/codelab/server/protocol/core.py`** (2 изменения)
    - Строки 175-192: handle() - распознание responses
    - Убедиться в наличии handle_incoming_response()
 
-2. **`acp-server/src/acp_server/protocol/handlers/prompt.py`** (1 изменение)
+2. **`codelab/src/codelab/server/protocol/handlers/prompt.py`** (1 изменение)
    - Строки 2035-2131: resolve_permission_response_impl() - добавить continuation flow
 
-3. **`acp-server/src/acp_server/protocol/handlers/prompt_orchestrator.py`** (1 изменение)
+3. **`codelab/src/codelab/server/protocol/handlers/prompt_orchestrator.py`** (1 изменение)
    - Добавить метод для возобновления tool execution после разрешения
 
 ### 5.3. Совместимость с протоколом ACP
@@ -392,7 +392,7 @@ Turn continuation
 ### 6.1. Unit-тесты (обязательны)
 
 ```python
-# acp-server/tests/test_permission_response_handling.py
+# codelab/tests/server/test_permission_response_handling.py
 
 def test_permission_response_recognized_as_response():
     """Test: Permission response распознается как JSON-RPC response"""
@@ -437,7 +437,7 @@ def test_resolve_permission_response_allows_tool_execution():
 ### 6.2. Integration-тесты (обязательны)
 
 ```python
-# acp-server/tests/test_permission_flow_integration.py
+# codelab/tests/server/test_permission_flow_integration.py
 
 async def test_full_permission_flow_with_tool_execution():
     """Test: Полный flow от permission request до tool execution"""
@@ -560,9 +560,9 @@ async def test_full_permission_flow_with_tool_execution():
 
 ### Изменяемые файлы
 
-- `acp-server/src/acp_server/protocol/core.py` (критично)
-- `acp-server/src/acp_server/protocol/handlers/prompt.py` (важно)
-- `acp-server/src/acp_server/protocol/handlers/prompt_orchestrator.py` (важно)
+- `codelab/src/codelab/server/protocol/core.py` (критично)
+- `codelab/src/codelab/server/protocol/handlers/prompt.py` (важно)
+- `codelab/src/codelab/server/protocol/handlers/prompt_orchestrator.py` (важно)
 
 ### Тестирование
 

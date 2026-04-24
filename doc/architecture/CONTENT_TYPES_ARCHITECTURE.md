@@ -437,11 +437,11 @@ graph TD
 
 ## Структура файлов для реализации
 
-### acp-server
+### codelab.server
 
 ```
-acp-server/
-├── src/acp_server/
+codelab/
+├── src/codelab/src/codelab/server/
 │   ├── protocol/
 │   │   ├── content/
 │   │   │   ├── __init__.py                # Экспорт публичных классов
@@ -461,11 +461,11 @@ acp-server/
         └── test_content_validation.py
 ```
 
-### acp-client
+### codelab.client
 
 ```
-acp-client/
-├── src/acp_client/
+codelab/
+├── src/codelab/src/codelab/client/
 │   ├── infrastructure/
 │   │   ├── message_parser.py              # Обновить: парсинг ContentBlock
 │   │   └── ...
@@ -480,10 +480,10 @@ acp-client/
 
 ### messages.py в обоих проектах
 
-**acp-server/src/acp_server/messages.py:**
+**codelab/src/codelab/server/messages.py:**
 ```python
 # Добавить импорт Content типов
-from acp_server.protocol.content import ContentBlock
+from codelab.server.protocol.content import ContentBlock
 
 # Обновить PromptParams
 class PromptParams(BaseModel):
@@ -496,10 +496,10 @@ class AgentMessageChunkUpdate(BaseModel):
     content: ContentBlock  # Вместо dict[str, Any]
 ```
 
-**acp-client/src/acp_client/messages.py:**
+**codelab/src/codelab/client/messages.py:**
 ```python
 # Аналогично для клиента
-from acp_client.protocol.content import ContentBlock
+from codelab.client.protocol.content import ContentBlock
 
 # Обновить типизацию
 class PromptParams(BaseModel):
@@ -509,7 +509,7 @@ class PromptParams(BaseModel):
 
 ### message_parser.py
 
-**acp-client/src/acp_client/infrastructure/message_parser.py:**
+**codelab/src/codelab/client/infrastructure/message_parser.py:**
 ```python
 # Добавить методы для парсинга Content блоков
 class MessageParser:
@@ -529,7 +529,7 @@ class MessageParser:
 ### Создание Content блоков
 
 ```python
-from acp_server.protocol.content import (
+from codelab.server.protocol.content import (
     TextContent,
     ImageContent,
     ResourceLinkContent,
@@ -581,7 +581,7 @@ json_str = text.model_dump_json(exclude_none=True)
 ### Десериализация из JSON
 
 ```python
-from acp_server.protocol.content import ContentBlock
+from codelab.server.protocol.content import ContentBlock
 
 payload = {
     "type": "text",

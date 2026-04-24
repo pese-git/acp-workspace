@@ -154,17 +154,17 @@ Client renders content
 ### Реализовано в Этап 1-3
 
 **Content Types (Этап 1-2):**
-- [`acp-client/src/acp_client/domain/content/base.py`](../../acp-client/src/acp_client/domain/content/base.py) - базовые классы
-- [`acp-client/src/acp_client/domain/content/text.py`](../../acp-client/src/acp_client/domain/content/text.py) - TextContent
-- [`acp-client/src/acp_client/domain/content/image.py`](../../acp-client/src/acp_client/domain/content/image.py) - ImageContent
-- [`acp-client/src/acp_client/domain/content/audio.py`](../../acp-client/src/acp_client/domain/content/audio.py) - AudioContent
-- [`acp-client/src/acp_client/domain/content/embedded.py`](../../acp-client/src/acp_client/domain/content/embedded.py) - EmbeddedResourceContent
-- [`acp-client/src/acp_client/domain/content/resource_link.py`](../../acp-client/src/acp_client/domain/content/resource_link.py) - ResourceLinkContent
+- [`codelab/src/codelab/client/domain/content/base.py`](../../codelab/src/codelab/client/domain/content/base.py) - базовые классы
+- [`codelab/src/codelab/client/domain/content/text.py`](../../codelab/src/codelab/client/domain/content/text.py) - TextContent
+- [`codelab/src/codelab/client/domain/content/image.py`](../../codelab/src/codelab/client/domain/content/image.py) - ImageContent
+- [`codelab/src/codelab/client/domain/content/audio.py`](../../codelab/src/codelab/client/domain/content/audio.py) - AudioContent
+- [`codelab/src/codelab/client/domain/content/embedded.py`](../../codelab/src/codelab/client/domain/content/embedded.py) - EmbeddedResourceContent
+- [`codelab/src/codelab/client/domain/content/resource_link.py`](../../codelab/src/codelab/client/domain/content/resource_link.py) - ResourceLinkContent
 
 **Tool Calls Integration (Этап 3):**
-- [`acp-server/src/acp_server/tools/base.py`](../../acp-server/src/acp_server/tools/base.py) - ToolRegistry, ToolExecutionResult
-- [`acp-server/src/acp_server/protocol/handlers/tool_call_handler.py`](../../acp-server/src/acp_server/protocol/handlers/tool_call_handler.py) - ToolCallHandler
-- [`acp-server/src/acp_server/protocol/handlers/prompt_orchestrator.py`](../../acp-server/src/acp_server/protocol/handlers/prompt_orchestrator.py) - PromptOrchestrator
+- [`codelab/src/codelab/server/tools/base.py`](../../codelab/src/codelab/server/tools/base.py) - ToolRegistry, ToolExecutionResult
+- [`codelab/src/codelab/server/protocol/handlers/tool_call_handler.py`](../../codelab/src/codelab/server/protocol/handlers/tool_call_handler.py) - ToolCallHandler
+- [`codelab/src/codelab/server/protocol/handlers/prompt_orchestrator.py`](../../codelab/src/codelab/server/protocol/handlers/prompt_orchestrator.py) - PromptOrchestrator
 - FileSystem и Terminal executors
 
 ### Текущие gaps (пробелы)
@@ -346,7 +346,7 @@ classDiagram
 **Цель**: Добавить поддержку структурированного контента в результаты инструментов
 
 **Файлы для изменения:**
-- [`acp-server/src/acp_server/tools/base.py`](../../acp-server/src/acp_server/tools/base.py)
+- [`codelab/src/codelab/server/tools/base.py`](../../codelab/src/codelab/server/tools/base.py)
 
 **Добавить классы:**
 ```python
@@ -374,8 +374,8 @@ class ToolExecutionResult:
 **Цель**: Извлечение ContentBlocks из результатов инструментов
 
 **Новые модули:**
-- `acp-server/src/acp_server/protocol/content/extractor.py`
-- `acp-server/src/acp_server/protocol/content/validator.py`
+- `codelab/src/codelab/server/protocol/content/extractor.py`
+- `codelab/src/codelab/server/protocol/content/validator.py`
 
 **Класс ContentExtractor:**
 - `extract_content(result: ToolExecutionResult) → list[dict]`
@@ -389,7 +389,7 @@ class ToolExecutionResult:
 **Цель**: Трансформация контента в формат конкретных LLM провайдеров
 
 **Новый модуль:**
-- `acp-server/src/acp_server/llm/content_formatters.py`
+- `codelab/src/codelab/server/llm/content_formatters.py`
 
 **Классы:**
 - `ContentFormatter` - базовый интерфейс
@@ -397,8 +397,8 @@ class ToolExecutionResult:
 - `AnthropicContentFormatter` - для Anthropic API
 
 **Интеграция:**
-- Добавить в [`acp-server/src/acp_server/llm/base.py`](../../acp-server/src/acp_server/llm/base.py)
-- Использовать в [`acp-server/src/acp_server/protocol/handlers/prompt_orchestrator.py`](../../acp-server/src/acp_server/protocol/handlers/prompt_orchestrator.py)
+- Добавить в [`codelab/src/codelab/server/llm/base.py`](../../codelab/src/codelab/server/llm/base.py)
+- Использовать в [`codelab/src/codelab/server/protocol/handlers/prompt_orchestrator.py`](../../codelab/src/codelab/server/protocol/handlers/prompt_orchestrator.py)
 
 **Тесты:** OpenAI format compliance, Anthropic format compliance
 
@@ -407,8 +407,8 @@ class ToolExecutionResult:
 **Цель**: Отправка и обработка контента на клиентской стороне
 
 **Обновить файлы:**
-- [`acp-client/src/acp_client/infrastructure/handlers/`](../../acp-client/src/acp_client/infrastructure/handlers/)
-- [`acp-client/src/acp_client/presentation/`](../../acp-client/src/acp_client/presentation/)
+- [`codelab/src/codelab/client/infrastructure/handlers/`](../../codelab/src/codelab/client/infrastructure/handlers/)
+- [`codelab/src/codelab/client/presentation/`](../../codelab/src/codelab/client/presentation/)
 
 **Логика:**
 - Message routing для tool content
@@ -426,10 +426,10 @@ class ToolExecutionResult:
 - Backward compatibility tests
 
 **Test organization:**
-- `acp-server/tests/test_content_extractor.py`
-- `acp-server/tests/test_content_formatters.py`
-- `acp-server/tests/test_tool_content_integration.py`
-- `acp-server/tests/test_prompt_content_e2e.py`
+- `codelab/tests/server/test_content_extractor.py`
+- `codelab/tests/server/test_content_formatters.py`
+- `codelab/tests/server/test_tool_content_integration.py`
+- `codelab/tests/server/test_prompt_content_e2e.py`
 
 ---
 

@@ -126,7 +126,7 @@ Total E2E tests: 30 scenarios + 10 edge cases = 40+ E2E тестов
 #### **Test Fixtures**
 
 ```python
-# acp-server/tests/fixtures/content_fixtures.py
+# codelab/tests/server/fixtures/content_fixtures.py
 class ContentTestFixtures:
     """Фикстуры для E2E тестов контента."""
     
@@ -210,7 +210,7 @@ class ContentTestFixtures:
 #### **Test Helpers**
 
 ```python
-# acp-server/tests/helpers/e2e_content_helpers.py
+# codelab/tests/server/helpers/e2e_content_helpers.py
 class E2EContentHelpers:
     """Вспомогательные методы для E2E тестов."""
     
@@ -295,7 +295,7 @@ class E2EContentHelpers:
 ### 2. Test Base Classes
 
 ```python
-# acp-server/tests/base/e2e_content_test_base.py
+# codelab/tests/server/base/e2e_content_test_base.py
 class E2EContentTestBase:
     """Base class для всех E2E тестов контента."""
     
@@ -335,7 +335,7 @@ class E2EContentTestBase:
 ### 3. Test Organization
 
 ```
-acp-server/tests/
+codelab/tests/server/
 ├── e2e/
 │   ├── __init__.py
 │   ├── conftest.py                          # Shared fixtures
@@ -542,14 +542,14 @@ graph LR
 
 **Файлы для создания:**
 
-1. **acp-server/tests/e2e/__init__.py** - E2E package
-2. **acp-server/tests/e2e/conftest.py** - Shared fixtures для E2E тестов
-3. **acp-server/tests/fixtures/content_fixtures.py** - Content block fixtures
-4. **acp-server/tests/fixtures/session_fixtures.py** - Session state fixtures
-5. **acp-server/tests/fixtures/tool_fixtures.py** - Tool execution fixtures
-6. **acp-server/tests/helpers/e2e_content_helpers.py** - E2E helper методы
-7. **acp-server/tests/helpers/assertions.py** - Custom assertions для контента
-8. **acp-server/tests/base/e2e_content_test_base.py** - Base class для E2E тестов
+1. **codelab/tests/server/e2e/__init__.py** - E2E package
+2. **codelab/tests/server/e2e/conftest.py** - Shared fixtures для E2E тестов
+3. **codelab/tests/server/fixtures/content_fixtures.py** - Content block fixtures
+4. **codelab/tests/server/fixtures/session_fixtures.py** - Session state fixtures
+5. **codelab/tests/server/fixtures/tool_fixtures.py** - Tool execution fixtures
+6. **codelab/tests/server/helpers/e2e_content_helpers.py** - E2E helper методы
+7. **codelab/tests/server/helpers/assertions.py** - Custom assertions для контента
+8. **codelab/tests/server/base/e2e_content_test_base.py** - Base class для E2E тестов
 
 **Выходные данные:**
 - Инфраструктура для E2E тестирования готова
@@ -562,37 +562,37 @@ graph LR
 
 **Файлы для создания:**
 
-1. **acp-server/tests/e2e/test_e2e_text_content.py**
+1. **codelab/tests/server/e2e/test_e2e_text_content.py**
    - E2E-1.1: Text → OpenAI
    - E2E-1.2: Text → Anthropic
    - Multiple text items
    - Text with annotations
 
-2. **acp-server/tests/e2e/test_e2e_diff_content.py**
+2. **codelab/tests/server/e2e/test_e2e_diff_content.py**
    - E2E-1.3: Diff → OpenAI
    - E2E-1.4: Diff → Anthropic
    - Diff with file path
    - Large diffs
 
-3. **acp-server/tests/e2e/test_e2e_image_content.py**
+3. **codelab/tests/server/e2e/test_e2e_image_content.py**
    - E2E-1.5: Image → OpenAI
    - E2E-1.6: Image → Anthropic
    - Image with alt text
    - Large base64 images
 
-4. **acp-server/tests/e2e/test_e2e_audio_content.py**
+4. **codelab/tests/server/e2e/test_e2e_audio_content.py**
    - E2E-1.7: Audio → OpenAI
    - E2E-1.8: Audio → Anthropic
    - Different MIME types
    - Base64 audio data
 
-5. **acp-server/tests/e2e/test_e2e_embedded_content.py**
+5. **codelab/tests/server/e2e/test_e2e_embedded_content.py**
    - E2E-1.9: Embedded → OpenAI
    - E2E-1.10: Embedded → Anthropic
    - Text resources
    - Blob resources
 
-6. **acp-server/tests/e2e/test_e2e_resource_link_content.py**
+6. **codelab/tests/server/e2e/test_e2e_resource_link_content.py**
    - E2E-1.11: Resource link → OpenAI
    - E2E-1.12: Resource link → Anthropic
    - Links with metadata
@@ -609,20 +609,20 @@ graph LR
 
 **Файлы для создания:**
 
-1. **acp-server/tests/e2e/test_e2e_filesystem_integration.py**
+1. **codelab/tests/server/e2e/test_e2e_filesystem_integration.py**
    - E2E-2.1: fs/read_text_file → text content
    - E2E-2.2: fs/write_text_file → diff content
    - E2E-2.3: fs/read_binary_file → image content
    - File permissions and errors
    - Large files handling
 
-2. **acp-server/tests/e2e/test_e2e_terminal_integration.py**
+2. **codelab/tests/server/e2e/test_e2e_terminal_integration.py**
    - E2E-2.4: terminal/create → text output
    - E2E-2.5: terminal/wait_for_exit → text content
    - Command output formatting
    - Error output handling
 
-3. **acp-server/tests/e2e/test_e2e_multiple_content.py**
+3. **codelab/tests/server/e2e/test_e2e_multiple_content.py**
    - E2E-2.6: Multiple content items in single result
    - E2E-2.7: Embedded resource from prompt
    - E2E-2.8: Resource link reference
@@ -639,7 +639,7 @@ graph LR
 
 **Файлы для создания:**
 
-1. **acp-server/tests/e2e/test_e2e_error_handling.py**
+1. **codelab/tests/server/e2e/test_e2e_error_handling.py**
    - E2E-3.1: Empty content → fallback
    - E2E-3.2: Null content → backward compatibility
    - E2E-3.3: Invalid content type → fallback
@@ -649,7 +649,7 @@ graph LR
    - E2E-3.7: Corrupted base64
    - E2E-3.8: Missing required fields
 
-2. **acp-server/tests/e2e/test_e2e_backward_compatibility.py**
+2. **codelab/tests/server/e2e/test_e2e_backward_compatibility.py**
    - E2E-3.2: Old code compatibility
    - E2E-3.3: Graceful degradation
    - No content → text output fallback
@@ -666,7 +666,7 @@ graph LR
 
 **Файлы для создания:**
 
-1. **acp-server/tests/e2e/test_e2e_prompt_orchestrator.py**
+1. **codelab/tests/server/e2e/test_e2e_prompt_orchestrator.py**
    - E2E-3.9: PromptOrchestrator с контентом
    - E2E-3.10: Concurrent tool calls
    - Full session/update notifications
@@ -684,7 +684,7 @@ graph LR
 
 **Файлы для создания:**
 
-1. **acp-server/tests/e2e/test_e2e_performance.py**
+1. **codelab/tests/server/e2e/test_e2e_performance.py**
    - Large content processing (50MB)
    - Multiple concurrent tool calls
    - Content formatting performance
@@ -698,23 +698,23 @@ graph LR
 
 ```bash
 # Run all E2E tests
-uv run --directory acp-server python -m pytest tests/e2e/ -v
+cd codelab && uv run python -m pytest tests/e2e/ -v
 
 # Run specific content type tests
-uv run --directory acp-server python -m pytest tests/e2e/test_e2e_text_content.py -v
+cd codelab && uv run python -m pytest tests/e2e/test_e2e_text_content.py -v
 
 # Run with coverage
-uv run --directory acp-server python -m pytest tests/e2e/ \
+cd codelab && uv run python -m pytest tests/e2e/ \
   --cov=acp_server.protocol.content \
   --cov=acp_server.tools \
   --cov-report=html
 
 # Run specific test case
-uv run --directory acp-server python -m pytest \
+cd codelab && uv run python -m pytest \
   tests/e2e/test_e2e_text_content.py::TestTextContentE2E::test_text_to_openai -v
 
 # Run markers
-uv run --directory acp-server python -m pytest tests/e2e/ -m e2e_high_priority -v
+cd codelab && uv run python -m pytest tests/e2e/ -m e2e_high_priority -v
 ```
 
 ### Test Markers
@@ -753,17 +753,17 @@ jobs:
       
       - name: Run E2E High Priority
         run: |
-          uv run --directory acp-server python -m pytest \
+          cd codelab && uv run python -m pytest \
             tests/e2e/ -m e2e_high_priority -v
       
       - name: Run E2E Integration
         run: |
-          uv run --directory acp-server python -m pytest \
+          cd codelab && uv run python -m pytest \
             tests/e2e/ -m e2e_integration -v
       
       - name: Run with Coverage
         run: |
-          uv run --directory acp-server python -m pytest \
+          cd codelab && uv run python -m pytest \
             tests/e2e/ --cov --cov-report=xml
       
       - name: Upload Coverage
@@ -846,13 +846,13 @@ pytest-cov: ≥ 4.0
 
 ```python
 # Обязательные импорты для E2E тестов
-from acp_server.protocol.content.extractor import ContentExtractor, ExtractedContent
-from acp_server.protocol.content.validator import ContentValidator
-from acp_server.protocol.content.formatter import ContentFormatter
-from acp_server.tools.base import ToolExecutionResult
-from acp_server.tools.executors.filesystem_executor import FileSystemToolExecutor
-from acp_server.tools.executors.terminal_executor import TerminalExecutor
-from acp_server.protocol.state import SessionState
+from codelab.server.protocol.content.extractor import ContentExtractor, ExtractedContent
+from codelab.server.protocol.content.validator import ContentValidator
+from codelab.server.protocol.content.formatter import ContentFormatter
+from codelab.server.tools.base import ToolExecutionResult
+from codelab.server.tools.executors.filesystem_executor import FileSystemToolExecutor
+from codelab.server.tools.executors.terminal_executor import TerminalExecutor
+from codelab.server.protocol.state import SessionState
 ```
 
 ### Existing Code Foundation
@@ -896,7 +896,7 @@ from acp_server.protocol.state import SessionState
 2. **Stream-based Content** - тесты для streaming контента
 3. **Content Caching** - тесты для кэширования результатов
 4. **Performance Optimization** - advanced performance тесты
-5. **Client-side E2E** - тесты с реальным acp-client
+5. **Client-side E2E** - тесты с реальным codelab.client
 
 ### Technology Upgrades
 

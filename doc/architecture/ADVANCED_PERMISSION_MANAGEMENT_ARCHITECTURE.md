@@ -462,8 +462,8 @@ def migrate_permission_policy_v3_to_v4(policy: dict) -> dict:
 **Область**: Load saved permission_policy when loading existing session
 **Effort**: Small (modify session/load handler)
 **Файлы**:
-- `acp-server/src/acp_server/protocol/handlers/session.py` — Update session/load handler
-- `acp-server/tests/test_protocol.py` — Add E2E test for policy persistence
+- `codelab/src/codelab/server/protocol/handlers/session.py` — Update session/load handler
+- `codelab/tests/server/test_protocol.py` — Add E2E test for policy persistence
 
 **Задачи**:
 1. Ensure session/load restores permission_policy from JSON
@@ -479,8 +479,8 @@ def migrate_permission_policy_v3_to_v4(policy: dict) -> dict:
 ### Фаза 3: Global Policy Support (FUTURE)
 **Область**: Policies applicable to all sessions
 **Файлы**:
-- `acp-server/src/acp_server/storage/policy_storage.py` (new)
-- `acp-server/src/acp_server/protocol/handlers/permission_manager.py` (extend)
+- `codelab/src/codelab/server/storage/policy_storage.py` (new)
+- `codelab/src/codelab/server/protocol/handlers/permission_manager.py` (extend)
 - New config: `~/.acp/global_permissions.json`
 
 **Приоритет**:
@@ -491,8 +491,8 @@ Session Policy > Global Policy > Ask User
 ### Фаза 4: Policy Metadata & Versioning (FUTURE)
 **Область**: Track when/who/why policies were set
 **Файлы**:
-- `acp-server/src/acp_server/protocol/state.py` — PolicyMetadata dataclass
-- `acp-server/src/acp_server/protocol/handlers/permission_manager.py` (extend)
+- `codelab/src/codelab/server/protocol/state.py` — PolicyMetadata dataclass
+- `codelab/src/codelab/server/protocol/handlers/permission_manager.py` (extend)
 - Migration scripts
 
 **Преимущества**:
@@ -596,31 +596,31 @@ async def test_permission_policy_serialization() -> None:
 ### Фаза 2: Cross-Session Policy Restoration
 
 - [ ] **Code Changes**
-  - [ ] `acp-server/src/acp_server/protocol/handlers/session.py`
+  - [ ] `codelab/src/codelab/server/protocol/handlers/session.py`
     - [ ] Verify session/load handler restores permission_policy
-  - [ ] `acp-server/src/acp_server/storage/json_file.py`
+  - [ ] `codelab/src/codelab/server/storage/json_file.py`
     - [ ] Add explicit `_serialize_permission_policy()` method
     - [ ] Add explicit `_deserialize_permission_policy()` method
     - [ ] Update docstrings
 
 - [ ] **Tests**
-  - [ ] `acp-server/tests/test_storage_json_file.py`
+  - [ ] `codelab/tests/server/test_storage_json_file.py`
     - [ ] Add test_permission_policy_serialization()
     - [ ] Add test_permission_policy_deserialization()
-  - [ ] `acp-server/tests/test_protocol.py`
+  - [ ] `codelab/tests/server/test_protocol.py`
     - [ ] Add test_session_load_restores_permission_policy()
     - [ ] Add test_permission_policy_applies_across_session_reload()
-  - [ ] `acp-server/tests/test_permission_manager.py`
+  - [ ] `codelab/tests/server/test_permission_manager.py`
     - [ ] Add test_remembered_permission_survives_reload()
 
 - [ ] **Documentation**
-  - [ ] Update [`acp-server/README.md`](acp-server/README.md) — Permission management section
+  - [ ] Update [`codelab/README.md`](codelab/README.md) — Permission management section
   - [ ] Update [`CHANGELOG.md`](CHANGELOG.md) — Note Phase 2 completion
   - [ ] Update this architecture doc with Phase 2 status
 
 - [ ] **Verification**
   - [ ] Run `make check` — All tests pass
-  - [ ] Run `uv run --directory acp-server pytest tests/test_permission*.py -v`
+  - [ ] Run `cd codelab && uv run pytest tests/test_permission*.py -v`
   - [ ] Run E2E: Create session with allow_always, reload, verify skip permission request
 
 ---
@@ -773,7 +773,7 @@ Session Policy > Global Policy > Ask User
 
 **Назначение**: Работать с файлом `~/.acp/global_permissions.json`, обеспечивая thread-safe операции
 
-**Расположение**: `acp-server/src/acp_server/storage/global_policy_storage.py`
+**Расположение**: `codelab/src/codelab/server/storage/global_policy_storage.py`
 
 **Класс**:
 ```python
@@ -932,7 +932,7 @@ class GlobalPolicyStorage:
 
 **Назначение**: Singleton для работы с глобальными policies
 
-**Расположение**: `acp-server/src/acp_server/protocol/handlers/global_policy_manager.py`
+**Расположение**: `codelab/src/codelab/server/protocol/handlers/global_policy_manager.py`
 
 **Класс**:
 ```python
@@ -1118,7 +1118,7 @@ decision = await resolve_remembered_permission_decision(
 
 **Команда 1: Просмотр всех глобальных policies**
 ```bash
-acp-server permissions list
+codelab permissions list
 ```
 
 **Output** (JSON format):
@@ -1151,13 +1151,13 @@ Total: 3 policies
 
 **Команда 2: Установить global policy**
 ```bash
-acp-server permissions set <tool_kind> <decision>
+codelab permissions set <tool_kind> <decision>
 ```
 
 **Примеры**:
 ```bash
-acp-server permissions set execute allow_always
-acp-server permissions set read reject_always
+codelab permissions set execute allow_always
+codelab permissions set read reject_always
 ```
 
 **Output**:
@@ -1173,12 +1173,12 @@ acp-server permissions set read reject_always
 
 **Команда 3: Сбросить policy**
 ```bash
-acp-server permissions reset [tool_kind]
+codelab permissions reset [tool_kind]
 ```
 
 **Без аргумента** (сбросить все):
 ```bash
-acp-server permissions reset
+codelab permissions reset
 ```
 Output:
 ```
@@ -1187,7 +1187,7 @@ Output:
 
 **С аргументом** (сбросить конкретный):
 ```bash
-acp-server permissions reset execute
+codelab permissions reset execute
 ```
 Output:
 ```
@@ -1203,7 +1203,7 @@ Output:
 
 ### 13.5.2 CLI Implementation Details
 
-**Расположение**: `acp-server/src/acp_server/cli.py`
+**Расположение**: `codelab/src/codelab/server/cli.py`
 
 **Субкоманда**: 
 ```python
@@ -1211,15 +1211,15 @@ def add_permissions_subcommand(subparsers) -> None:
     """Добавляет subcommand для управления permissions.
     
     Usage:
-        acp-server permissions list
-        acp-server permissions set <tool_kind> <decision>
-        acp-server permissions reset [tool_kind]
+        codelab permissions list
+        codelab permissions set <tool_kind> <decision>
+        codelab permissions reset [tool_kind]
     """
 ```
 
 **Структура argparse**:
 ```python
-parser = argparse.ArgumentParser(prog="acp-server")
+parser = argparse.ArgumentParser(prog="codelab")
 subparsers = parser.add_subparsers(dest="command")
 
 # Main 'run' command (existing)
@@ -1338,7 +1338,7 @@ classDiagram
 
 ### 13.7.1 Создание новых файлов
 
-- [ ] **`acp-server/src/acp_server/storage/global_policy_storage.py`**
+- [ ] **`codelab/src/codelab/server/storage/global_policy_storage.py`**
   - [ ] Класс `GlobalPolicyStorage`
   - [ ] Методы load/save/get/set/delete/list/clear_all
   - [ ] Обработка JSON schema validation
@@ -1347,7 +1347,7 @@ classDiagram
   - [ ] Thread-safe операции (asyncio.Lock)
   - [ ] Unit tests (test_global_policy_storage.py)
 
-- [ ] **`acp-server/src/acp_server/protocol/handlers/global_policy_manager.py`**
+- [ ] **`codelab/src/codelab/server/protocol/handlers/global_policy_manager.py`**
   - [ ] Класс `GlobalPolicyManager` (Singleton)
   - [ ] Методы get/set/delete/list/clear + initialize
   - [ ] Кэширование с invalidation
@@ -1357,31 +1357,31 @@ classDiagram
 
 ### 13.7.2 Модификация существующих файлов
 
-- [ ] **`acp-server/src/acp_server/protocol/handlers/permissions.py`**
+- [ ] **`codelab/src/codelab/server/protocol/handlers/permissions.py`**
   - [ ] Обновить `resolve_remembered_permission_decision()` сигнатуру
   - [ ] Добавить fallback логику (session > global > ask)
   - [ ] Maintain backward compatibility (optional global_manager param)
   - [ ] Update docstrings
 
-- [ ] **`acp-server/src/acp_server/protocol/core.py` (ACPProtocol)**
+- [ ] **`codelab/src/codelab/server/protocol/core.py` (ACPProtocol)**
   - [ ] Инициализировать GlobalPolicyManager при startup
   - [ ] Вызывать `await global_manager.initialize()` на startup
   - [ ] Передавать global_manager в resolve_remembered_permission_decision()
 
-- [ ] **`acp-server/src/acp_server/cli.py`**
+- [ ] **`codelab/src/codelab/server/cli.py`**
   - [ ] Добавить `permissions` subcommand
   - [ ] Реализовать `list`, `set`, `reset` sub-subcommands
   - [ ] Add CLI handlers для каждой команды
   - [ ] Output formatting (JSON/table)
   - [ ] Error handling и user feedback
 
-- [ ] **`acp-server/src/acp_server/storage/__init__.py`**
+- [ ] **`codelab/src/codelab/server/storage/__init__.py`**
   - [ ] Export `GlobalPolicyStorage`
 
 ### 13.7.3 Тесты
 
 **Unit Tests**:
-- [ ] `acp-server/tests/test_global_policy_storage.py`
+- [ ] `codelab/tests/server/test_global_policy_storage.py`
   - [ ] test_load_empty_file_returns_empty_dict
   - [ ] test_save_creates_valid_json
   - [ ] test_get_policy_returns_decision
@@ -1392,7 +1392,7 @@ classDiagram
   - [ ] test_corrupted_json_raises_storage_error
   - [ ] test_invalid_decision_raises_value_error
 
-- [ ] `acp-server/tests/test_global_policy_manager.py`
+- [ ] `codelab/tests/server/test_global_policy_manager.py`
   - [ ] test_singleton_pattern
   - [ ] test_initialize_loads_from_storage
   - [ ] test_get_global_policy
@@ -1403,14 +1403,14 @@ classDiagram
   - [ ] test_concurrent_set_operations
 
 **Integration Tests**:
-- [ ] `acp-server/tests/test_protocol_global_policy.py`
+- [ ] `codelab/tests/server/test_protocol_global_policy.py`
   - [ ] test_global_policy_fallback_when_no_session_policy
   - [ ] test_session_policy_takes_precedence_over_global
   - [ ] test_permission_request_skipped_with_global_policy
   - [ ] test_global_policy_persists_across_sessions
 
 **CLI Tests**:
-- [ ] `acp-server/tests/test_cli_permissions.py`
+- [ ] `codelab/tests/server/test_cli_permissions.py`
   - [ ] test_permissions_list_command
   - [ ] test_permissions_set_command
   - [ ] test_permissions_reset_command_single
@@ -1420,7 +1420,7 @@ classDiagram
 
 ### 13.7.4 Документация
 
-- [ ] **`acp-server/README.md`**
+- [ ] **`codelab/README.md`**
   - [ ] Add "Global Policy Management" section
   - [ ] Show CLI usage examples
   - [ ] Explain fallback chain
@@ -1438,14 +1438,14 @@ classDiagram
 ### 13.7.5 Verification
 
 - [ ] Run `make check` — All tests pass
-- [ ] Run `uv run --directory acp-server ruff check .`
-- [ ] Run `uv run --directory acp-server python -m pytest tests/test_global_policy*.py tests/test_cli_permissions.py -v`
+- [ ] Run `cd codelab && uv run ruff check .`
+- [ ] Run `cd codelab && uv run python -m pytest tests/test_global_policy*.py tests/test_cli_permissions.py -v`
 - [ ] Manual testing:
-  - [ ] `acp-server permissions list` (empty)
-  - [ ] `acp-server permissions set execute allow_always`
-  - [ ] `acp-server permissions list` (shows 1 policy)
-  - [ ] `acp-server permissions reset execute`
-  - [ ] `acp-server permissions list` (empty again)
+  - [ ] `codelab permissions list` (empty)
+  - [ ] `codelab permissions set execute allow_always`
+  - [ ] `codelab permissions list` (shows 1 policy)
+  - [ ] `codelab permissions reset execute`
+  - [ ] `codelab permissions list` (empty again)
 - [ ] E2E: Create 2 sessions, set global policy, verify applied in both
 
 ---
@@ -1459,7 +1459,7 @@ classDiagram
 | `SessionState.permission_policy` | ✅ Неизменён | По-прежнему dict[str, str] |
 | `resolve_remembered_permission_decision()` сигнатура | ⚠️ Расширена | Добавлен optional параметр `global_manager` |
 | JSON format session files | ✅ Неизменён | Сохраняется в том же виде |
-| CLI команды `acp-server run` | ✅ Неизменены | Работают как раньше |
+| CLI команды `codelab serve` | ✅ Неизменены | Работают как раньше |
 | Permission options (allow_once/always/reject_once/always) | ✅ Неизменены | Поведение идентично |
 
 ### 13.8.2 Что изменяется
@@ -1607,10 +1607,10 @@ except StorageError as e:
 ### 13.10.3 CLI error messages
 
 ```bash
-$ acp-server permissions set execute invalid
+$ codelab permissions set execute invalid
 ✗ Invalid decision: 'invalid'. Must be 'allow_always' or 'reject_always'
 
-$ acp-server permissions set execute allow_always
+$ codelab permissions set execute allow_always
 Permission denied: Cannot write to ~/.acp/global_permissions.json
 ```
 

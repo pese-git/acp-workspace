@@ -96,7 +96,7 @@ class PermissionModal(ModalScreen[str | None]):
 - Callback на выбор опции
 
 **Проблемы в интеграции:**
-- Требует вызова `app.push_screen(modal)` в [`tui/app.py:498`](acp-client/src/acp_client/tui/app.py:498)
+- Требует вызова `app.push_screen(modal)` в [`tui/app.py:498`](codelab/src/codelab/client/tui/app.py:498)
 - Callback `on_choice` вызывает `coordinator.resolve_permission()` или `coordinator.cancel_permission()`
 - Но callback=None в `ACPTransportService._handle_permission_request_with_handler()`
 
@@ -386,7 +386,7 @@ graph TB
 
 ### 4.1 Новые файлы
 
-#### `acp-client/src/acp_client/tui/components/inline_permission_widget.py` (~200 строк)
+#### `codelab/src/codelab/client/tui/components/inline_permission_widget.py` (~200 строк)
 ```python
 """Встроенный виджет подтверждения разрешения в ChatView."""
 
@@ -398,10 +398,10 @@ from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
 from textual.widgets import Button, Static
 
-from acp_client.messages import PermissionOption, PermissionToolCall
+from codelab.client.messages import PermissionOption, PermissionToolCall
 
 if TYPE_CHECKING:
-    from acp_client.presentation.permission_view_model import PermissionViewModel
+    from codelab.client.presentation.permission_view_model import PermissionViewModel
 
 
 class InlinePermissionWidget(Static):
@@ -481,7 +481,7 @@ class InlinePermissionWidget(Static):
                 self.remove()
 ```
 
-#### `acp-client/src/acp_client/tui/components/chat_view_permission_manager.py` (~150 строк)
+#### `codelab/src/codelab/client/tui/components/chat_view_permission_manager.py` (~150 строк)
 ```python
 """Менеджер встроенного виджета разрешения в ChatView."""
 
@@ -490,12 +490,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Callable
 
 import structlog
-from acp_client.messages import PermissionOption, PermissionToolCall
-from acp_client.tui.components.inline_permission_widget import InlinePermissionWidget
+from codelab.client.messages import PermissionOption, PermissionToolCall
+from codelab.client.tui.components.inline_permission_widget import InlinePermissionWidget
 
 if TYPE_CHECKING:
-    from acp_client.presentation.permission_view_model import PermissionViewModel
-    from acp_client.tui.components.chat_view import ChatView
+    from codelab.client.presentation.permission_view_model import PermissionViewModel
+    from codelab.client.tui.components.chat_view import ChatView
 
 
 class ChatViewPermissionManager:
@@ -569,10 +569,10 @@ class ChatViewPermissionManager:
 
 ### 4.2 Изменяемые файлы
 
-#### `acp-client/src/acp_client/tui/components/chat_view.py` (расширение)
+#### `codelab/src/codelab/client/tui/components/chat_view.py` (расширение)
 ```python
 # Добавить импорт менеджера
-from acp_client.tui.components.chat_view_permission_manager import ChatViewPermissionManager
+from codelab.client.tui.components.chat_view_permission_manager import ChatViewPermissionManager
 
 class ChatView(VerticalScroll):
     """Расширена поддержкой встроенного виджета разрешения."""
@@ -606,7 +606,7 @@ class ChatView(VerticalScroll):
             )
 ```
 
-#### `acp-client/src/acp_client/tui/app.py` (значительное изменение)
+#### `codelab/src/codelab/client/tui/app.py` (значительное изменение)
 ```python
 class ACPClientApp(App[None]):
     """Главное приложение с поддержкой встроенного виджета разрешения."""
@@ -632,7 +632,7 @@ class ACPClientApp(App[None]):
         Новая реализация использует встроенный виджет вместо ModalScreen.
         """
         try:
-            from acp_client.application.session_coordinator import SessionCoordinator
+            from codelab.client.application.session_coordinator import SessionCoordinator
             
             coordinator = self._container.resolve(SessionCoordinator)
             
@@ -661,7 +661,7 @@ class ACPClientApp(App[None]):
             )
 ```
 
-#### `acp-client/src/acp_client/presentation/permission_view_model.py` (минимальное расширение)
+#### `codelab/src/codelab/client/presentation/permission_view_model.py` (минимальное расширение)
 ```python
 class PermissionViewModel(BaseViewModel):
     """Расширена для поддержки встроенного виджета.
@@ -690,7 +690,7 @@ class PermissionViewModel(BaseViewModel):
             self._current_request_id.value = request_id
 ```
 
-#### `acp-client/src/acp_client/tui/components/__init__.py` (добавить экспорт)
+#### `codelab/src/codelab/client/tui/components/__init__.py` (добавить экспорт)
 ```python
 from .inline_permission_widget import InlinePermissionWidget
 from .chat_view_permission_manager import ChatViewPermissionManager
@@ -704,16 +704,16 @@ __all__ = [
 
 ### 4.3 Тестовые файлы
 
-#### `acp-client/tests/test_tui_inline_permission_widget_mvvm.py` (НОВЫЙ ~400 строк)
+#### `codelab/tests/client/test_tui_inline_permission_widget_mvvm.py` (НОВЫЙ ~400 строк)
 ```python
 """Тесты встроенного виджета разрешения с MVVM интеграцией."""
 
 import pytest
 from textual.pilot import Pilot
 
-from acp_client.messages import PermissionOption, PermissionToolCall
-from acp_client.presentation.permission_view_model import PermissionViewModel
-from acp_client.tui.components.inline_permission_widget import InlinePermissionWidget
+from codelab.client.messages import PermissionOption, PermissionToolCall
+from codelab.client.presentation.permission_view_model import PermissionViewModel
+from codelab.client.tui.components.inline_permission_widget import InlinePermissionWidget
 
 
 @pytest.mark.asyncio
@@ -774,9 +774,9 @@ class TestChatViewPermissionManager:
     
     async def test_manager_mounts_widget_in_chat_view(self):
         """Менеджер должен монтировать виджет в ChatView."""
-        from acp_client.presentation.chat_view_model import ChatViewModel
-        from acp_client.tui.components.chat_view import ChatView
-        from acp_client.tui.components.chat_view_permission_manager import (
+        from codelab.client.presentation.chat_view_model import ChatViewModel
+        from codelab.client.tui.components.chat_view import ChatView
+        from codelab.client.tui.components.chat_view_permission_manager import (
             ChatViewPermissionManager,
         )
         
@@ -790,16 +790,16 @@ class TestChatViewPermissionManager:
         assert manager.permission_vm == permission_vm
 ```
 
-#### `acp-client/tests/test_tui_chat_view_permission_integration.py` (НОВЫЙ ~350 строк)
+#### `codelab/tests/client/test_tui_chat_view_permission_integration.py` (НОВЫЙ ~350 строк)
 ```python
 """Интеграционные тесты ChatView с встроенным виджетом разрешения."""
 
 import pytest
 
-from acp_client.messages import PermissionOption, PermissionToolCall
-from acp_client.presentation.chat_view_model import ChatViewModel
-from acp_client.presentation.permission_view_model import PermissionViewModel
-from acp_client.tui.components.chat_view import ChatView
+from codelab.client.messages import PermissionOption, PermissionToolCall
+from codelab.client.presentation.chat_view_model import ChatViewModel
+from codelab.client.presentation.permission_view_model import PermissionViewModel
+from codelab.client.tui.components.chat_view import ChatView
 
 
 @pytest.mark.asyncio
@@ -866,12 +866,12 @@ class TestChatViewPermissionIntegration:
 
 ```python
 # Старые тесты продолжат работать с PermissionModal:
-# acp-client/tests/test_tui_permission_modal.py
-# acp-client/tests/test_tui_permission_modal_mvvm.py
+# codelab/tests/client/test_tui_permission_modal.py
+# codelab/tests/client/test_tui_permission_modal_mvvm.py
 
 # Новые тесты будут для InlinePermissionWidget:
-# acp-client/tests/test_tui_inline_permission_widget_mvvm.py
-# acp-client/tests/test_tui_chat_view_permission_integration.py
+# codelab/tests/client/test_tui_inline_permission_widget_mvvm.py
+# codelab/tests/client/test_tui_chat_view_permission_integration.py
 ```
 
 ### Стратегия миграции тестов

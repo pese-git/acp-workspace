@@ -6,8 +6,8 @@
 2. [Обзор системы](#обзор-системы)
 3. [Архитектура на уровне компонентов](#архитектура-на-уровне-компонентов)
 4. [Потоки данных](#потоки-данных)
-5. [Двухуровневая история в acp-server](#двухуровневая-история)
-6. [Background Receive Loop в acp-client](#background-receive-loop)
+5. [Двухуровневая история в codelab.server](#двухуровневая-история)
+6. [Background Receive Loop в codelab.client](#background-receive-loop)
 7. [Критические архитектурные решения](#критические-архитектурные-решения)
 8. [Расширение и интеграция](#расширение-и-интеграция)
 
@@ -18,8 +18,8 @@
 ACP (Agent Client Protocol) — стандартный протокол взаимодействия между LLM-агентами и клиентами для выполнения задач с инструментами.
 
 Проект реализован как **монорепозиторий** с двумя независимыми Python-компонентами:
-- **[acp-server/](acp-server/)** — серверная реализация протокола с LLM-агентом и управлением сессиями
-- **[acp-client/](acp-client/)** — клиентская реализация с TUI интерфейсом на базе Clean Architecture
+- **[codelab/](codelab/)** — серверная реализация протокола с LLM-агентом и управлением сессиями
+- **[codelab/](codelab/)** — клиентская реализация с TUI интерфейсом на базе Clean Architecture
 
 ---
 
@@ -69,20 +69,20 @@ graph TB
 
 | Компонент | Слой | Ответственность | Файлы |
 |-----------|------|-----------------|-------|
-| **TUI** | Presentation | Textual компоненты, User Interaction | `acp-client/src/acp_client/tui/` |
-| **ViewModels** | Presentation | MVVM паттерн, Observable state | `acp-client/src/acp_client/presentation/` |
-| **Use Cases** | Application | Business scenarios, DTOs | `acp-client/src/acp_client/application/` |
-| **DIContainer** | Infrastructure | Dependency Injection | [`acp-client/src/acp_client/infrastructure/di_container.py`](acp-client/src/acp_client/infrastructure/di_container.py:33) |
-| **BackgroundReceiveLoop** | Infrastructure | Единственный receive() на WebSocket | [`acp-client/src/acp_client/infrastructure/services/background_receive_loop.py`](acp-client/src/acp_client/infrastructure/services/background_receive_loop.py:22) |
-| **MessageRouter** | Infrastructure | Маршрутизация сообщений | [`acp-client/src/acp_client/infrastructure/services/message_router.py`](acp-client/src/acp_client/infrastructure/services/message_router.py:26) |
-| **EventBus** | Infrastructure | Pub/Sub система событий | [`acp-client/src/acp_client/infrastructure/events/bus.py`](acp-client/src/acp_client/infrastructure/events/bus.py) |
-| **ACPProtocol** | Protocol | Диспетчер методов ACP | [`acp-server/src/acp_server/protocol/core.py`](acp-server/src/acp_server/protocol/core.py:39) |
-| **Handlers** | Protocol | Обработчики методов (auth, session, prompt) | [`acp-server/src/acp_server/protocol/handlers/`](acp-server/src/acp_server/protocol/handlers/) |
-| **PromptOrchestrator** | Protocol | Главный оркестратор prompt-turn | [`acp-server/src/acp_server/protocol/handlers/prompt_orchestrator.py`](acp-server/src/acp_server/protocol/handlers/prompt_orchestrator.py:32) |
-| **AgentOrchestrator** | Agent | Управление LLM-агентом | [`acp-server/src/acp_server/agent/orchestrator.py`](acp-server/src/acp_server/agent/orchestrator.py:18) |
-| **ToolRegistry** | Tools | Регистрация и управление инструментами | [`acp-server/src/acp_server/tools/registry.py`](acp-server/src/acp_server/tools/registry.py) |
-| **Storage** | Storage | Persistence для сессий | [`acp-server/src/acp_server/storage/`](acp-server/src/acp_server/storage/) |
-| **HttpServer** | Transport | WebSocket endpoint и JSON-RPC | [`acp-server/src/acp_server/http_server.py`](acp-server/src/acp_server/http_server.py) |
+| **TUI** | Presentation | Textual компоненты, User Interaction | `codelab/src/codelab/client/tui/` |
+| **ViewModels** | Presentation | MVVM паттерн, Observable state | `codelab/src/codelab/client/presentation/` |
+| **Use Cases** | Application | Business scenarios, DTOs | `codelab/src/codelab/client/application/` |
+| **DIContainer** | Infrastructure | Dependency Injection | [`codelab/src/codelab/client/infrastructure/di_container.py`](codelab/src/codelab/client/infrastructure/di_container.py:33) |
+| **BackgroundReceiveLoop** | Infrastructure | Единственный receive() на WebSocket | [`codelab/src/codelab/client/infrastructure/services/background_receive_loop.py`](codelab/src/codelab/client/infrastructure/services/background_receive_loop.py:22) |
+| **MessageRouter** | Infrastructure | Маршрутизация сообщений | [`codelab/src/codelab/client/infrastructure/services/message_router.py`](codelab/src/codelab/client/infrastructure/services/message_router.py:26) |
+| **EventBus** | Infrastructure | Pub/Sub система событий | [`codelab/src/codelab/client/infrastructure/events/bus.py`](codelab/src/codelab/client/infrastructure/events/bus.py) |
+| **ACPProtocol** | Protocol | Диспетчер методов ACP | [`codelab/src/codelab/server/protocol/core.py`](codelab/src/codelab/server/protocol/core.py:39) |
+| **Handlers** | Protocol | Обработчики методов (auth, session, prompt) | [`codelab/src/codelab/server/protocol/handlers/`](codelab/src/codelab/server/protocol/handlers/) |
+| **PromptOrchestrator** | Protocol | Главный оркестратор prompt-turn | [`codelab/src/codelab/server/protocol/handlers/prompt_orchestrator.py`](codelab/src/codelab/server/protocol/handlers/prompt_orchestrator.py:32) |
+| **AgentOrchestrator** | Agent | Управление LLM-агентом | [`codelab/src/codelab/server/agent/orchestrator.py`](codelab/src/codelab/server/agent/orchestrator.py:18) |
+| **ToolRegistry** | Tools | Регистрация и управление инструментами | [`codelab/src/codelab/server/tools/registry.py`](codelab/src/codelab/server/tools/registry.py) |
+| **Storage** | Storage | Persistence для сессий | [`codelab/src/codelab/server/storage/`](codelab/src/codelab/server/storage/) |
+| **HttpServer** | Transport | WebSocket endpoint и JSON-RPC | [`codelab/src/codelab/server/http_server.py`](codelab/src/codelab/server/http_server.py) |
 
 ---
 
@@ -383,7 +383,7 @@ graph TD
 
 ### SessionState.history vs events_history
 
-На сервере в acp-server существует **двухуровневая система истории**:
+На сервере в codelab.server существует **двухуровневая система истории**:
 
 ```mermaid
 graph TB
@@ -526,11 +526,11 @@ graph LR
 
 ## Критические архитектурные решения
 
-### 1. Абстракция SessionStorage в acp-server
+### 1. Абстракция SessionStorage в codelab.server
 
 **Проблема:** Нужна гибкость в выборе хранилища (в памяти для dev, на диске для prod).
 
-**Решение:** [`SessionStorage(ABC)`](acp-server/src/acp_server/storage/base.py) — интерфейс с двумя реализациями:
+**Решение:** [`SessionStorage(ABC)`](codelab/src/codelab/server/storage/base.py) — интерфейс с двумя реализациями:
 
 ```mermaid
 graph TB
@@ -572,7 +572,7 @@ graph TB
 
 **Проблема:** Не все клиенты поддерживают все инструменты (например, некоторые не поддерживают file system операции).
 
-**Решение:** [`ClientRuntimeCapabilities`](acp-server/src/acp_server/protocol/state.py) для фильтрации:
+**Решение:** [`ClientRuntimeCapabilities`](codelab/src/codelab/server/protocol/state.py) для фильтрации:
 
 ```python
 # Пример из PromptOrchestrator
@@ -591,7 +591,7 @@ available_tools = [
 
 **Проблема:** Инструменты (fs/*, terminal/*) должны выполняться асинхронно на клиенте, а сервер ждет результата.
 
-**Решение:** [`ClientRPCService`](acp-server/src/acp_server/client_rpc/service.py) управляет [`asyncio.Future`](acp-server/src/acp_server/client_rpc/models.py):
+**Решение:** [`ClientRPCService`](codelab/src/codelab/server/client_rpc/service.py) управляет [`asyncio.Future`](codelab/src/codelab/server/client_rpc/models.py):
 
 ```mermaid
 graph TD
@@ -617,7 +617,7 @@ graph TD
 
 **Проблема:** Обработка prompt-turn включает множество этапов (валидация, LLM, tools, permissions, обновления).
 
-**Решение:** [`PromptOrchestrator`](acp-server/src/acp_server/protocol/handlers/prompt_orchestrator.py) интегрирует все компоненты:
+**Решение:** [`PromptOrchestrator`](codelab/src/codelab/server/protocol/handlers/prompt_orchestrator.py) интегрирует все компоненты:
 
 ```python
 class PromptOrchestrator:
@@ -650,7 +650,7 @@ class PromptOrchestrator:
 
 ## Расширение и интеграция
 
-### Добавление нового инструмента в acp-server
+### Добавление нового инструмента в codelab.server
 
 1. **Определить инструмент** в `tools/definitions/`
 2. **Реализовать executor** в `tools/executors/`
@@ -678,10 +678,10 @@ class MyToolExecutor(ToolExecutor):
 tool_registry.register("my/tool", MyToolDefinition(), MyToolExecutor())
 ```
 
-### Добавление нового обработчика в acp-client
+### Добавление нового обработчика в codelab.client
 
 1. **Создать handler** в `infrastructure/handlers/`
-2. **Зарегистрировать** в [`HandlerRegistry`](acp-client/src/acp_client/infrastructure/handler_registry.py)
+2. **Зарегистрировать** в [`HandlerRegistry`](codelab/src/codelab/client/infrastructure/handler_registry.py)
 3. **Добавить tests** в `tests/`
 
 Пример:
@@ -701,7 +701,7 @@ registry.register("my/method", MyHandler())
 
 ### Интеграция нового LLM провайдера
 
-1. **Наследовать** [`BaseLLMProvider`](acp-server/src/acp_server/llm/base.py)
+1. **Наследовать** [`BaseLLMProvider`](codelab/src/codelab/server/llm/base.py)
 2. **Реализовать** `async generate()` метод
 3. **Зарегистрировать** в CLI флаге `--llm-provider`
 

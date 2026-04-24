@@ -1,4 +1,4 @@
-# Архитектура обработки Permissions на acp-client
+# Архитектура обработки Permissions клиента
 
 **Версия**: 1.0  
 **Дата**: 2026-04-16  
@@ -54,7 +54,7 @@ ACP протокол определяет метод `session/request_permission
 ### 2.1 Что уже реализовано
 
 #### 2.1.1 Серверная сторона
-Полная реализация в [`acp-server/src/acp_server/protocol/handlers/permissions.py`](../../acp-server/src/acp_server/protocol/handlers/permissions.py):
+Полная реализация в [`codelab/src/codelab/server/protocol/handlers/permissions.py`](../../codelab/src/codelab/server/protocol/handlers/permissions.py):
 - Обработчик метода `session/request_permission`
 - GlobalPolicyManager для управления глобальными политиками
 - Типизированные сообщения (PermissionRequest, PermissionOption, PermissionOutcome)
@@ -62,25 +62,25 @@ ACP протокол определяет метод `session/request_permission
 #### 2.1.2 Клиентская UI часть
 Существующие компоненты:
 
-1. **PermissionViewModel** ([`acp-client/src/acp_client/presentation/permission_view_model.py`](../../acp-client/src/acp_client/presentation/permission_view_model.py)):
+1. **PermissionViewModel** ([`codelab/src/codelab/client/presentation/permission_view_model.py`](../../codelab/src/codelab/client/presentation/permission_view_model.py)):
    - Управление состоянием модального окна
    - Observable properties: permission_type, resource, message, is_visible
    - Методы: show_request(), hide(), clear()
 
-2. **PermissionModal** ([`acp-client/src/acp_client/tui/components/permission_modal.py`](../../acp-client/src/acp_client/tui/components/permission_modal.py)):
+2. **PermissionModal** ([`codelab/src/codelab/client/tui/components/permission_modal.py`](../../codelab/src/codelab/client/tui/components/permission_modal.py)):
    - Textual UI компонент (ModalScreen)
    - Отображение опций разрешения
    - Привязка к PermissionViewModel через Observable
 
 #### 2.1.3 Инфраструктура транспорта
-Компоненты для маршрутизации ([`acp-client/src/acp_client/infrastructure/services/`](../../acp-client/src/acp_client/infrastructure/services/)):
+Компоненты для маршрутизации ([`codelab/src/codelab/client/infrastructure/services/`](../../codelab/src/codelab/client/infrastructure/services/)):
 - **ACPTransportService** — низкоуровневая коммуникация
 - **MessageRouter** — маршрутизация по методам и id (уже поддерживает permission queue type)
 - **RoutingQueues** — распределение сообщений
 - **BackgroundReceiveLoop** — единственный receive() на WebSocket
 
 #### 2.1.4 Протокол (сообщения)
-В [`acp-client/src/acp_client/messages.py`](../../acp-client/src/acp_client/messages.py):
+В [`codelab/src/codelab/client/messages.py`](../../codelab/src/codelab/client/messages.py):
 - PermissionOption (optionId, name, kind, description, disabled)
 - PermissionOutcome (outcome, optionId)
 - Поддержка request/response в ACPMessage
@@ -99,8 +99,8 @@ ACP протокол определяет метод `session/request_permission
 ### 2.3 Ссылки на существующие компоненты
 
 ```
-acp-client/
-├── src/acp_client/
+codelab/
+├── src/codelab/src/codelab/client/
 │   ├── messages.py (PermissionOption, PermissionOutcome)
 │   ├── presentation/
 │   │   └── permission_view_model.py (PermissionViewModel)
@@ -258,7 +258,7 @@ graph TB
 #### 4.1.1 Интерфейс
 
 ```python
-# acp-client/src/acp_client/infrastructure/services/permission_handler.py
+# codelab/src/codelab/client/infrastructure/services/permission_handler.py
 
 from __future__ import annotations
 
@@ -267,10 +267,10 @@ from typing import TYPE_CHECKING
 
 import structlog
 
-from acp_client.messages import ACPMessage, JsonRpcId
+from codelab.client.messages import ACPMessage, JsonRpcId
 
 if TYPE_CHECKING:
-    from acp_client.presentation.permission_view_model import PermissionViewModel
+    from codelab.client.presentation.permission_view_model import PermissionViewModel
     from .routing_queues import RoutingQueues
 
 
@@ -461,7 +461,7 @@ class PermissionHandler:
 #### 4.1.2 PermissionRequestManager
 
 ```python
-# acp-client/src/acp_client/infrastructure/services/permission_request_manager.py
+# codelab/src/codelab/client/infrastructure/services/permission_request_manager.py
 
 from __future__ import annotations
 
@@ -470,7 +470,7 @@ from typing import Any
 
 import structlog
 
-from acp_client.messages import JsonRpcId, PermissionOption
+from codelab.client.messages import JsonRpcId, PermissionOption
 
 
 @dataclass
@@ -652,7 +652,7 @@ class PermissionRequestManager:
 **Необходимое расширение:**
 
 ```python
-# В acp-client/src/acp_client/infrastructure/services/acp_transport_service.py
+# В codelab/src/codelab/client/infrastructure/services/acp_transport_service.py
 
 class ACPTransportService(TransportService):
     """Добавить методы для обработки permissions."""
@@ -786,7 +786,7 @@ active = manager.get_all_active()
 #### 4.4.1 Изменения в PermissionModal
 
 ```python
-# acp-client/src/acp_client/tui/components/permission_modal.py
+# codelab/src/codelab/client/tui/components/permission_modal.py
 
 class PermissionModal(ModalScreen[PermissionOutcome]):
     """Модальное окно permission request с поддержкой callback."""
@@ -834,7 +834,7 @@ class PermissionModal(ModalScreen[PermissionOutcome]):
 #### 4.4.2 Изменения в PermissionViewModel
 
 ```python
-# acp-client/src/acp_client/presentation/permission_view_model.py
+# codelab/src/codelab/client/presentation/permission_view_model.py
 
 class PermissionViewModel(BaseViewModel):
     """ViewModel с поддержкой callbacks для user actions."""
@@ -1094,12 +1094,12 @@ stateDiagram-v2
 #### 8.1.1 PermissionRequest
 
 ```python
-# acp-client/tests/infrastructure/test_permission_request.py
+# codelab/tests/client/infrastructure/test_permission_request.py
 
 import asyncio
 import pytest
 
-from acp_client.infrastructure.services.permission_request_manager import (
+from codelab.client.infrastructure.services.permission_request_manager import (
     PermissionRequest,
     PermissionOutcome,
 )
@@ -1157,12 +1157,12 @@ async def test_permission_request_timeout():
 #### 8.1.2 PermissionRequestManager
 
 ```python
-# acp-client/tests/infrastructure/test_permission_request_manager.py
+# codelab/tests/client/infrastructure/test_permission_request_manager.py
 
 import asyncio
 import pytest
 
-from acp_client.infrastructure.services.permission_request_manager import (
+from codelab.client.infrastructure.services.permission_request_manager import (
     PermissionRequestManager,
     PermissionOutcome,
 )
@@ -1247,16 +1247,16 @@ async def test_multiple_concurrent_requests():
 #### 8.1.3 PermissionHandler
 
 ```python
-# acp-client/tests/infrastructure/test_permission_handler.py
+# codelab/tests/client/infrastructure/test_permission_handler.py
 
 import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from acp_client.infrastructure.services.permission_handler import (
+from codelab.client.infrastructure.services.permission_handler import (
     PermissionHandler,
 )
-from acp_client.messages import ACPMessage
+from codelab.client.messages import ACPMessage
 
 
 @pytest.mark.asyncio
@@ -1318,16 +1318,16 @@ async def test_permission_handler_format_response():
 ### 8.2 Integration тесты
 
 ```python
-# acp-client/tests/integration/test_permission_integration.py
+# codelab/tests/client/integration/test_permission_integration.py
 
 import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from acp_client.infrastructure.services.permission_handler import (
+from codelab.client.infrastructure.services.permission_handler import (
     PermissionHandler,
 )
-from acp_client.infrastructure.services.permission_request_manager import (
+from codelab.client.infrastructure.services.permission_request_manager import (
     PermissionRequestManager,
     PermissionOutcome,
 )
@@ -1399,7 +1399,7 @@ async def test_permission_timeout():
 ### 8.3 E2E сценарии
 
 ```python
-# acp-client/tests/e2e/test_permission_e2e.py
+# codelab/tests/client/e2e/test_permission_e2e.py
 
 @pytest.mark.asyncio
 @pytest.mark.integration
@@ -1462,7 +1462,7 @@ async def test_e2e_permission_flow_with_real_server():
 ### 10.1 Permission Handler (полный класс)
 
 ```python
-# acp-client/src/acp_client/infrastructure/services/permission_handler.py
+# codelab/src/codelab/client/infrastructure/services/permission_handler.py
 
 """Обработчик входящих permission request сообщений от сервера."""
 
@@ -1474,10 +1474,10 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
-from acp_client.messages import ACPMessage, JsonRpcId
+from codelab.client.messages import ACPMessage, JsonRpcId
 
 if TYPE_CHECKING:
-    from acp_client.presentation.permission_view_model import PermissionViewModel
+    from codelab.client.presentation.permission_view_model import PermissionViewModel
     from .routing_queues import RoutingQueues
 
 
@@ -1670,7 +1670,7 @@ class PermissionHandler:
 ### 10.2 Session Coordinator integration
 
 ```python
-# В acp-client/src/acp_client/application/session_coordinator.py
+# В codelab/src/codelab/client/application/session_coordinator.py
 
 class SessionCoordinator:
     """Координирует сессию и всю инфраструктуру."""
@@ -1691,7 +1691,7 @@ class SessionCoordinator:
 ### 10.3 Transport integration
 
 ```python
-# В acp-client/src/acp_client/infrastructure/services/acp_transport_service.py
+# В codelab/src/codelab/client/infrastructure/services/acp_transport_service.py
 
 class ACPTransportService(TransportService):
     """Расширение для support permission handling."""

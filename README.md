@@ -1,114 +1,85 @@
-# ACP Protocol Workspace
+# CodeLab
 
-Монорепозиторий с двумя независимыми Python-проектами:
+> Унифицированная реализация [Agent Client Protocol (ACP)](doc/Agent%20Client%20Protocol/get-started/01-Introduction.md) — AI-агент и клиент в едином Python-пакете.
 
-- `acp-server` — ACP-сервер с WebSocket транспортом
-- `acp-client` — ACP-клиент с WebSocket транспортом
+## Что такое CodeLab?
 
-Каждый подпроект содержит собственные `pyproject.toml`, `uv.lock`, тесты и CLI-команды.
+CodeLab — это полнофункциональная реализация протокола ACP для взаимодействия AI-агентов с редакторами кода. Проект объединяет:
+
+- **ACP-сервер** — интеллектуальный агент с поддержкой OpenAI GPT-4
+- **TUI-клиент** — терминальный интерфейс на базе Textual
+- **Web UI** — браузерный интерфейс для удаленной работы
+
+## Быстрый старт
+
+```bash
+# Установка зависимостей
+cd codelab && uv sync
+
+# Запуск сервера
+uv run codelab serve --port 8080
+
+# Подключение TUI-клиента (в другом терминале)
+uv run codelab connect --url ws://localhost:8080/acp/ws
+```
+
+## Документация
+
+| Раздел | Описание |
+|--------|----------|
+| [Введение](doc/product/overview/01-introduction.md) | Обзор возможностей и архитектуры |
+| [Быстрый старт](doc/product/getting-started/03-quickstart.md) | Пошаговая инструкция запуска |
+| [Руководство пользователя](doc/product/user-guide/01-tui-client.md) | Работа с TUI-клиентом |
+| [Руководство разработчика](doc/product/developer-guide/01-architecture.md) | Архитектура и разработка |
+| [Справочник CLI](doc/product/reference/01-cli.md) | Команды и опции |
+| [ACP Protocol](doc/Agent%20Client%20Protocol/) | Официальная спецификация протокола |
+
+## Структура проекта
+
+```
+acp-protocol/
+├── codelab/                    # Основной Python-пакет
+│   ├── src/codelab/
+│   │   ├── client/             # ACP-клиент (Clean Architecture)
+│   │   │   ├── domain/         # Сущности и интерфейсы
+│   │   │   ├── application/    # Use Cases, State Machine
+│   │   │   ├── infrastructure/ # DI, Transport, Handlers
+│   │   │   ├── presentation/   # ViewModels (MVVM)
+│   │   │   └── tui/            # Textual UI компоненты
+│   │   ├── server/             # ACP-сервер
+│   │   │   ├── protocol/       # Обработчики методов ACP
+│   │   │   ├── agent/          # LLM-агент (OpenAI)
+│   │   │   ├── tools/          # Инструменты (fs, terminal)
+│   │   │   ├── storage/        # Хранилище сессий
+│   │   │   └── llm/            # LLM-провайдеры
+│   │   ├── shared/             # Общие модули
+│   │   └── cli.py              # CLI точка входа
+│   └── tests/                  # Тесты (~1800 тестов)
+├── doc/
+│   ├── product/                # Продуктовая документация
+│   ├── architecture/           # Архитектурные документы
+│   └── Agent Client Protocol/  # Спецификация ACP (не изменять!)
+└── Makefile                    # Команды сборки и проверок
+```
+
+## Проверки
+
+```bash
+# Полный набор проверок
+make check
+
+# Или вручную
+cd codelab
+uv run ruff check .
+uv run ty check
+uv run python -m pytest
+```
 
 ## Требования
 
 - Python 3.12+
-- [uv](https://docs.astral.sh/uv/)
+- [uv](https://docs.astral.sh/uv/) — менеджер пакетов
 
-## Установка зависимостей
+## Лицензия
 
-Из корня репозитория:
-
-```bash
-make server-sync client-sync
-```
-
-или отдельно:
-
-```bash
-uv sync --directory acp-server
-uv sync --directory acp-client
-```
-
-## Быстрый старт
-
-1) Запустить сервер (WS):
-
-```bash
-make run-server-ws
-# с обязательной аутентификацией
-uv run --directory acp-server acp-server --host 127.0.0.1 --port 8080 --require-auth
-# с local API key backend для authenticate
-uv run --directory acp-server acp-server --host 127.0.0.1 --port 8080 --require-auth --auth-api-key dev-secret
-```
-
-2) Отправить запрос с клиента:
-
-```bash
-make ping-ws
-```
-
-## Поддерживаемые методы
-
-### Agent-side методы (Client → Agent)
-
-- `authenticate` — аутентификация клиента
-- `initialize` — инициализация соединения и negotiation capabilities
-- `session/new` — создание новой сессии
-- `session/load` — загрузка существующей сессии
-- `session/list` — список сессий с пагинацией
-- `session/prompt` — отправка промпта агенту
-- `session/cancel` — отмена текущей операции
-- `session/set_config_option` — изменение конфигурации сессии
-- `session/set_mode` — изменение режима сессии (legacy, используйте `configOptions`)
-
-### Client-side методы (Agent → Client)
-
-- `session/request_permission` — запрос разрешения на выполнение операции
-- `fs/read_text_file` — чтение текстового файла
-- `fs/write_text_file` — запись текстового файла
-- `terminal/create` — создание терминала
-- `terminal/output` — получение вывода терминала
-- `terminal/wait_for_exit` — ожидание завершения команды
-- `terminal/kill` — принудительное завершение команды
-- `terminal/release` — освобождение терминала
-
-### Notifications (Agent → Client)
-
-- `session/update` — уведомления о ходе выполнения (tool_call, plan, message chunks и др.)
-
-Профиль реализации в этом репозитории: только ACP over WebSocket (`GET /acp/ws`).
-
-### Legacy-методы (для обратной совместимости)
-
-- `ping`
-- `echo`
-- `shutdown`
-
-## Проверки
-
-Полный набор проверок для обоих подпроектов:
-
-```bash
-make check
-```
-
-Что включает `make check`:
-
-- `ruff check`
-- `ty check`
-- `python -m pytest`
-
-## Архитектура
-
-Подробное описание архитектуры проекта см. в [ARCHITECTURE.md](ARCHITECTURE.md).
-
-Ключевые компоненты:
-- **Protocol Layer** — модульная реализация ACP методов через handlers
-- **Transport Layer** — WebSocket с асинхронной обработкой
-- **Storage Layer** — plug-and-play backends (InMemoryStorage, JsonFileStorage)
-- **Logging Layer** — структурированное логирование с structlog
-
-## Структура репозитория
-
-- `acp-server/` — серверная реализация ACP
-- `acp-client/` — клиентская реализация ACP
-- `doc/Agent Client Protocol/` — рабочие материалы и спецификация ACP
-- `doc/ACP_IMPLEMENTATION_STATUS.md` — матрица соответствия и приоритетный backlog
+MIT License
