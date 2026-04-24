@@ -8,12 +8,12 @@
 
 ### Added
 - **MCP Integration (Stage 8)**: Поддержка Model Context Protocol
-  - Модуль `acp-server/src/acp_server/mcp/` с компонентами:
-    - [`models.py`](acp-server/src/acp_server/mcp/models.py) — Pydantic модели MCP протокола
-    - [`transport.py`](acp-server/src/acp_server/mcp/transport.py) — StdioTransport для запуска MCP серверов
-    - [`client.py`](acp-server/src/acp_server/mcp/client.py) — MCPClient с полным жизненным циклом
-    - [`tool_adapter.py`](acp-server/src/acp_server/mcp/tool_adapter.py) — MCPToolAdapter для интеграции с ToolRegistry
-    - [`manager.py`](acp-server/src/acp_server/mcp/manager.py) — MCPManager для управления несколькими серверами
+  - Модуль `codelab/src/codelab/server/mcp/` с компонентами:
+    - [`models.py`](codelab/src/codelab/server/mcp/models.py) — Pydantic модели MCP протокола
+    - [`transport.py`](codelab/src/codelab/server/mcp/transport.py) — StdioTransport для запуска MCP серверов
+    - [`client.py`](codelab/src/codelab/server/mcp/client.py) — MCPClient с полным жизненным циклом
+    - [`tool_adapter.py`](codelab/src/codelab/server/mcp/tool_adapter.py) — MCPToolAdapter для интеграции с ToolRegistry
+    - [`manager.py`](codelab/src/codelab/server/mcp/manager.py) — MCPManager для управления несколькими серверами
   - Поддержка параметра `mcpServers` в `session/new` и `session/load`
   - 27 unit-тестов для MCP модуля
 
@@ -44,7 +44,7 @@
   * Риски и mitigation strategies
 
 **Тесты:**
-- [`acp-server/tests/test_permission_policy_persistence.py`](acp-server/tests/test_permission_policy_persistence.py) (6 integration тестов)
+- [`codelab/tests/server/test_permission_policy_persistence.py`](codelab/tests/server/test_permission_policy_persistence.py) (6 integration тестов)
   * `test_allow_always_persists_across_save_load`
   * `test_reject_always_persists_across_save_load`
   * `test_multiple_permission_policies_persist`
@@ -75,17 +75,17 @@
 - Определено 40+ E2E сценариев с приоритетами
 
 #### E2E Test Infrastructure
-- [`acp-server/tests/e2e/conftest.py`](acp-server/tests/e2e/conftest.py) — 9 pytest fixtures для всех типов контента
-- [`acp-server/tests/e2e/helpers.py`](acp-server/tests/e2e/helpers.py) — 6 утилит-функций для проверок
-- [`acp-server/tests/e2e/base_e2e_test.py`](acp-server/tests/e2e/base_e2e_test.py) — базовый класс для E2E тестов
+- [`codelab/tests/server/e2e/conftest.py`](codelab/tests/server/e2e/conftest.py) — 9 pytest fixtures для всех типов контента
+- [`codelab/tests/server/e2e/helpers.py`](codelab/tests/server/e2e/helpers.py) — 6 утилит-функций для проверок
+- [`codelab/tests/server/e2e/base_e2e_test.py`](codelab/tests/server/e2e/base_e2e_test.py) — базовый класс для E2E тестов
 
 #### E2E Tests (24 теста)
-- [`test_e2e_text_content.py`](acp-server/tests/e2e/test_e2e_text_content.py) — 4 теста для text content
-- [`test_e2e_diff_content.py`](acp-server/tests/e2e/test_e2e_diff_content.py) — 4 теста для diff content
-- [`test_e2e_image_content.py`](acp-server/tests/e2e/test_e2e_image_content.py) — 4 теста для image content
-- [`test_e2e_audio_content.py`](acp-server/tests/e2e/test_e2e_audio_content.py) — 4 теста для audio content
-- [`test_e2e_embedded_content.py`](acp-server/tests/e2e/test_e2e_embedded_content.py) — 4 теста для embedded content
-- [`test_e2e_resource_link_content.py`](acp-server/tests/e2e/test_e2e_resource_link_content.py) — 4 теста для resource_link content
+- [`test_e2e_text_content.py`](codelab/tests/server/e2e/test_e2e_text_content.py) — 4 теста для text content
+- [`test_e2e_diff_content.py`](codelab/tests/server/e2e/test_e2e_diff_content.py) — 4 теста для diff content
+- [`test_e2e_image_content.py`](codelab/tests/server/e2e/test_e2e_image_content.py) — 4 теста для image content
+- [`test_e2e_audio_content.py`](codelab/tests/server/e2e/test_e2e_audio_content.py) — 4 теста для audio content
+- [`test_e2e_embedded_content.py`](codelab/tests/server/e2e/test_e2e_embedded_content.py) — 4 теста для embedded content
+- [`test_e2e_resource_link_content.py`](codelab/tests/server/e2e/test_e2e_resource_link_content.py) — 4 теста для resource_link content
 
 #### Test Coverage
 - Полный цикл: ToolExecutor → ContentExtractor → ContentValidator → ContentFormatter
@@ -94,8 +94,8 @@
 - 100% success rate (24/24 passed)
 
 #### Fixes
-- Добавлены экспорты `TextResource` и `BlobResource` в [`protocol/content/__init__.py`](acp-server/src/acp_server/protocol/content/__init__.py)
-- Исправлены линтинг ошибки в [`test_content_formatting.py`](acp-server/tests/test_content_formatting.py)
+- Добавлены экспорты `TextResource` и `BlobResource` в [`protocol/content/__init__.py`](codelab/src/codelab/server/protocol/content/__init__.py)
+- Исправлены линтинг ошибки в [`test_content_formatting.py`](codelab/tests/server/test_content_formatting.py)
 
 ### Fixed - Tool Registry Duplication (2026-04-15)
 
@@ -111,7 +111,7 @@
 
 **Исправлена передача capabilities от клиента согласно ACP спецификации**
 
-- acp-client теперь отправляет правильные `clientCapabilities` в `initialize` запросе
+- Клиент теперь отправляет правильные `clientCapabilities` в `initialize` запросе
 - `AgentOrchestrator` фильтрует инструменты на основе объявленных capabilities
 - Соответствие спецификации: "Clients and Agents MUST treat all capabilities omitted in the initialize request as UNSUPPORTED"
 
@@ -122,45 +122,45 @@
 #### Фаза 1: Расширение ToolExecutionResult для Content Support
 
 **Новые возможности:**
-- Добавлено поле `content: list[dict[str, Any]]` в [`ToolExecutionResult`](acp-server/src/acp_server/tools/base.py) для структурированного content
-- [`FileSystemExecutor`](acp-server/src/acp_server/tools/executors/filesystem_executor.py) генерирует text и diff content автоматически
-- [`TerminalExecutor`](acp-server/src/acp_server/tools/executors/terminal_executor.py) генерирует text content с terminal output
+- Добавлено поле `content: list[dict[str, Any]]` в [`ToolExecutionResult`](codelab/src/codelab/server/tools/base.py) для структурированного content
+- [`FileSystemExecutor`](codelab/src/codelab/server/tools/executors/filesystem_executor.py) генерирует text и diff content автоматически
+- [`TerminalExecutor`](codelab/src/codelab/server/tools/executors/terminal_executor.py) генерирует text content с terminal output
 - Backward compatibility: старые executors без content продолжают работать через fallback
 
 **Файлы:**
-- `acp-server/src/acp_server/tools/base.py` - расширен ToolExecutionResult
-- `acp-server/src/acp_server/tools/executors/filesystem_executor.py` - генерация content
-- `acp-server/src/acp_server/tools/executors/terminal_executor.py` - генерация content
-- `acp-server/tests/test_tool_execution_result_content.py` - 18 unit тестов
+- `codelab/src/codelab/server/tools/base.py` - расширен ToolExecutionResult
+- `codelab/src/codelab/server/tools/executors/filesystem_executor.py` - генерация content
+- `codelab/src/codelab/server/tools/executors/terminal_executor.py` - генерация content
+- `codelab/tests/server/test_tool_execution_result_content.py` - 18 unit тестов
 
 **Commit:** `0922a29`
 
 #### Фаза 2: Content Extraction и Validation
 
 **Новые модули:**
-- [`ContentExtractor`](acp-server/src/acp_server/protocol/content/extractor.py) - извлечение content из tool results
-- [`ContentValidator`](acp-server/src/acp_server/protocol/content/validator.py) - валидация согласно ACP спецификации
+- [`ContentExtractor`](codelab/src/codelab/server/protocol/content/extractor.py) - извлечение content из tool results
+- [`ContentValidator`](codelab/src/codelab/server/protocol/content/validator.py) - валидация согласно ACP спецификации
 - Поддержка всех 6 типов content: text, diff, image, audio, embedded, resource_link
 
 **Интеграция:**
-- `acp-server/src/acp_server/protocol/state.py` - добавлено `result_content` в ToolCallState
-- `acp-server/src/acp_server/protocol/handlers/prompt_orchestrator.py` - интеграция extractor/validator
-- `acp-server/tests/test_content_extraction.py` - 29 unit тестов
+- `codelab/src/codelab/server/protocol/state.py` - добавлено `result_content` в ToolCallState
+- `codelab/src/codelab/server/protocol/handlers/prompt_orchestrator.py` - интеграция extractor/validator
+- `codelab/tests/server/test_content_extraction.py` - 29 unit тестов
 
 **Commit:** `0922a29`
 
 #### Фаза 3: Content Formatting для LLM
 
 **Новые возможности:**
-- [`ContentFormatter`](acp-server/src/acp_server/protocol/content/formatter.py) - форматирование в LLM-специфичные форматы
+- [`ContentFormatter`](codelab/src/codelab/server/protocol/content/formatter.py) - форматирование в LLM-специфичные форматы
 - Поддержка OpenAI API format: `{"role": "tool", "tool_call_id": "...", "content": "..."}`
 - Поддержка Anthropic API format: `{"role": "user", "content": [{"type": "tool_result", ...}]}`
 - Автоматическое объединение content items разных типов в читаемый текст для LLM
 
 **Интеграция:**
-- `acp-server/src/acp_server/protocol/handlers/prompt_orchestrator.py` - форматирование tool results для LLM
+- `codelab/src/codelab/server/protocol/handlers/prompt_orchestrator.py` - форматирование tool results для LLM
 - Определение провайдера из session config
-- `acp-server/tests/test_content_formatting.py` - 29 unit тестов
+- `codelab/tests/server/test_content_formatting.py` - 29 unit тестов
 
 **Commit:** `bee5578`
 
@@ -251,7 +251,7 @@
 - `SimpleToolRegistry.execute_tool()` теперь полностью async с поддержкой metadata
 
 #### Documentation
-- Обновлен `acp-server/README.md` с секцией Tool Calls Integration
+- Обновлен `codelab/README.md` с секцией Tool Calls Integration
 - Обновлен `doc/ACP_IMPLEMENTATION_STATUS.md` со статистикой
 
 ### Added - Этап 2: Клиентские методы (File System и Terminal) (2026-04-14)
@@ -263,16 +263,16 @@
 - Исправлено понимание направления вызовов: Agent → Client RPC
 - 6 диаграмм Mermaid (Component, Sequence, State, Class)
 
-#### acp-server: ClientRPCService
+#### Server: ClientRPCService
 
-- Реализован [`ClientRPCService`](acp-server/src/acp_server/client_rpc/service.py) для инициирования RPC на клиент
+- Реализован [`ClientRPCService`](codelab/src/codelab/server/client_rpc/service.py) для инициирования RPC на клиент
 - 12 Pydantic V2 моделей для File System и Terminal методов
 - Иерархия исключений (ClientRPCError, ClientRPCTimeoutError, ClientCapabilityMissingError, ClientRPCResponseError)
 - Проверка clientCapabilities перед вызовами
 - Управление pending requests с timeout
 - 23 unit теста ✅
 
-#### acp-client: Handlers и Executors
+#### Client: Handlers и Executors
 
 **FileSystemExecutor и FileSystemHandler:**
 - Асинхронные операции с файлами (read/write)
@@ -325,8 +325,8 @@
 #### Метрики качества
 | Метрика | Значение |
 |---------|----------|
-| acp-server (ClientRPCService) | 4 файла, ~500 LOC, 23 теста ✅ |
-| acp-client (Handlers + Executors) | 6 файлов, ~924 LOC, 59 тестов ✅ |
+| Server (ClientRPCService) | 4 файла, ~500 LOC, 23 теста ✅ |
+| Client (Handlers + Executors) | 6 файлов, ~924 LOC, 59 тестов ✅ |
 | **Всего** | **10 файлов, ~1424 LOC, 82 теста ✅** |
 | ruff check | ✅ 0 ошибок |
 | type check | ✅ 0 ошибок |
@@ -350,7 +350,7 @@
 
 #### Модули реализации
 
-**acp-server** (`acp-server/src/acp_server/protocol/content/`):
+**Server** (`codelab/src/codelab/server/protocol/content/`):
 - `base.py` — базовые классы и интерфейсы
 - `text.py` — TextContent реализация
 - `image.py` — ImageContent реализация с валидацией MIME типов
@@ -359,7 +359,7 @@
 - `resource_link.py` — ResourceLinkContent реализация
 - `__init__.py` — экспорт публичного API
 
-**acp-client** (`acp-client/src/acp_client/domain/content/`):
+**Client** (`codelab/src/codelab/client/domain/content/`):
 - `base.py` — базовые классы и интерфейсы
 - `text.py` — TextContent реализация
 - `image.py` — ImageContent реализация с валидацией MIME типов
@@ -402,11 +402,11 @@
 
 ### Added - ACP Server Phase 1 Critical Refactoring (2026-04-11)
 
-**Критический рефакторинг архитектуры acp-server с целью разрешения проблем модульности, типизации и дублирования кода**
+**Критический рефакторинг архитектуры сервера с целью разрешения проблем модульности, типизации и дублирования кода**
 
 #### 1. Иерархия специализированных исключений
 
-- **Новый файл:** [`acp-server/src/acp_server/exceptions.py`](acp-server/src/acp_server/exceptions.py)
+- **Новый файл:** [`codelab/src/codelab/server/exceptions.py`](codelab/src/codelab/server/exceptions.py)
 - **10 специализированных классов исключений:**
   - `ACPError` (базовое)
   - `ValidationError`, `AuthenticationError`, `AuthorizationError`, `PermissionDeniedError`
@@ -417,7 +417,7 @@
 
 #### 2. Pydantic модели типизации
 
-- **Новый файл:** [`acp-server/src/acp_server/models.py`](acp-server/src/acp_server/models.py)
+- **Новый файл:** [`codelab/src/codelab/server/models.py`](codelab/src/codelab/server/models.py)
 - **10+ строго типизированных моделей:** замена `dict[str, Any]` на Pydantic BaseModel
   - Сообщения: `MessageContent`, `HistoryMessage`
   - Команды: `CommandParameter`, `AvailableCommand`
@@ -428,7 +428,7 @@
 
 #### 3. SessionFactory для создания сессий
 
-- **Новый файл:** [`acp-server/src/acp_server/protocol/session_factory.py`](acp-server/src/acp_server/protocol/session_factory.py)
+- **Новый файл:** [`codelab/src/codelab/server/protocol/session_factory.py`](codelab/src/codelab/server/protocol/session_factory.py)
 - **Централизованная логика создания сессий** с валидацией и подготовкой параметров
   - Валидация обязательных параметров (cwd)
   - Автогенерация ID сессии
@@ -437,22 +437,21 @@
 
 #### 4. Начало разложения session_prompt (Этап 1/7)
 
-- **Новая директория:** [`acp-server/src/acp_server/protocol/prompt_handlers/`](acp-server/src/acp_server/protocol/prompt_handlers/)
+- **Новая директория:** [`codelab/src/codelab/server/protocol/prompt_handlers/`](codelab/src/codelab/server/protocol/prompt_handlers/)
 - **PromptValidator** — валидация входных данных для prompt-turn
   - Валидация sessionId, prompt array, content blocks
   - Проверка состояния сессии (нет активного turn)
-  - 15+ unit тестов в [`tests/test_prompt_validator.py`](acp-server/tests/test_prompt_validator.py)
+  - 15+ unit тестов в [`tests/test_prompt_validator.py`](codelab/tests/server/test_prompt_validator.py)
 - **DirectiveResolver** — парсинг slash-команд и разрешение directives
   - Парсинг `/tool`, `/plan`, `/fs-read`, `/term-run` команд
   - Применение overrides из `_meta.promptDirectives`
-  - 20+ unit тестов в [`tests/test_directive_resolver.py`](acp-server/tests/test_directive_resolver.py)
+  - 20+ unit тестов в [`tests/test_directive_resolver.py`](codelab/tests/server/test_directive_resolver.py)
 - **Архитектурный план:** 7-этапное разложение монолитной функции `session_prompt` (2151 строк)
 
 #### Документация
 
-- **[acp-server/docs/archive/refactoring/REFACTORING_STATUS.md](acp-server/docs/archive/refactoring/REFACTORING_STATUS.md)** — полный статус рефакторинга Фазы 1
-- **[acp-server/README.md#Архитектура](acp-server/README.md)** — описание новых компонентов архитектуры
-- Обновлены существующие документы: архивные документы в `acp-server/docs/archive/refactoring/`
+- Полный статус рефакторинга Фазы 1 (документы архивированы)
+- **[codelab/README.md](codelab/README.md)** — описание новых компонентов архитектуры
 
 #### Результаты тестирования
 

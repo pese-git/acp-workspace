@@ -4,11 +4,9 @@
 
 ## Контекст проекта
 
-- Монорепозиторий из двух независимых Python-проектов:
-  - `acp-server/`
-  - `acp-client/`
+- Единый Python-проект `codelab/` объединяющий сервер и клиент ACP
 - Менеджер окружения и запуск команд: `uv`
-- Базовые проверки запускаются через `Makefile` из корня.
+- Базовые проверки запускаются через `Makefile` из корня
 
 ## Рабочие правила
 
@@ -31,90 +29,102 @@
 make check
 ```
 
-Если изменения только в одном подпроекте, допускается локальная проверка:
+Или локальная проверка в codelab:
 
 ```bash
-uv run --directory acp-server ruff check .
-uv run --directory acp-server ty check
-uv run --directory acp-server python -m pytest
-```
-
-или:
-
-```bash
-uv run --directory acp-client ruff check .
-uv run --directory acp-client ty check
-uv run --directory acp-client python -m pytest
+cd codelab
+uv run ruff check .
+uv run ty check
+uv run python -m pytest
 ```
 
 ## Где что находится
 
-- Сервер:
-  - `acp-server/src/acp_server/protocol/` — модули протокола ACP:
-    - `__init__.py` — экспорт публичных классов (ACPProtocol, ProtocolOutcome)
-    - `core.py` — основной класс ACPProtocol (диспетчеризация методов)
-    - `state.py` — dataclasses состояния (SessionState, ToolCallState, и т.д.)
-    - `session_factory.py` — фабрика создания сессий
-    - `handlers/` — обработчики методов протокола:
-      - `auth.py` — методы аутентификации (authenticate, initialize)
-      - `session.py` — управление сессиями (session/new, load, list)
-      - `prompt.py` — обработка prompt-turn (session/prompt, cancel)
-      - `prompt_orchestrator.py` — главный оркестратор prompt-turn
-      - `permissions.py` — управление разрешениями (session/request_permission)
-      - `permission_manager.py` — менеджер политик разрешений
-      - `global_policy_manager.py` — глобальные политики разрешений
-      - `config.py` — конфигурация сессий (session/set_config_option, session/set_mode)
-      - `client_rpc_handler.py` — обработка RPC вызовов к клиенту
-      - `tool_call_handler.py` — обработка tool calls
-      - `plan_builder.py` — построение планов агента
-      - `state_manager.py` — управление состоянием
-      - `turn_lifecycle_manager.py` — управление жизненным циклом turn
-      - `legacy.py` — ping, echo, shutdown
-    - `content/` — типы контента (ACP Content Types):
-      - `base.py` — базовые классы
-      - `text.py`, `image.py`, `audio.py` — типы контента
-      - `embedded.py`, `resource_link.py` — ресурсы
-      - `extractor.py`, `validator.py`, `formatter.py` — обработка контента
-    - `prompt_handlers/` — обработчики директив промптов:
-      - `directive_resolver.py` — разрешение директив
-      - `validator.py` — валидация промптов
-  - `acp-server/src/acp_server/storage/` — хранилище сессий:
-    - `base.py` — SessionStorage(ABC) интерфейс
-    - `memory.py` — InMemoryStorage (development)
-    - `json_file.py` — JsonFileStorage (production с persistence)
-    - `global_policy_storage.py` — хранилище глобальных политик
-  - `acp-server/src/acp_server/client_rpc/` — RPC сервис для вызовов Agent → Client:
-    - `service.py` — ClientRPCService
-    - `models.py` — модели данных
-    - `exceptions.py` — исключения
-  - `acp-server/src/acp_server/agent/` — LLM агенты:
-    - `orchestrator.py` — AgentOrchestrator (управление LLM-агентом)
-    - `naive.py` — NaiveAgent (базовая реализация)
-    - `base.py` — базовые классы агентов
-    - `state.py` — состояние агента
-  - `acp-server/src/acp_server/tools/` — инструменты агента:
-    - `registry.py` — ToolRegistry (регистрация и управление инструментами)
-    - `base.py` — базовые классы инструментов
-    - `definitions/` — определения инструментов (filesystem.py, terminal.py)
-    - `executors/` — исполнители инструментов (filesystem_executor.py, terminal_executor.py)
-    - `integrations/` — интеграции (client_rpc_bridge.py, permission_checker.py)
-  - `acp-server/src/acp_server/llm/` — LLM провайдеры
-  - `acp-server/src/acp_server/http_server.py` — WebSocket транспорт
-  - `acp-server/src/acp_server/messages.py` — JSON-RPC сообщения
-- Клиент (Clean Architecture, 5 слоев):
-  - `acp-client/src/acp_client/domain/` — Domain Layer:
-    - `entities.py` — сущности (Session, Message)
-    - `repositories.py` — интерфейсы репозиториев
-  - `acp-client/src/acp_client/application/` — Application Layer:
-    - Use Cases, DTOs, State Machine
-  - `acp-client/src/acp_client/infrastructure/` — Infrastructure Layer:
-    - DI Container, Transport, Event Bus, Handlers (fs/*, terminal/*)
-  - `acp-client/src/acp_client/presentation/` — Presentation Layer:
-    - ViewModels (MVVM), Observable
-  - `acp-client/src/acp_client/tui/` — TUI Layer:
-    - Textual UI компоненты
-  - `acp-client/src/acp_client/cli.py` — CLI entrypoint
-  - `acp-client/src/acp_client/messages.py` — JSON-RPC сообщения
+### Общие модули (`codelab/src/codelab/shared/`)
+- `messages.py` — JSON-RPC сообщения (ACPMessage, JsonRpcError)
+- `logging.py` — структурированное логирование
+- `content/` — типы контента ACP (text, image, audio, embedded, resource_link)
+
+### Сервер (`codelab/src/codelab/server/`)
+- `protocol/` — модули протокола ACP:
+  - `__init__.py` — экспорт публичных классов (ACPProtocol, ProtocolOutcome)
+  - `core.py` — основной класс ACPProtocol (диспетчеризация методов)
+  - `state.py` — dataclasses состояния (SessionState, ToolCallState, и т.д.)
+  - `session_factory.py` — фабрика создания сессий
+  - `handlers/` — обработчики методов протокола:
+    - `auth.py` — методы аутентификации (authenticate, initialize)
+    - `session.py` — управление сессиями (session/new, load, list)
+    - `prompt.py` — обработка prompt-turn (session/prompt, cancel)
+    - `prompt_orchestrator.py` — главный оркестратор prompt-turn
+    - `permissions.py` — управление разрешениями (session/request_permission)
+    - `permission_manager.py` — менеджер политик разрешений
+    - `global_policy_manager.py` — глобальные политики разрешений
+    - `config.py` — конфигурация сессий (session/set_config_option, session/set_mode)
+    - `client_rpc_handler.py` — обработка RPC вызовов к клиенту
+    - `tool_call_handler.py` — обработка tool calls
+    - `plan_builder.py` — построение планов агента
+    - `state_manager.py` — управление состоянием
+    - `turn_lifecycle_manager.py` — управление жизненным циклом turn
+    - `legacy.py` — ping, echo, shutdown
+  - `content/` — типы контента (ACP Content Types):
+    - `base.py` — базовые классы
+    - `text.py`, `image.py`, `audio.py` — типы контента
+    - `embedded.py`, `resource_link.py` — ресурсы
+    - `extractor.py`, `validator.py`, `formatter.py` — обработка контента
+  - `prompt_handlers/` — обработчики директив промптов:
+    - `directive_resolver.py` — разрешение директив
+    - `validator.py` — валидация промптов
+- `storage/` — хранилище сессий:
+  - `base.py` — SessionStorage(ABC) интерфейс
+  - `memory.py` — InMemoryStorage (development)
+  - `json_file.py` — JsonFileStorage (production с persistence)
+  - `global_policy_storage.py` — хранилище глобальных политик
+- `client_rpc/` — RPC сервис для вызовов Agent → Client:
+  - `service.py` — ClientRPCService
+  - `models.py` — модели данных
+  - `exceptions.py` — исключения
+- `agent/` — LLM агенты:
+  - `orchestrator.py` — AgentOrchestrator (управление LLM-агентом)
+  - `naive.py` — NaiveAgent (базовая реализация)
+  - `base.py` — базовые классы агентов
+  - `state.py` — состояние агента
+- `tools/` — инструменты агента:
+  - `registry.py` — ToolRegistry (регистрация и управление инструментами)
+  - `base.py` — базовые классы инструментов
+  - `definitions/` — определения инструментов (filesystem.py, terminal.py)
+  - `executors/` — исполнители инструментов (filesystem_executor.py, terminal_executor.py)
+  - `integrations/` — интеграции (client_rpc_bridge.py, permission_checker.py)
+- `llm/` — LLM провайдеры (OpenAI, Mock)
+- `mcp/` — MCP интеграция
+- `http_server.py` — WebSocket транспорт
+- `web_app.py` — Web UI (Textual Web интеграция)
+- `cli.py` — CLI команды сервера
+
+### Клиент (`codelab/src/codelab/client/`)
+Clean Architecture, 5 слоев:
+
+- `domain/` — Domain Layer:
+  - `entities.py` — сущности (Session, Message)
+  - `repositories.py` — интерфейсы репозиториев
+- `application/` — Application Layer:
+  - Use Cases, DTOs, State Machine
+- `infrastructure/` — Infrastructure Layer:
+  - DI Container, Transport, Event Bus, Handlers (fs/*, terminal/*)
+- `presentation/` — Presentation Layer:
+  - ViewModels (MVVM), Observable
+- `tui/` — TUI Layer:
+  - Textual UI компоненты
+  - `components/` — виджеты (chat_view, file_tree, prompt_input, etc.)
+  - `navigation/` — менеджер навигации
+
+### CLI (`codelab/src/codelab/cli.py`)
+Единая точка входа:
+- `codelab serve` — запуск сервера
+- `codelab connect` — подключение TUI клиента
+
+### Тесты (`codelab/tests/`)
+- `client/` — тесты клиента (~1100 тестов)
+- `server/` — тесты сервера (~700 тестов)
 
 ## Git-правила
 
@@ -124,7 +134,7 @@ uv run --directory acp-client python -m pytest
 
 ## Документация
 
-- При изменении поведения обновлять соответствующие README (`README.md`, `acp-server/README.md`, `acp-client/README.md`).
+- При изменении поведения обновлять соответствующие README (`README.md`, `codelab/README.md`).
 - Для сверки с протоколом использовать материалы в `doc/Agent Client Protocol/`.
 - **Все диаграммы, схемы описывать с помощью Mermaid**.
 - **При каждом изменении архитектуры необходимо обновлять документацию и диаграммы/графики/схемы** — архитектурная документация должна отражать текущее состояние системы.
