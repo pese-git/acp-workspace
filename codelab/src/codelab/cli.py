@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import logging
 import os
 import sys
 import threading
@@ -37,7 +36,43 @@ DEFAULT_HOST = os.getenv("CODELAB_HOST", "127.0.0.1")
 
 # Домашняя директория CodeLab (из env или ~/.codelab)
 _codelab_home_env = os.getenv("CODELAB_HOME")
-CODELAB_HOME = Path(_codelab_home_env).expanduser() if _codelab_home_env else Path.home() / ".codelab"
+CODELAB_HOME = (
+    Path(_codelab_home_env).expanduser() if _codelab_home_env else Path.home() / ".codelab"
+)
+
+# Шаблон дефолтного .env файла для автоматической генерации при первом запуске
+DEFAULT_ENV_TEMPLATE = """# CodeLab Configuration
+# =====================
+# Этот файл создан автоматически при первом запуске.
+# Измените значения под ваши нужды.
+
+# === LLM Провайдер ===
+# Тип провайдера: openai, anthropic или mock
+CODELAB_LLM_PROVIDER=mock
+
+# API ключ (требуется для openai/anthropic)
+# CODELAB_LLM_API_KEY=sk-your-key-here
+
+# Base URL для LLM провайдера (опционально)
+# CODELAB_LLM_BASE_URL=https://api.openai.com/v1
+
+# Модель LLM (по умолчанию: gpt-4o)
+CODELAB_LLM_MODEL=gpt-4o
+
+# Temperature (0.0-1.0)
+CODELAB_LLM_TEMPERATURE=0.7
+
+# Максимальное количество токенов
+CODELAB_LLM_MAX_TOKENS=8192
+
+# === Сервер ===
+CODELAB_PORT=8765
+CODELAB_HOST=127.0.0.1
+
+# === Логирование ===
+# Уровень: DEBUG, INFO, WARNING, ERROR
+CODELAB_LOG_LEVEL=INFO
+"""
 
 
 def ensure_home_directory() -> None:
@@ -70,6 +105,13 @@ def ensure_home_directory() -> None:
     for directory in directories:
         directory.mkdir(parents=True, exist_ok=True)
 
+    # Генерация глобального .env если не существует
+    global_env = CODELAB_HOME / "config" / ".env"
+    if not global_env.exists():
+        global_env.write_text(DEFAULT_ENV_TEMPLATE, encoding="utf-8")
+        print(f"✅ Создан файл конфигурации: {global_env}")
+        print("💡 Отредактируйте его и добавьте CODELAB_LLM_API_KEY для работы с LLM.")
+
 
 def _configure_logging(verbose: bool = False) -> None:
     """Настраивает structlog для CLI с записью логов в файл.
@@ -82,10 +124,7 @@ def _configure_logging(verbose: bool = False) -> None:
 
     # Приоритет: флаг --verbose > CODELAB_LOG_LEVEL > INFO
     env_log_level = os.getenv("CODELAB_LOG_LEVEL", "INFO").upper()
-    if verbose:
-        level = "DEBUG"
-    else:
-        level = env_log_level
+    level = "DEBUG" if verbose else env_log_level
 
     # Используем setup_logging из shared модуля с записью в файл
     # Логи сохраняются в ~/.codelab/logs/codelab.log с ротацией
