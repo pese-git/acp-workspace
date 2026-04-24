@@ -1813,7 +1813,7 @@ classDiagram
 **Цель:** Создать инфраструктуру для обработки входящих RPC запросов на клиенте.
 
 **Задачи:**
-1. Расширить `MessageRouter` в `acp-client` для поддержки входящих requests
+1. Расширить `MessageRouter` в клиенте для поддержки входящих requests
 2. Создать `HandlerRegistry` с поддержкой fs/* и terminal/* методов
 3. Добавить механизм диспетчеризации requests на основе method name
 4. Добавить поддержку формирования JSON-RPC responses
