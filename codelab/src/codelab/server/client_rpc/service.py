@@ -346,8 +346,8 @@ class ClientRPCService:
         """
         self._check_capability("fs.readTextFile")
 
-        request = ReadTextFileRequest(  # type: ignore[call-arg]
-            session_id=session_id, path=path, line=line, limit=limit
+        request = ReadTextFileRequest(
+            sessionId=session_id, path=path, line=line, limit=limit
         )
 
         response = await self._call_method(
@@ -381,8 +381,8 @@ class ClientRPCService:
         """
         self._check_capability("fs.writeTextFile")
 
-        request = WriteTextFileRequest(  # type: ignore[call-arg]
-            session_id=session_id, path=path, content=content
+        request = WriteTextFileRequest(
+            sessionId=session_id, path=path, content=content
         )
 
         response = await self._call_method(
@@ -424,13 +424,13 @@ class ClientRPCService:
         """
         self._check_capability("terminal")
 
-        request = TerminalCreateRequest(  # type: ignore[call-arg]
-            session_id=session_id,
+        request = TerminalCreateRequest(
+            sessionId=session_id,
             command=command,
             args=args,
             env=env,
             cwd=cwd,
-            output_byte_limit=output_byte_limit,
+            outputByteLimit=output_byte_limit,
         )
 
         response = await self._call_method(
@@ -464,8 +464,8 @@ class ClientRPCService:
         """
         self._check_capability("terminal")
 
-        request = TerminalOutputRequest(  # type: ignore[call-arg]
-            session_id=session_id, terminal_id=terminal_id
+        request = TerminalOutputRequest(
+            sessionId=session_id, terminalId=terminal_id
         )
 
         response = await self._call_method(
@@ -499,8 +499,8 @@ class ClientRPCService:
         """
         self._check_capability("terminal")
 
-        request = TerminalWaitForExitRequest(  # type: ignore[call-arg]
-            session_id=session_id, terminal_id=terminal_id, timeout=timeout
+        request = TerminalWaitForExitRequest(
+            sessionId=session_id, terminalId=terminal_id, timeout=timeout
         )
 
         response = await self._call_method(
@@ -534,8 +534,8 @@ class ClientRPCService:
         """
         self._check_capability("terminal")
 
-        request = TerminalKillRequest(  # type: ignore[call-arg]
-            session_id=session_id, terminal_id=terminal_id, signal=signal
+        request = TerminalKillRequest(
+            sessionId=session_id, terminalId=terminal_id, signal=signal
         )
 
         response = await self._call_method(
@@ -567,8 +567,8 @@ class ClientRPCService:
         """
         self._check_capability("terminal")
 
-        request = TerminalReleaseRequest(  # type: ignore[call-arg]
-            session_id=session_id, terminal_id=terminal_id
+        request = TerminalReleaseRequest(
+            sessionId=session_id, terminalId=terminal_id
         )
 
         response = await self._call_method(

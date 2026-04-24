@@ -29,7 +29,7 @@ class PromptTextArea(TextArea):
         """Инициализирует поле ввода."""
         super().__init__(id="prompt-textarea")
 
-    def _on_key(self, event: events.Key) -> None:
+    async def _on_key(self, event: events.Key) -> None:
         """Обработка клавиш: Ctrl+Enter отправляет, Enter - новая строка."""
         # Ctrl+Enter - отправка сообщения через родителя
         key = event.key
@@ -43,6 +43,8 @@ class PromptTextArea(TextArea):
                     event.stop()
                     return
                 parent = parent.parent
+        # Вызываем родительский обработчик для стандартной обработки
+        await super()._on_key(event)
 
 
 class PromptInput(Horizontal):

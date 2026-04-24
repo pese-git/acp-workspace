@@ -46,10 +46,13 @@ class TransportService(ABC):
         ...
 
     @abstractmethod
-    async def receive(self) -> dict[str, Any]:
+    async def receive(self, request_id: str | int | None = None) -> dict[str, Any]:
         """Получает одно сообщение с сервера.
 
         Это блокирующая операция, ожидающая сообщение.
+
+        Аргументы:
+            request_id: Опциональный ID запроса для маршрутизации ответа
 
         Возвращает:
             JSON-RPC сообщение из сервера

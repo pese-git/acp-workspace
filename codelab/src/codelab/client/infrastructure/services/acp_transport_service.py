@@ -296,7 +296,7 @@ class ACPTransportService(TransportService):
             msg = f"Failed to send message: {e}"
             raise RuntimeError(msg) from e
 
-    async def receive(self, request_id: str | None = None) -> dict[str, Any]:
+    async def receive(self, request_id: str | int | None = None) -> dict[str, Any]:
         """Получает одно сообщение с сервера из очереди RPC ответов.
 
         Архитектура:

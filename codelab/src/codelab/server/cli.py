@@ -20,9 +20,10 @@ from pathlib import Path
 import structlog
 from dotenv import load_dotenv
 
+from codelab.shared.logging import setup_logging
+
 from .config import AppConfig
 from .http_server import ACPHttpServer
-from .logging import setup_logging
 from .storage import InMemoryStorage, JsonFileStorage, SessionStorage
 
 
