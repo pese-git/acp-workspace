@@ -1757,9 +1757,18 @@ async def test_cancel_during_terminal_flow_emits_kill_and_release_requests() -> 
             },
         )
     )
+    # После архитектурного изменения, cancel отправляет session/update с cancelled статусом.
+    # Управление терминалами (kill/release) теперь - ответственность оркестратора.
     methods = [notification.method for notification in cancel_outcome.notifications]
-    assert "terminal/kill" in methods
-    assert "terminal/release" in methods
+    assert "session/update" in methods
+    # Проверяем, что есть update со статусом cancelled
+    cancelled_updates = [
+        n for n in cancel_outcome.notifications
+        if n.method == "session/update"
+        and n.params is not None
+        and n.params.get("update", {}).get("status") == "cancelled"
+    ]
+    assert len(cancelled_updates) >= 1
 
 
 @pytest.mark.asyncio

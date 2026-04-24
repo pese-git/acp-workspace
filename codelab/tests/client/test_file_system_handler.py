@@ -11,6 +11,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+# Маркируем все async тесты в модуле
+pytestmark = pytest.mark.asyncio
+
 from codelab.client.infrastructure.handlers.file_system_handler import (
     FileSystemHandler,
 )

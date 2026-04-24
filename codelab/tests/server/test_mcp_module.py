@@ -189,7 +189,7 @@ class TestMCPClient:
 
         # Подменяем создание транспорта
         with patch(
-            "acp_server.mcp.client.StdioTransport",
+            "codelab.server.mcp.client.StdioTransport",
             return_value=mock_transport,
         ):
             await client.connect()
@@ -209,7 +209,7 @@ class TestMCPClient:
         
         # Первый connect
         with patch(
-            "acp_server.mcp.client.StdioTransport",
+            "codelab.server.mcp.client.StdioTransport",
             return_value=mock_transport,
         ):
             await client.connect()
@@ -235,7 +235,7 @@ class TestMCPClient:
         }
 
         with patch(
-            "acp_server.mcp.client.StdioTransport",
+            "codelab.server.mcp.client.StdioTransport",
             return_value=mock_transport,
         ):
             await client.connect()
@@ -268,7 +268,7 @@ class TestMCPClient:
         }
 
         with patch(
-            "acp_server.mcp.client.StdioTransport",
+            "codelab.server.mcp.client.StdioTransport",
             return_value=mock_transport,
         ):
             await client.connect()
@@ -315,7 +315,7 @@ class TestMCPManager:
         mock_client.list_tools = AsyncMock(return_value=sample_mcp_tools)
 
         with patch(
-            "acp_server.mcp.manager.MCPClient",
+            "codelab.server.mcp.manager.MCPClient",
             return_value=mock_client,
         ):
             tools = await manager.add_server(mcp_server_config)
@@ -339,7 +339,7 @@ class TestMCPManager:
         mock_client.list_tools = AsyncMock(return_value=sample_mcp_tools)
 
         with patch(
-            "acp_server.mcp.manager.MCPClient",
+            "codelab.server.mcp.manager.MCPClient",
             return_value=mock_client,
         ):
             await manager.add_server(mcp_server_config)
@@ -362,7 +362,7 @@ class TestMCPManager:
         mock_client.list_tools = AsyncMock(return_value=sample_mcp_tools)
 
         with patch(
-            "acp_server.mcp.manager.MCPClient",
+            "codelab.server.mcp.manager.MCPClient",
             return_value=mock_client,
         ):
             await manager.add_server(mcp_server_config)
@@ -396,7 +396,7 @@ class TestMCPManager:
         mock_client.list_tools = AsyncMock(return_value=sample_mcp_tools)
 
         with patch(
-            "acp_server.mcp.manager.MCPClient",
+            "codelab.server.mcp.manager.MCPClient",
             return_value=mock_client,
         ):
             await manager.add_server(mcp_server_config)
@@ -421,7 +421,7 @@ class TestMCPManager:
         mock_client.list_tools = AsyncMock(return_value=sample_mcp_tools)
 
         with patch(
-            "acp_server.mcp.manager.MCPClient",
+            "codelab.server.mcp.manager.MCPClient",
             return_value=mock_client,
         ):
             await manager.add_server(mcp_server_config)

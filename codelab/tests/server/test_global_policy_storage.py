@@ -41,7 +41,7 @@ class TestGlobalPolicyStorageInit:
         """Инициализация с default path."""
         storage = GlobalPolicyStorage()
 
-        expected = Path.home() / ".acp" / "global_permissions.json"
+        expected = Path.home() / ".codelab" / "data" / "policies" / "global_permissions.json"
         assert storage._storage_path == expected
 
 

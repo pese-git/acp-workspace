@@ -136,41 +136,21 @@ async def test_single_tool_call_success(
     tool_registry: SimpleToolRegistry,
     session_state: SessionState,
 ) -> None:
-    """Тест успешного выполнения одного tool call."""
+    """Тест делегирования tool call в PromptOrchestrator.
+    
+    После архитектурного изменения, агент НЕ выполняет tool calls сам.
+    Он возвращает stop_reason="tool_use" с tool_calls для обработки в PromptOrchestrator.
+    """
+    tool_call = LLMToolCall(
+        id="call_1",
+        name="calculator",
+        arguments={"operation": "add", "a": 2, "b": 3},
+    )
 
-    # Создать провайдер, который возвращает tool call в первый раз,
-    # потом финальный ответ
-    class SingleToolCallProvider(MockLLMProvider):
-        """Провайдер для одного tool call."""
-
-        def __init__(self):
-            super().__init__(response="Final answer")
-            self.call_count = 0
-
-        async def create_completion(self, messages, tools=None, **kwargs):
-            from codelab.server.llm.base import LLMResponse
-
-            self.call_count += 1
-
-            if self.call_count == 1:
-                tool_call = LLMToolCall(
-                    id="call_1",
-                    name="calculator",
-                    arguments={"operation": "add", "a": 2, "b": 3},
-                )
-                return LLMResponse(
-                    text="I need to calculate 2 + 3",
-                    tool_calls=[tool_call],
-                    stop_reason="tool_use",
-                )
-            else:
-                return LLMResponse(
-                    text="The result is 5",
-                    tool_calls=[],
-                    stop_reason="end_turn",
-                )
-
-    llm = SingleToolCallProvider()
+    llm = MockLLMProvider(
+        response="I need to calculate 2 + 3",
+        tool_calls=[tool_call],
+    )
     agent = NaiveAgent(llm=llm, tools=tool_registry)
 
     context = AgentContext(
@@ -184,10 +164,12 @@ async def test_single_tool_call_success(
 
     response = await agent.process_prompt(context)
 
-    # После выполнения tool, агент должен вернуть финальный ответ
-    assert response.stop_reason == "end_turn"
-    assert response.text == "The result is 5"
-    assert response.metadata["iterations"] >= 2
+    # Агент делегирует tool calls в PromptOrchestrator
+    assert response.stop_reason == "tool_use"
+    assert response.text == "I need to calculate 2 + 3"
+    assert len(response.tool_calls) == 1
+    assert response.tool_calls[0].name == "calculator"
+    assert response.metadata["iterations"] == 1
 
 
 @pytest.mark.asyncio
@@ -242,55 +224,21 @@ async def test_tool_call_chain(
     tool_registry: SimpleToolRegistry,
     session_state: SessionState,
 ) -> None:
-    """Тест цепочки tool calls (tool -> response -> tool -> response)."""
+    """Тест делегирования tool calls в PromptOrchestrator.
+    
+    После архитектурного изменения, агент НЕ выполняет tool calls сам,
+    поэтому не формирует цепочки. Он возвращает tool_calls для PromptOrchestrator.
+    """
+    tool_call = LLMToolCall(
+        id="call_1",
+        name="calculator",
+        arguments={"operation": "add", "a": 5, "b": 3},
+    )
 
-    # После выполнения первого tool, LLM должен вернуть второй
-    # Для этого создаем специальный провайдер, который ведет себя по-разному
-    # при повторных вызовах
-    class ChainedMockLLMProvider(MockLLMProvider):
-        """Mock провайдер для тестирования цепочек."""
-
-        def __init__(self) -> None:
-            super().__init__(response="Final answer")
-            self.call_count = 0
-
-        async def create_completion(self, messages, tools=None, **kwargs):
-            """Вернуть разные ответы в зависимости от количества вызовов."""
-            self.call_count += 1
-
-            if self.call_count == 1:
-                # Первый вызов - вернуть tool call
-                return self._get_response_with_tool_call()
-            else:
-                # Последующие вызовы - вернуть финальный ответ
-                return self._get_final_response()
-
-        def _get_response_with_tool_call(self):
-            """Вернуть ответ с tool call."""
-            from codelab.server.llm.base import LLMResponse
-
-            tool_call = LLMToolCall(
-                id="call_1",
-                name="calculator",
-                arguments={"operation": "add", "a": 5, "b": 3},
-            )
-            return LLMResponse(
-                text="I'll calculate 5 + 3",
-                tool_calls=[tool_call],
-                stop_reason="tool_use",
-            )
-
-        def _get_final_response(self):
-            """Вернуть финальный ответ."""
-            from codelab.server.llm.base import LLMResponse
-
-            return LLMResponse(
-                text="The result is 8",
-                tool_calls=[],
-                stop_reason="end_turn",
-            )
-
-    llm = ChainedMockLLMProvider()
+    llm = MockLLMProvider(
+        response="I'll calculate 5 + 3",
+        tool_calls=[tool_call],
+    )
     agent = NaiveAgent(llm=llm, tools=tool_registry)
 
     context = AgentContext(
@@ -304,9 +252,12 @@ async def test_tool_call_chain(
 
     response = await agent.process_prompt(context)
 
-    # Агент должен выполнить tool и вернуть финальный ответ
-    assert response.text == "The result is 8"
-    assert response.metadata["iterations"] >= 2
+    # Агент делегирует tool calls в PromptOrchestrator
+    assert response.stop_reason == "tool_use"
+    assert response.text == "I'll calculate 5 + 3"
+    assert len(response.tool_calls) == 1
+    assert response.tool_calls[0].name == "calculator"
+    assert response.metadata["iterations"] == 1
 
 
 # ============================================================================
@@ -319,27 +270,21 @@ async def test_max_iterations_exceeded(
     tool_registry: SimpleToolRegistry,
     session_state: SessionState,
 ) -> None:
-    """Тест достижения максимума итераций."""
+    """Тест делегирования tool calls в PromptOrchestrator.
+    
+    После архитектурного изменения, агент возвращает tool calls на первой итерации.
+    Контроль max_iterations теперь - ответственность PromptOrchestrator.
+    """
+    tool_call = LLMToolCall(
+        id="call_1",
+        name="echo",
+        arguments={"text": "loop"},
+    )
 
-    # Создать провайдер, который всегда возвращает tool calls
-    class InfiniteToolCallProvider(MockLLMProvider):
-        """Провайдер, который бесконечно возвращает tool calls."""
-
-        async def create_completion(self, messages, tools=None, **kwargs):
-            from codelab.server.llm.base import LLMResponse
-
-            tool_call = LLMToolCall(
-                id="call_1",
-                name="echo",
-                arguments={"text": "loop"},
-            )
-            return LLMResponse(
-                text="Continuing...",
-                tool_calls=[tool_call],
-                stop_reason="tool_use",
-            )
-
-    llm = InfiniteToolCallProvider()
+    llm = MockLLMProvider(
+        response="Continuing...",
+        tool_calls=[tool_call],
+    )
     agent = NaiveAgent(llm=llm, tools=tool_registry, max_iterations=3)
 
     context = AgentContext(
@@ -353,9 +298,10 @@ async def test_max_iterations_exceeded(
 
     response = await agent.process_prompt(context)
 
-    # Должен вернуть ошибку max_iterations
-    assert response.stop_reason == "max_iterations"
-    assert response.metadata["iterations"] == 3
+    # Агент делегирует tool calls в PromptOrchestrator на первой итерации
+    assert response.stop_reason == "tool_use"
+    assert len(response.tool_calls) == 1
+    assert response.metadata["iterations"] == 1
 
 
 @pytest.mark.asyncio
@@ -397,40 +343,21 @@ async def test_tool_execution_error(
     tool_registry: SimpleToolRegistry,
     session_state: SessionState,
 ) -> None:
-    """Тест обработки исключения при выполнении инструмента."""
+    """Тест делегирования error_tool в PromptOrchestrator.
+    
+    После архитектурного изменения, агент не выполняет tool calls сам,
+    поэтому не обрабатывает ошибки выполнения. Это ответственность PromptOrchestrator.
+    """
+    tool_call = LLMToolCall(
+        id="call_1",
+        name="error_tool",
+        arguments={},
+    )
 
-    # После выполнения tool с ошибкой, LLM должен вернуть финальный ответ
-    class ErrorHandlingProvider(MockLLMProvider):
-        """Провайдер для обработки ошибок."""
-
-        def __init__(self):
-            super().__init__(response="Final answer")
-            self.call_count = 0
-
-        async def create_completion(self, messages, tools=None, **kwargs):
-            from codelab.server.llm.base import LLMResponse
-
-            self.call_count += 1
-
-            if self.call_count == 1:
-                tool_call = LLMToolCall(
-                    id="call_1",
-                    name="error_tool",
-                    arguments={},
-                )
-                return LLMResponse(
-                    text="Calling error tool",
-                    tool_calls=[tool_call],
-                    stop_reason="tool_use",
-                )
-            else:
-                return LLMResponse(
-                    text="Tool failed, but I'll continue",
-                    tool_calls=[],
-                    stop_reason="end_turn",
-                )
-
-    llm = ErrorHandlingProvider()
+    llm = MockLLMProvider(
+        response="Calling error tool",
+        tool_calls=[tool_call],
+    )
     agent = NaiveAgent(llm=llm, tools=tool_registry)
 
     context = AgentContext(
@@ -444,8 +371,12 @@ async def test_tool_execution_error(
 
     response = await agent.process_prompt(context)
 
+    # Агент делегирует tool calls в PromptOrchestrator
     assert response is not None
-    assert response.metadata["iterations"] >= 2
+    assert response.stop_reason == "tool_use"
+    assert len(response.tool_calls) == 1
+    assert response.tool_calls[0].name == "error_tool"
+    assert response.metadata["iterations"] == 1
 
 
 # ============================================================================
@@ -608,42 +539,20 @@ async def test_integration_with_mock_provider(
     tool_registry: SimpleToolRegistry,
     session_state: SessionState,
 ) -> None:
-    """Интеграционный тест с MockLLMProvider."""
+    """Интеграционный тест с MockLLMProvider.
+    
+    После архитектурного изменения, агент делегирует tool calls в PromptOrchestrator.
+    """
+    tool_call = LLMToolCall(
+        id="call_1",
+        name="calculator",
+        arguments={"operation": "multiply", "a": 7, "b": 6},
+    )
 
-    # Создать провайдер, который выполняет две операции
-    class IntegrationMockProvider(MockLLMProvider):
-        """Mock провайдер для интеграционного теста."""
-
-        def __init__(self):
-            super().__init__(response="Calculation complete")
-            self.call_count = 0
-
-        async def create_completion(self, messages, tools=None, **kwargs):
-            from codelab.server.llm.base import LLMResponse
-
-            self.call_count += 1
-
-            if self.call_count == 1:
-                # Первый вызов - запрос калькулятора
-                tool_call = LLMToolCall(
-                    id="call_1",
-                    name="calculator",
-                    arguments={"operation": "multiply", "a": 7, "b": 6},
-                )
-                return LLMResponse(
-                    text="I need to calculate 7 * 6",
-                    tool_calls=[tool_call],
-                    stop_reason="tool_use",
-                )
-            else:
-                # Второй вызов - финальный ответ
-                return LLMResponse(
-                    text="The answer is 42",
-                    tool_calls=[],
-                    stop_reason="end_turn",
-                )
-
-    llm = IntegrationMockProvider()
+    llm = MockLLMProvider(
+        response="I need to calculate 7 * 6",
+        tool_calls=[tool_call],
+    )
     agent = NaiveAgent(llm=llm, tools=tool_registry)
 
     context = AgentContext(
@@ -657,6 +566,9 @@ async def test_integration_with_mock_provider(
 
     response = await agent.process_prompt(context)
 
-    assert response.text == "The answer is 42"
-    assert response.stop_reason == "end_turn"
-    assert response.metadata["iterations"] >= 2
+    # Агент делегирует tool calls в PromptOrchestrator
+    assert response.text == "I need to calculate 7 * 6"
+    assert response.stop_reason == "tool_use"
+    assert len(response.tool_calls) == 1
+    assert response.tool_calls[0].name == "calculator"
+    assert response.metadata["iterations"] == 1

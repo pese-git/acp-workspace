@@ -248,7 +248,7 @@ class TestPermissionManagerAcceptance:
         """Проверяет, что allow_once не сохраняет policy."""
         tool_call_id = "call_001"
         session.tool_calls[tool_call_id] = __import__(
-            "acp_server.protocol.state", fromlist=["ToolCallState"]
+            "codelab.server.protocol.state", fromlist=["ToolCallState"]
         ).ToolCallState(
             tool_call_id=tool_call_id,
             title="Test",

@@ -51,46 +51,23 @@ async def test_tool_execution_with_session_state(
     tool_registry: SimpleToolRegistry,
     session_state: SessionState,
 ) -> None:
-    """Интеграционный тест выполнения tool call с SessionState.
+    """Интеграционный тест передачи SessionState в AgentContext.
     
     Проверяет что:
     1. SessionState корректно передается в AgentContext
     2. AgentContext передается в process_prompt
-    3. Tool выполняется с SessionState в контексте
+    3. Агент делегирует tool calls в PromptOrchestrator (не выполняет их сам)
     """
-    
-    # Создать провайдер, который возвращает tool call
-    class ToolCallProvider(MockLLMProvider):
-        """Провайдер, который выполняет tool call."""
+    tool_call = LLMToolCall(
+        id="call_1",
+        name="echo",
+        arguments={"text": "Hello from integration test"},
+    )
 
-        def __init__(self):
-            super().__init__(response="Final answer")
-            self.call_count = 0
-
-        async def create_completion(self, messages, tools=None, **kwargs):
-            self.call_count += 1
-
-            if self.call_count == 1:
-                # Первый вызов - вернуть tool call
-                tool_call = LLMToolCall(
-                    id="call_1",
-                    name="echo",
-                    arguments={"text": "Hello from integration test"},
-                )
-                return LLMResponse(
-                    text="I'll echo the message",
-                    tool_calls=[tool_call],
-                    stop_reason="tool_use",
-                )
-            else:
-                # Второй вызов - вернуть финальный ответ
-                return LLMResponse(
-                    text="The tool returned: Echo: Hello from integration test",
-                    tool_calls=[],
-                    stop_reason="end_turn",
-                )
-
-    llm = ToolCallProvider()
+    llm = MockLLMProvider(
+        response="I'll echo the message",
+        tool_calls=[tool_call],
+    )
     agent = NaiveAgent(llm=llm, tools=tool_registry)
 
     # Создать context с SessionState
@@ -110,11 +87,13 @@ async def test_tool_execution_with_session_state(
     # Выполнить prompt с контекстом
     response = await agent.process_prompt(context)
 
-    # Проверить результаты
+    # Проверить результаты - агент делегирует tool calls в PromptOrchestrator
     assert response is not None
-    assert response.text == "The tool returned: Echo: Hello from integration test"
-    assert response.stop_reason == "end_turn"
-    assert response.metadata["iterations"] >= 2
+    assert response.text == "I'll echo the message"
+    assert response.stop_reason == "tool_use"
+    assert len(response.tool_calls) == 1
+    assert response.tool_calls[0].name == "echo"
+    assert response.metadata["iterations"] == 1
 
 
 @pytest.mark.asyncio

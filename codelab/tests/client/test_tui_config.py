@@ -31,7 +31,7 @@ def test_tui_config_store_fallbacks_on_invalid_payload(tmp_path: Path) -> None:
 
 def test_resolve_tui_connection_uses_store_values_when_args_missing(monkeypatch) -> None:
     monkeypatch.setattr(
-        "acp_client.tui.config.TUIConfigStore.load",
+        "codelab.client.tui.config.TUIConfigStore.load",
         lambda _self: TUIConfig(host="127.0.0.8", port=8800, theme="light"),
     )
 

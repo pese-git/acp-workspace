@@ -75,7 +75,7 @@ class TestInitialization:
             "read_file": "reject_always",
         }
 
-        with patch("acp_server.protocol.handlers.global_policy_manager.GlobalPolicyStorage"):
+        with patch("codelab.server.protocol.handlers.global_policy_manager.GlobalPolicyStorage"):
             manager = GlobalPolicyManager(mock_storage)
             await manager.initialize()
 

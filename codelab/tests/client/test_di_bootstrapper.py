@@ -118,7 +118,7 @@ class TestDIBootstrapper:
         # Имитируем ошибку при создании сервиса
         with (
             patch(
-                "acp_client.infrastructure.di_bootstrapper.EventBus",
+                "codelab.client.infrastructure.di_bootstrapper.EventBus",
                 side_effect=Exception("Test error"),
             ),
             pytest.raises(RuntimeError, match="Failed to build DI container"),

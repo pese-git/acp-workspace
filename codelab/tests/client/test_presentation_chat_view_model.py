@@ -262,7 +262,7 @@ def test_chat_history_uses_env_dir_when_history_dir_not_passed(tmp_path, monkeyp
     """При отсутствии history_dir используется путь из ACP_CLIENT_HISTORY_DIR."""
 
     env_history_dir = tmp_path / "history_from_env"
-    monkeypatch.setenv("ACP_CLIENT_HISTORY_DIR", str(env_history_dir))
+    monkeypatch.setenv("CODELAB_CLIENT_HISTORY_DIR", str(env_history_dir))
 
     vm = ChatViewModel(
         coordinator=None,
@@ -279,7 +279,7 @@ def test_chat_history_explicit_dir_has_priority_over_env(tmp_path, monkeypatch) 
 
     env_history_dir = tmp_path / "history_from_env"
     explicit_history_dir = tmp_path / "history_explicit"
-    monkeypatch.setenv("ACP_CLIENT_HISTORY_DIR", str(env_history_dir))
+    monkeypatch.setenv("CODELAB_CLIENT_HISTORY_DIR", str(env_history_dir))
 
     vm = ChatViewModel(
         coordinator=None,
@@ -294,9 +294,9 @@ def test_chat_history_explicit_dir_has_priority_over_env(tmp_path, monkeypatch) 
 
 
 def test_chat_history_falls_back_to_default_dir_when_env_missing(tmp_path, monkeypatch) -> None:
-    """Без history_dir и ACP_CLIENT_HISTORY_DIR используется ~/.acp-client/history."""
+    """Без history_dir и CODELAB_CLIENT_HISTORY_DIR используется ~/.codelab/data/history."""
 
-    monkeypatch.delenv("ACP_CLIENT_HISTORY_DIR", raising=False)
+    monkeypatch.delenv("CODELAB_CLIENT_HISTORY_DIR", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
 
     vm = ChatViewModel(
@@ -306,7 +306,7 @@ def test_chat_history_falls_back_to_default_dir_when_env_missing(tmp_path, monke
     )
     vm.add_message("user", "saved via default", session_id="sess_default")
 
-    default_history_dir = tmp_path / ".acp-client" / "history"
+    default_history_dir = tmp_path / ".codelab" / "data" / "history"
     assert (default_history_dir / "sess_default.json").exists()
 
 
