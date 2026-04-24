@@ -13,14 +13,12 @@ from unittest.mock import Mock
 
 import pytest
 
-from codelab.client.presentation.observable import Observable
-from codelab.client.presentation.ui_view_model import ConnectionStatus, SidebarTab, UIViewModel
+from codelab.client.presentation.ui_view_model import ConnectionStatus, UIViewModel
 from codelab.client.tui.components.container import Card, ContainerVariant, StyledContainer
 from codelab.client.tui.components.footer import AgentStatus, FooterBar
 from codelab.client.tui.components.header import HeaderBar
 from codelab.client.tui.components.main_layout import MainLayout
 from codelab.client.tui.components.panel import AccordionPanel, CollapsiblePanel
-
 
 # =============================================================================
 # Fixtures

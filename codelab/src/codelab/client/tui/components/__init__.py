@@ -5,6 +5,13 @@
 - StyledContainer, Card: универсальные контейнеры
 - CollapsiblePanel, AccordionPanel: сворачиваемые панели
 - HeaderBar, FooterBar: улучшенные header/footer
+
+Фаза 2 (Session Components):
+- MarkdownViewer, InlineMarkdown, CodeBlock: рендеринг Markdown
+- StreamingText, TypewriterText, ThinkingIndicator: streaming text
+- MessageBubble, Avatar, MessageRole: отображение сообщений
+- MessageList, DateSeparator: список сообщений
+- SessionTurn, TurnStatus, TurnData: turn компоненты
 """
 
 from .chat_view import ChatView
@@ -17,11 +24,16 @@ from .header import HeaderBar
 from .help_modal import HelpModal
 from .inline_permission_widget import InlinePermissionWidget
 from .main_layout import MainLayout
+from .markdown import CodeBlock, InlineMarkdown, MarkdownViewer
+from .message_bubble import Avatar, MessageBubble, MessageRole
+from .message_list import DateSeparator, MessageList
 from .panel import AccordionPanel, CollapsiblePanel
 from .permission_modal import PermissionModal
 from .plan_panel import PlanPanel
 from .prompt_input import PromptInput
+from .session_turn import SessionTurn, TurnData, TurnStatus
 from .sidebar import Sidebar
+from .streaming_text import StreamingText, ThinkingIndicator, TypewriterText
 from .terminal_log_modal import TerminalLogModal
 from .terminal_output import TerminalOutputPanel
 from .tool_panel import ToolPanel
@@ -57,4 +69,22 @@ __all__ = [
     "TerminalLogModal",
     "TerminalOutputPanel",
     "ToolPanel",
+    # Фаза 2: Markdown компоненты
+    "MarkdownViewer",
+    "InlineMarkdown",
+    "CodeBlock",
+    # Фаза 2: Streaming компоненты
+    "StreamingText",
+    "TypewriterText",
+    "ThinkingIndicator",
+    # Фаза 2: Message компоненты
+    "Avatar",
+    "MessageBubble",
+    "MessageRole",
+    "MessageList",
+    "DateSeparator",
+    # Фаза 2: Session Turn компоненты
+    "SessionTurn",
+    "TurnStatus",
+    "TurnData",
 ]
