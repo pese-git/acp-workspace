@@ -82,11 +82,11 @@ def run_server() -> None:
     Приоритет: CLI аргументы > .env переменные > значения по умолчанию
 
     Пример .env файла:
-        ACP_LLM_PROVIDER=openai
-        ACP_LLM_MODEL=gpt-4-turbo
-        ACP_LLM_API_KEY=sk-...
-        ACP_LLM_TEMPERATURE=0.9
-        ACP_SYSTEM_PROMPT=Your custom prompt
+        CODELAB_LLM_PROVIDER=openai
+        CODELAB_LLM_MODEL=gpt-4-turbo
+        CODELAB_LLM_API_KEY=sk-...
+        CODELAB_LLM_TEMPERATURE=0.9
+        CODELAB_SYSTEM_PROMPT=Your custom prompt
 
     Пример использования:
         # Загружает .env из текущей директории

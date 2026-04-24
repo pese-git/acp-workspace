@@ -85,7 +85,7 @@ class ChatViewModel(BaseViewModel):
             event_bus: EventBus для публикации/подписки на события
             logger: Logger для логирования
             history_dir: Директория локального persistence истории
-                (приоритет: аргумент history_dir -> ACP_CLIENT_HISTORY_DIR -> ~/.acp-client/history)
+                (приоритет: аргумент history_dir -> CODELAB_CLIENT_HISTORY_DIR -> ~/.codelab/history)
             fs_executor: FileSystemExecutor для обработки fs/* callbacks (синхронно)
             terminal_executor: TerminalExecutor для обработки terminal/* callbacks (синхронно)
             plan_vm: PlanViewModel для обработки plan updates из session/update
@@ -98,13 +98,13 @@ class ChatViewModel(BaseViewModel):
 
         # Локальный storage истории нужен для восстановления UI без network roundtrip.
         # Порядок приоритета: явный аргумент -> переменная окружения -> путь по умолчанию.
-        env_history_dir = os.getenv("ACP_CLIENT_HISTORY_DIR")
+        env_history_dir = os.getenv("CODELAB_CLIENT_HISTORY_DIR")
         if history_dir is not None:
             resolved_history_dir = Path(history_dir)
         elif env_history_dir:
             resolved_history_dir = Path(env_history_dir)
         else:
-            resolved_history_dir = Path.home() / ".acp-client" / "history"
+            resolved_history_dir = Path.home() / ".codelab" / "history"
         self._history_dir = resolved_history_dir
         try:
             self._history_dir.mkdir(parents=True, exist_ok=True)

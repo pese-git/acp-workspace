@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import sys
 import threading
 from pathlib import Path
@@ -29,12 +30,13 @@ if TYPE_CHECKING:
 # Настройка логирования для CLI
 logger = structlog.get_logger("codelab.cli")
 
-# Порт по умолчанию для WebSocket сервера
-DEFAULT_PORT = 8765
-DEFAULT_HOST = "127.0.0.1"
+# Порт по умолчанию для WebSocket сервера (читается из env с fallback)
+DEFAULT_PORT = int(os.getenv("CODELAB_PORT", "8765"))
+DEFAULT_HOST = os.getenv("CODELAB_HOST", "127.0.0.1")
 
-# Домашняя директория CodeLab
-CODELAB_HOME = Path.home() / ".codelab"
+# Домашняя директория CodeLab (из env или ~/.codelab)
+_codelab_home_env = os.getenv("CODELAB_HOME")
+CODELAB_HOME = Path(_codelab_home_env).expanduser() if _codelab_home_env else Path.home() / ".codelab"
 
 
 def ensure_home_directory() -> None:
@@ -68,7 +70,12 @@ def _configure_logging(verbose: bool = False) -> None:
     Args:
         verbose: Включить подробное логирование (DEBUG уровень)
     """
-    level = logging.DEBUG if verbose else logging.INFO
+    # Приоритет: флаг --verbose > CODELAB_LOG_LEVEL > INFO
+    env_log_level = os.getenv("CODELAB_LOG_LEVEL", "INFO").upper()
+    if verbose:
+        level = logging.DEBUG
+    else:
+        level = getattr(logging, env_log_level, logging.INFO)
 
     # Базовая конфигурация logging
     logging.basicConfig(
