@@ -12,7 +12,7 @@ from .app import run_tui_app
 def main() -> None:
     """Запускает TUI приложение с параметрами хоста, порта, рабочей директории и логирования."""
 
-    parser = argparse.ArgumentParser(prog="acp-client-tui")
+    parser = argparse.ArgumentParser(prog="codelab connect")
     parser.add_argument("--host", default=None)
     parser.add_argument("--port", default=None, type=int)
     parser.add_argument(
@@ -26,7 +26,7 @@ def main() -> None:
         default=None,
         help=(
             "Путь к локальной истории чата "
-            "(default: ACP_CLIENT_HISTORY_DIR или ~/.acp-client/history)"
+            "(default: ACP_CLIENT_HISTORY_DIR или ~/.codelab/history)"
         ),
     )
     parser.add_argument(
@@ -43,11 +43,11 @@ def main() -> None:
     parser.add_argument(
         "--log-file",
         default=None,
-        help="Путь к файлу логов. 'default' для ~/.acp-client/logs/acp-client.log",
+        help="Путь к файлу логов. 'default' для ~/.codelab/logs/codelab-client.log",
     )
     args = parser.parse_args()
 
-    # Инициализировать логирование с сохранением в ~/.acp-client/logs/acp-client.log по умолчанию
+    # Инициализировать логирование с сохранением в ~/.codelab/logs/codelab-client.log по умолчанию
     setup_logging(
         level=args.log_level,
         json_format=args.log_json,

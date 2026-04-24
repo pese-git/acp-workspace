@@ -3,11 +3,11 @@
 Модуль читает аргументы запуска и поднимает WS транспорт.
 
 Пример использования:
-    acp-server --host 127.0.0.1 --port 8080
-    acp-server --log-level DEBUG
-    acp-server --log-level INFO --log-json
-    acp-server --log-level DEBUG --log-file default
-    acp-server --log-level INFO --log-json --log-file /var/log/acp-server.log
+    codelab serve --host 127.0.0.1 --port 8080
+    codelab serve --log-level DEBUG
+    codelab serve --log-level INFO --log-json
+    codelab serve --log-level DEBUG --log-file default
+    codelab serve --log-level INFO --log-json --log-file /var/log/codelab-server.log
 """
 
 from __future__ import annotations
@@ -95,13 +95,13 @@ def run_server() -> None:
     """
     # Инициализируем базовое логирование для вывода ошибок инициализации
     logger = setup_logging(level="INFO", json_format=False)
-    logger.debug("acp-server starting up")
+    logger.debug("codelab-server starting up")
 
     # Загружаем переменные окружения из .env файла если он существует
     load_dotenv()
     logger.debug("environment variables loaded from .env")
 
-    parser = argparse.ArgumentParser(prog="acp-server")
+    parser = argparse.ArgumentParser(prog="codelab serve")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)
     parser.add_argument(
@@ -131,7 +131,7 @@ def run_server() -> None:
     parser.add_argument(
         "--log-file",
         default=None,
-        help="Путь к файлу логов. 'default' для ~/.acp-server/logs/acp-server.log",
+        help="Путь к файлу логов. 'default' для ~/.codelab/logs/codelab-server.log",
     )
     parser.add_argument(
         "--storage",
@@ -269,7 +269,7 @@ def run_server() -> None:
 
     # Запускаем сервер
     try:
-        logger.info("starting acp-server", host=args.host, port=args.port)
+        logger.info("starting codelab-server", host=args.host, port=args.port)
         asyncio.run(server.run())
     except KeyboardInterrupt:
         logger.info("server interrupted by user")

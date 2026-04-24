@@ -1,4 +1,4 @@
-"""Integration тесты для Content типов в acp-client.
+"""Integration тесты для Content типов в codelab client.
 
 Проверяет:
 - Парсинг Content из JSON ответов сервера

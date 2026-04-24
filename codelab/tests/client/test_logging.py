@@ -50,8 +50,8 @@ def test_setup_logging_with_default_file_path() -> None:
     assert logger is not None
     # Проверяем что директория создана
     home = Path.home()
-    log_dir = home / ".acp-client" / "logs"
+    log_dir = home / ".codelab" / "logs"
     assert log_dir.exists()
     # Проверяем что файл создан
-    log_file = log_dir / "acp-client.log"
+    log_file = log_dir / "codelab.log"
     assert log_file.exists()

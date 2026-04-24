@@ -207,8 +207,8 @@ doc/
 |------|------------|----------|
 | `developer-guide/index.md` | Обзор архитектуры | 🆕 Создать |
 | `developer-guide/architecture.md` | Общая архитектура системы | 🔄 Консолидировать из doc/architecture/ |
-| `developer-guide/client-arch.md` | Clean Architecture клиента | 🔄 Из acp-client/docs |
-| `developer-guide/server-arch.md` | Архитектура сервера | 🔄 Из acp-server/docs |
+| `developer-guide/client-arch.md` | Clean Architecture клиента | 🔄 Из codelab/src/codelab/client/ |
+| `developer-guide/server-arch.md` | Архитектура сервера | 🔄 Из codelab/src/codelab/server/ |
 | `developer-guide/extending.md` | Создание инструментов, handlers | 🆕 Создать |
 | `developer-guide/mcp-integration.md` | Интеграция с MCP серверами | 🔄 Из doc/architecture/MCP* |
 | `developer-guide/testing.md` | Запуск тестов, написание тестов | 🆕 Создать |

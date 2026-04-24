@@ -25,7 +25,7 @@ class TUIConfigStore:
     def __init__(self, file_path: Path | None = None) -> None:
         """Настраивает путь хранения конфигурации в домашней директории."""
 
-        self._file_path = file_path or (Path.home() / ".acp-client" / "tui_config.json")
+        self._file_path = file_path or (Path.home() / ".codelab" / "tui_config.json")
 
     def load(self) -> TUIConfig:
         """Загружает конфигурацию из файла или возвращает значения по умолчанию."""

@@ -31,7 +31,7 @@ MCP_PROTOCOL_VERSION = "2024-11-05"
 
 # Информация о нашем клиенте
 ACP_CLIENT_INFO = MCPClientInfo(
-    name="acp-server",
+    name="codelab",
     version="1.0.0"
 )
 

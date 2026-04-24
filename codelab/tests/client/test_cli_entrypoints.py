@@ -1,10 +1,10 @@
-"""Тесты CLI entrypoint-ов acp-client и acp-client-tui."""
+"""Тесты CLI entrypoint-ов codelab connect."""
 
 from __future__ import annotations
 
 
 def test_tui_main_forwards_history_dir(monkeypatch, tmp_path) -> None:
-    """acp-client-tui пробрасывает --history-dir в run_tui_app."""
+    """codelab connect пробрасывает --history-dir в run_tui_app."""
     from codelab.client.tui import __main__ as tui_main
 
     captured: dict[str, dict[str, object]] = {}
@@ -18,9 +18,10 @@ def test_tui_main_forwards_history_dir(monkeypatch, tmp_path) -> None:
         "codelab.client.tui.__main__.run_tui_app",
         lambda **kwargs: captured.setdefault("run", kwargs),
     )
+    # __main__.py не использует подкоманды - аргументы передаются напрямую
     monkeypatch.setattr(
         "sys.argv",
-        ["acp-client-tui", "--history-dir", str(history_dir)],
+        ["codelab-connect", "--history-dir", str(history_dir)],
     )
 
     tui_main.main()

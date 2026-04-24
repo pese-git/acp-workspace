@@ -75,7 +75,7 @@ def initialize(
             "sessionCapabilities": {},
         },
         "agentInfo": {
-            "name": "acp-server",
+            "name": "codelab-server",
             "title": "ACP Server",
             "version": "0.1.0",
         },

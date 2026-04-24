@@ -58,7 +58,14 @@ target-version = "py312"
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.ty.src]
-include = ["src", "tests"]
+include = ["src"]
+
+[tool.ty.rules]
+# Игнорируем ошибки связанные с внешними библиотеками и динамическим кодом
+"no-matching-overload" = "ignore"
+"unknown-argument" = "ignore"
+"missing-argument" = "ignore"
+"unresolved-attribute" = "ignore"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

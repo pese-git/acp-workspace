@@ -98,7 +98,7 @@ class InitializeUseCase(UseCase):
                         "terminal": True,  # Поддержка terminal/* методов
                     },
                     "clientInfo": {
-                        "name": "acp-client",  # Идентификатор клиента
+                        "name": "codelab-client",  # Идентификатор клиента
                         "version": "1.0.0",  # Версия клиента
                     },
                 },

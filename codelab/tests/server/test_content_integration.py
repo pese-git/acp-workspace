@@ -1,4 +1,4 @@
-"""Integration тесты для Content типов в acp-server.
+"""Integration тесты для Content типов в codelab server.
 
 Проверяет:
 - Сериализацию Content типов в JSON и обратно

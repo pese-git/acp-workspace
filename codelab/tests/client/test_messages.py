@@ -262,7 +262,7 @@ def test_parse_initialize_result_success() -> None:
                 "mcpCapabilities": {"http": False, "sse": False},
                 "sessionCapabilities": {"list": {}},
             },
-            "agentInfo": {"name": "acp-server", "version": "0.1.0"},
+            "agentInfo": {"name": "codelab-server", "version": "0.1.0"},
             "authMethods": [],
         },
     )

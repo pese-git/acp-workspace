@@ -29,7 +29,7 @@ ACP (Agent Client Protocol) — стандартный протокол взаи
 
 ```mermaid
 graph TB
-    subgraph Client["acp-client (Client Side)"]
+    subgraph Client["codelab-client (Client Side)"]
         TUI["🖥️ TUI Layer<br/>Textual UI Components"]
         Presentation["📊 Presentation Layer<br/>ViewModels + Observable"]
         Application["🎯 Application Layer<br/>Use Cases + State Machine"]
@@ -37,7 +37,7 @@ graph TB
         Domain["📦 Domain Layer<br/>Entities, Events, Interfaces"]
     end
     
-    subgraph Server["acp-server (Server Side)"]
+    subgraph Server["codelab-server (Server Side)"]
         HttpServer["🌐 HTTP/WebSocket Server<br/>JSON-RPC Transport"]
         Protocol["🔄 Protocol Layer<br/>ACPProtocol + Handlers"]
         Agent["🤖 Agent Layer<br/>LLM Orchestration"]
@@ -88,7 +88,7 @@ graph TB
 
 ## Архитектура на уровне компонентов
 
-### acp-server: Внутренняя структура
+### codelab-server: Внутренняя структура
 
 ```mermaid
 graph LR
@@ -138,7 +138,7 @@ graph LR
     style RPC fill:#fce4ec
 ```
 
-### acp-client: Clean Architecture в 5 слоев
+### codelab-client: Clean Architecture в 5 слоев
 
 ```mermaid
 graph TB
@@ -240,7 +240,7 @@ sequenceDiagram
     participant UseCase
     participant Transport
     participant BgLoop
-    participant Server as acp-server
+    participant Server as codelab-server
 
     User->>TUI: Вводит промпт
     TUI->>ChatVM: prompt_text.value = "..."
@@ -310,7 +310,7 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    participant Server as acp-server
+    participant Server as codelab-server
     participant BgLoop as BackgroundReceiveLoop
     participant PermVM as PermissionViewModel
     participant User as 👤 User
@@ -723,10 +723,8 @@ class MyLLMProvider(BaseLLMProvider):
 
 ### Справочная документация
 
-- **[acp-server/README.md](acp-server/README.md)** — запуск и использование сервера
-- **[acp-client/README.md](acp-client/README.md)** — запуск и использование клиента
-- **[acp-server/docs/ARCHITECTURE.md](acp-server/docs/ARCHITECTURE.md)** — детальная архитектура сервера
-- **[acp-client/docs/developer-guide/ARCHITECTURE.md](acp-client/docs/developer-guide/ARCHITECTURE.md)** — детальная архитектура клиента
+- **[codelab/README.md](codelab/README.md)** — основная документация проекта
+- **[doc/product/developer-guide/](doc/product/developer-guide/)** — руководство разработчика
 
 ### Специальные документы
 
