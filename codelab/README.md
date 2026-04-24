@@ -21,6 +21,22 @@ uv pip install -e ".[full]"
 uv pip install -e ".[web]"
 ```
 
+### Глобальная установка через pipx
+
+Для установки `codelab` как глобального CLI-инструмента (изолированно от других пакетов) используйте [pipx](https://pipx.pypa.io/):
+
+```bash
+# Установка из ветки develop
+pipx install "git+https://github.com/pese-git/codelab-ai.git@develop#subdirectory=codelab"
+
+# Или установка из ветки master (по умолчанию)
+pipx install "git+https://github.com/pese-git/codelab-ai.git#subdirectory=codelab"
+```
+
+> **Примечание:** Параметр `@develop` (или любое другое имя ветки/тега) — необязательный. Если не указан, будет использована ветка по умолчанию (`master`).
+
+После установки команда `codelab` будет доступна глобально.
+
 ## Структура проекта
 
 ```
