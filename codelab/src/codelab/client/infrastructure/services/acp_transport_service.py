@@ -575,196 +575,201 @@ class ACPTransportService(TransportService):
                 )
 
                 # Получаем ответы, обрабатывая промежуточные события.
-                # Используем asyncio.wait для ожидания нескольких очередей одновременно.
-                while True:
-                    # Создаем задачи для ожидания из разных очередей.
-                    response_task = asyncio.create_task(
-                        asyncio.wait_for(response_queue.get(), timeout=300.0)
+                # ИСПРАВЛЕНИЕ: response_task и permission_task создаются ОДИН раз
+                # перед циклом и переиспользуются между итерациями.
+                # notification_task создаётся каждую итерацию для короткого polling.
+                # Это предотвращает потерю permission_request когда notification
+                # timeout (0.1s) завершается раньше.
+                
+                # Создаём долгоживущие tasks ВНЕ цикла
+                response_task: asyncio.Task[dict[str, Any]] = asyncio.create_task(
+                    response_queue.get()
+                )
+                permission_task: asyncio.Task[dict[str, Any]] | None = None
+                if should_listen_notifications:
+                    permission_task = asyncio.create_task(
+                        self._queues.permission_queue.get()
                     )
-                    notification_task: asyncio.Task[dict[str, Any]] | None = None
-                    permission_task: asyncio.Task[dict[str, Any]] | None = None
-                    if should_listen_notifications:
-                        notification_task = asyncio.create_task(
-                            asyncio.wait_for(self._queues.notification_queue.get(), timeout=0.1)
+                
+                try:
+                    while True:
+                        # notification_task создаётся каждую итерацию (короткий polling)
+                        notification_task: asyncio.Task[dict[str, Any]] | None = None
+                        if should_listen_notifications:
+                            notification_task = asyncio.create_task(
+                                asyncio.wait_for(
+                                    self._queues.notification_queue.get(),
+                                    timeout=0.1
+                                )
+                            )
+
+                        # Собираем активные tasks для ожидания
+                        tasks_to_wait: list[asyncio.Task[dict[str, Any]]] = [response_task]
+                        if notification_task is not None:
+                            tasks_to_wait.append(notification_task)
+                        if permission_task is not None:
+                            tasks_to_wait.append(permission_task)
+
+                        # Ждём первого результата
+                        done, pending = await asyncio.wait(
+                            tasks_to_wait,
+                            return_when=asyncio.FIRST_COMPLETED,
                         )
-                        # Permission requests важны - даём больше времени на получение
-                        # Если permission в очереди, get() вернётся мгновенно
-                        permission_task = asyncio.create_task(
-                            asyncio.wait_for(self._queues.permission_queue.get(), timeout=1.0)
-                        )
 
-                    # Ждем первого результата.
-                    tasks_to_wait = (
-                        [response_task]
-                        if notification_task is None or permission_task is None
-                        else [response_task, notification_task, permission_task]
-                    )
-                    done, pending = await asyncio.wait(
-                        tasks_to_wait,
-                        return_when=asyncio.FIRST_COMPLETED,
-                    )
-                    
-                    # Диагностика: какие задачи завершились
-                    notif_done = notification_task in done if notification_task else None
-                    perm_done = permission_task in done if permission_task else None
-                    self._logger.debug(
-                        "asyncio_wait_completed",
-                        method=method,
-                        request_id=request_id,
-                        done_count=len(done),
-                        pending_count=len(pending),
-                        response_in_done=response_task in done,
-                        notification_in_done=notif_done,
-                        permission_in_done=perm_done,
-                    )
+                        # Отменяем ТОЛЬКО notification_task (короткий polling)
+                        # response_task и permission_task НЕ отменяем!
+                        if notification_task is not None and notification_task in pending:
+                            notification_task.cancel()
+                            with contextlib.suppress(asyncio.CancelledError, TimeoutError):
+                                await notification_task
 
-                    # Отменяем оставшиеся задачи.
-                    # В Python 3.11+ при отмене задачи с вложенным wait_for,
-                    # CancelledError может преобразовываться в TimeoutError.
-                    for task in pending:
-                        task.cancel()
-                        with contextlib.suppress(asyncio.CancelledError, TimeoutError):
-                            await task
-
-                    # Сначала обрабатываем notification, если она уже получена.
-                    # Это предотвращает потерю события в кейсе, когда response
-                    # и notification завершаются одновременно.
-                    if permission_task is not None and permission_task in done:
-                        try:
-                            permission_data = permission_task.result()
-                            self._logger.debug(
-                                "tool_lifecycle_permission_request_received",
-                                method=method,
-                                request_id=request_id,
-                                permission_id=permission_data.get("id"),
-                            )
-                            # Всегда обрабатываем через PermissionHandler
-                            await self._handle_permission_request_with_handler(
-                                permission_data,
-                            )
-                        except TimeoutError:
-                            # Таймаут при ожидании уведомления — нормально.
-                            pass
-                        except Exception as e:
-                            # Логируем ошибки, чтобы видеть причину зависания turn.
-                            self._logger.warning(
-                                "tool_lifecycle_permission_request_failed",
-                                method=method,
-                                request_id=request_id,
-                                error=str(e),
+                        # Обрабатываем permission_task если завершился
+                        if permission_task is not None and permission_task in done:
+                            try:
+                                permission_data = permission_task.result()
+                                self._logger.debug(
+                                    "tool_lifecycle_permission_request_received",
+                                    method=method,
+                                    request_id=request_id,
+                                    permission_id=permission_data.get("id"),
+                                )
+                                # Обрабатываем через PermissionHandler
+                                await self._handle_permission_request_with_handler(
+                                    permission_data,
+                                )
+                            except Exception as e:
+                                self._logger.warning(
+                                    "tool_lifecycle_permission_request_failed",
+                                    method=method,
+                                    request_id=request_id,
+                                    error=str(e),
+                                )
+                            # Пересоздаём permission_task для следующего permission
+                            permission_task = asyncio.create_task(
+                                self._queues.permission_queue.get()
                             )
 
-                    if notification_task is not None and notification_task in done:
-                        try:
-                            notification_data = notification_task.result()
-                            self._logger.debug(
-                                "tool_lifecycle_notification_received",
-                                method=method,
-                                request_id=request_id,
-                                notification_id=notification_data.get("id"),
-                                notification_method=notification_data.get("method"),
-                            )
-                            await self._handle_notification_or_client_rpc(
-                                method=method,
-                                request_id=request_id,
-                                notification_data=notification_data,
-                                on_update=on_update,
-                                on_fs_read=on_fs_read,
-                                on_fs_write=on_fs_write,
-                                on_terminal_create=on_terminal_create,
-                                on_terminal_output=on_terminal_output,
-                                on_terminal_wait=on_terminal_wait,
-                                on_terminal_release=on_terminal_release,
-                                on_terminal_kill=on_terminal_kill,
-                            )
-                        except TimeoutError:
-                            # Таймаут при ожидании уведомления — нормально.
-                            pass
-                        except Exception as e:
-                            # Логируем ошибки, чтобы видеть причину зависания turn.
-                            self._logger.warning(
-                                "tool_lifecycle_notification_failed",
-                                method=method,
-                                request_id=request_id,
-                                error=str(e),
-                            )
+                        # Обрабатываем notification_task если завершился
+                        if notification_task is not None and notification_task in done:
+                            try:
+                                notification_data = notification_task.result()
+                                self._logger.debug(
+                                    "tool_lifecycle_notification_received",
+                                    method=method,
+                                    request_id=request_id,
+                                    notification_id=notification_data.get("id"),
+                                    notification_method=notification_data.get("method"),
+                                )
+                                await self._handle_notification_or_client_rpc(
+                                    method=method,
+                                    request_id=request_id,
+                                    notification_data=notification_data,
+                                    on_update=on_update,
+                                    on_fs_read=on_fs_read,
+                                    on_fs_write=on_fs_write,
+                                    on_terminal_create=on_terminal_create,
+                                    on_terminal_output=on_terminal_output,
+                                    on_terminal_wait=on_terminal_wait,
+                                    on_terminal_release=on_terminal_release,
+                                    on_terminal_kill=on_terminal_kill,
+                                )
+                            except TimeoutError:
+                                # Таймаут при polling уведомлений — нормально
+                                pass
+                            except Exception as e:
+                                self._logger.warning(
+                                    "tool_lifecycle_notification_failed",
+                                    method=method,
+                                    request_id=request_id,
+                                    error=str(e),
+                                )
 
-                    # Проверяем результат от response queue.
-                    if response_task in done:
-                        try:
-                            response_data = response_task.result()
-                            # Сравниваем id по raw payload, чтобы не терять корректный
-                            # ответ из-за излишне строгого разбора в ACPMessage.
-                            if response_data.get("id") == request_id:
-                                if isinstance(response_data.get("error"), dict):
-                                    error_payload = response_data["error"]
-                                    self._logger.error(
-                                        "request_error",
-                                        method=method,
-                                        error_code=error_payload.get("code"),
-                                        error_message=error_payload.get("message"),
-                                    )
-
-                                # Обрабатываем уведомления после финального ответа.
-                                # Небольшой grace period нужен, чтобы забрать события,
-                                # которые могли прийти сразу после response и попасть
-                                # в очередь чуть позже этой проверки.
-                                # Ограничиваем количество итераций чтобы избежать deadlock.
-                                remaining_notifications = 0
-                                max_remaining_iterations = 10
-                                for _ in range(max_remaining_iterations):
-                                    try:
-                                        notification_data = await asyncio.wait_for(
-                                            self._queues.notification_queue.get(),
-                                            timeout=0.2,
+                        # Проверяем результат от response queue.
+                        if response_task in done:
+                            try:
+                                response_data = response_task.result()
+                                # Сравниваем id по raw payload, чтобы не терять корректный
+                                # ответ из-за излишне строгого разбора в ACPMessage.
+                                if response_data.get("id") == request_id:
+                                    if isinstance(response_data.get("error"), dict):
+                                        error_payload = response_data["error"]
+                                        self._logger.error(
+                                            "request_error",
+                                            method=method,
+                                            error_code=error_payload.get("code"),
+                                            error_message=error_payload.get("message"),
                                         )
-                                        notification = ACPMessage.from_dict(notification_data)
-                                        remaining_notifications += 1
 
-                                        if (
-                                            notification.method == "session/update"
-                                            and on_update is not None
-                                        ):
-                                            self._logger.debug(
-                                                "handling_remaining_session_update",
-                                                method=method,
-                                                request_id=request_id,
-                                                remaining_count=remaining_notifications,
+                                    # Обрабатываем уведомления после финального ответа.
+                                    # Небольшой grace period нужен, чтобы забрать события,
+                                    # которые могли прийти сразу после response и попасть
+                                    # в очередь чуть позже этой проверки.
+                                    # Ограничиваем количество итераций чтобы избежать deadlock.
+                                    remaining_notifications = 0
+                                    max_remaining_iterations = 10
+                                    for _ in range(max_remaining_iterations):
+                                        try:
+                                            notification_data = await asyncio.wait_for(
+                                                self._queues.notification_queue.get(),
+                                                timeout=0.2,
                                             )
-                                            on_update(notification_data)
-                                    except TimeoutError:
-                                        break
-                                    except Exception as e:
-                                        self._logger.warning(
-                                            "error_processing_remaining_notification",
-                                            error=str(e),
-                                        )
-                                        break
+                                            notification = ACPMessage.from_dict(notification_data)
+                                            remaining_notifications += 1
 
-                                if remaining_notifications > 0:
+                                            if (
+                                                notification.method == "session/update"
+                                                and on_update is not None
+                                            ):
+                                                self._logger.debug(
+                                                    "handling_remaining_session_update",
+                                                    method=method,
+                                                    request_id=request_id,
+                                                    remaining_count=remaining_notifications,
+                                                )
+                                                on_update(notification_data)
+                                        except TimeoutError:
+                                            break
+                                        except Exception as e:
+                                            self._logger.warning(
+                                                "error_processing_remaining_notification",
+                                                error=str(e),
+                                            )
+                                            break
+
+                                    if remaining_notifications > 0:
+                                        self._logger.info(
+                                            "processed_remaining_notifications",
+                                            method=method,
+                                            request_id=request_id,
+                                            count=remaining_notifications,
+                                        )
+
                                     self._logger.info(
-                                        "processed_remaining_notifications",
+                                        "request_completed",
                                         method=method,
                                         request_id=request_id,
-                                        count=remaining_notifications,
                                     )
-
-                                self._logger.info(
-                                    "request_completed",
+                                    return response_data
+                            except TimeoutError:
+                                self._logger.error(
+                                    "request_timeout",
                                     method=method,
                                     request_id=request_id,
                                 )
-                                return response_data
-                        except TimeoutError:
-                            self._logger.error(
-                                "request_timeout",
-                                method=method,
-                                request_id=request_id,
-                            )
-                            raise RuntimeError(f"Request {request_id} timed out") from None
-                        except Exception:
-                            # Продолжаем если была ошибка.
-                            pass
+                                raise RuntimeError(f"Request {request_id} timed out") from None
+                            except Exception:
+                                # Продолжаем если была ошибка.
+                                pass
+                finally:
+                    # Очистка долгоживущих tasks при выходе из цикла
+                    if not response_task.done():
+                        response_task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await response_task
+                    if permission_task is not None and not permission_task.done():
+                        permission_task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await permission_task
 
             except Exception as e:
                 self._logger.error(
