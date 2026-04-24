@@ -1,24 +1,24 @@
-"""Глобальные настройки ACP сервера с использованием Pydantic.
+"""Глобальные настройки CodeLab сервера с использованием Pydantic.
 
 Модуль определяет конфигурацию для LLM провайдера, модели, системного промпта
 и других параметров сервера через Pydantic BaseSettings.
 
 Переменные окружения:
-    ACP_LLM_PROVIDER: Тип провайдера LLM (openai, mock). По умолчанию mock.
-    ACP_LLM_BASE_URL: Base URL для LLM провайдера (опционально)
-    ACP_LLM_API_KEY: API ключ для LLM провайдера (опционально)
-    ACP_LLM_MODEL: Модель LLM (по умолчанию gpt-4o)
-    ACP_LLM_TEMPERATURE: Temperature для LLM (по умолчанию 0.7)
-    ACP_LLM_MAX_TOKENS: Максимальное количество токенов (по умолчанию 8192)
-    ACP_SYSTEM_PROMPT: Системный промпт для агента
+    CODELAB_LLM_PROVIDER: Тип провайдера LLM (openai, mock). По умолчанию mock.
+    CODELAB_LLM_BASE_URL: Base URL для LLM провайдера (опционально)
+    CODELAB_LLM_API_KEY: API ключ для LLM провайдера (опционально)
+    CODELAB_LLM_MODEL: Модель LLM (по умолчанию gpt-4o)
+    CODELAB_LLM_TEMPERATURE: Temperature для LLM (по умолчанию 0.7)
+    CODELAB_LLM_MAX_TOKENS: Максимальное количество токенов (по умолчанию 8192)
+    CODELAB_SYSTEM_PROMPT: Системный промпт для агента
 
 Пример использования:
     config = AppConfig()
     print(config.llm.model)
 
     # С переменными окружения:
-    export ACP_LLM_PROVIDER=openai
-    export ACP_LLM_MODEL=gpt-4-turbo
+    export CODELAB_LLM_PROVIDER=openai
+    export CODELAB_LLM_MODEL=gpt-4-turbo
     config = AppConfig()
 """
 
@@ -41,14 +41,14 @@ class LLMConfig(BaseModel):
         max_tokens: Максимальное количество токенов в ответе
     """
 
-    provider: str = Field(default_factory=lambda: os.getenv("ACP_LLM_PROVIDER", "mock"))
-    api_key: str | None = Field(default_factory=lambda: os.getenv("ACP_LLM_API_KEY"))
-    base_url: str | None = Field(default_factory=lambda: os.getenv("ACP_LLM_BASE_URL"))
-    model: str = Field(default_factory=lambda: os.getenv("ACP_LLM_MODEL", "gpt-4o"))
+    provider: str = Field(default_factory=lambda: os.getenv("CODELAB_LLM_PROVIDER", "mock"))
+    api_key: str | None = Field(default_factory=lambda: os.getenv("CODELAB_LLM_API_KEY"))
+    base_url: str | None = Field(default_factory=lambda: os.getenv("CODELAB_LLM_BASE_URL"))
+    model: str = Field(default_factory=lambda: os.getenv("CODELAB_LLM_MODEL", "gpt-4o"))
     temperature: float = Field(
-        default_factory=lambda: float(os.getenv("ACP_LLM_TEMPERATURE", "0.7"))
+        default_factory=lambda: float(os.getenv("CODELAB_LLM_TEMPERATURE", "0.7"))
     )
-    max_tokens: int = Field(default_factory=lambda: int(os.getenv("ACP_LLM_MAX_TOKENS", "8192")))
+    max_tokens: int = Field(default_factory=lambda: int(os.getenv("CODELAB_LLM_MAX_TOKENS", "8192")))
 
 
 class AgentConfig(BaseModel):
@@ -60,7 +60,7 @@ class AgentConfig(BaseModel):
 
     system_prompt: str = Field(
         default_factory=lambda: os.getenv(
-            "ACP_SYSTEM_PROMPT",
+            "CODELAB_SYSTEM_PROMPT",
             (
                 "Ты помощник, который помогает пользователю выполнять различные задачи. "
                 "Используй доступные инструменты для решения задач.\n\n"
@@ -80,7 +80,7 @@ class AppConfig(BaseModel):
     """Глобальная конфигурация ACP сервера.
 
     Объединяет конфигурацию LLM, агента и других компонентов.
-    Все параметры могут быть установлены через переменные окружения с префиксом ACP_.
+    Все параметры могут быть установлены через переменные окружения с префиксом CODELAB_.
 
     Пример:
         config = AppConfig()
@@ -88,7 +88,7 @@ class AppConfig(BaseModel):
         print(config.agent.system_prompt)
 
         # С переменными окружения:
-        export ACP_LLM_PROVIDER=openai
+        export CODELAB_LLM_PROVIDER=openai
         config = AppConfig()
     """
 
