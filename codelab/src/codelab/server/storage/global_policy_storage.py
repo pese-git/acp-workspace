@@ -17,8 +17,9 @@ logger = structlog.get_logger()
 
 
 class GlobalPolicyStorage:
-    """Управление глобальными permission policies в ~/.acp/global_permissions.json.
+    """Управление глобальными permission policies.
 
+    Хранилище: ~/.codelab/data/policies/global_permissions.json
     Thread-safe операции с atomic file writes.
 
     Пример использования:
@@ -34,13 +35,17 @@ class GlobalPolicyStorage:
     # Допустимые решения
     VALID_DECISIONS = ("allow_always", "reject_always")
 
+    # Путь по умолчанию: ~/.codelab/data/policies/global_permissions.json
+    _DEFAULT_PATH = Path.home() / ".codelab" / "data" / "policies"
+    DEFAULT_STORAGE_PATH = _DEFAULT_PATH / "global_permissions.json"
+
     def __init__(self, storage_path: Path | None = None) -> None:
         """Инициализирует хранилище.
 
         Args:
-            storage_path: Путь к JSON файлу. Default: ~/.acp/global_permissions.json
+            storage_path: Путь к JSON файлу (default: ~/.codelab/data/policies/)
         """
-        self._storage_path = storage_path or Path.home() / ".acp" / "global_permissions.json"
+        self._storage_path = storage_path or self.DEFAULT_STORAGE_PATH
         self._lock = asyncio.Lock()
         self._cache: dict[str, str] | None = None
 

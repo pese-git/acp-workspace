@@ -48,17 +48,23 @@ def ensure_home_directory() -> None:
 
     Структура:
         ~/.codelab/
-        ├── config/   # Конфигурационные файлы
-        ├── logs/     # Файлы логов
-        ├── data/     # Сессии, история
-        └── cache/    # Кэш MCP и временные данные
+        ├── config/       # Конфигурационные файлы
+        ├── logs/         # Файлы логов
+        ├── data/         # Данные приложения
+        │   ├── sessions/ # Сессии сервера (JSON файлы)
+        │   ├── history/  # История чатов клиента
+        │   └── policies/ # Глобальные политики разрешений
+        └── cache/        # Кэш MCP и временные данные
     """
     directories = [
         CODELAB_HOME,
-        CODELAB_HOME / "config",  # Конфигурация
-        CODELAB_HOME / "logs",  # Логи
-        CODELAB_HOME / "data",  # Сессии, история
-        CODELAB_HOME / "cache",  # Кэш MCP
+        CODELAB_HOME / "config",  # Конфигурационные файлы
+        CODELAB_HOME / "logs",  # Файлы логов
+        CODELAB_HOME / "data",  # Данные приложения
+        CODELAB_HOME / "data" / "sessions",  # Сессии сервера (JSON файлы)
+        CODELAB_HOME / "data" / "history",  # История чатов клиента
+        CODELAB_HOME / "data" / "policies",  # Глобальные политики разрешений
+        CODELAB_HOME / "cache",  # Кэш MCP и временные данные
     ]
 
     for directory in directories:
@@ -218,6 +224,12 @@ def run_local(args: argparse.Namespace) -> None:
 
     logger.info("starting_local_mode", host=host, port=port)
 
+    # Создаём хранилище сессий в ~/.codelab/data/sessions/
+    from codelab.server.storage.json_file import JsonFileStorage
+
+    sessions_dir = CODELAB_HOME / "data" / "sessions"
+    storage = JsonFileStorage(sessions_dir)
+
     # Событие для сигнализации остановки сервера
     stop_event = threading.Event()
     server_ready_event = threading.Event()
@@ -232,7 +244,7 @@ def run_local(args: argparse.Namespace) -> None:
         asyncio.set_event_loop(loop)
 
         try:
-            server_instance = ACPHttpServer(host=host, port=port)
+            server_instance = ACPHttpServer(host=host, port=port, storage=storage)
 
             async def server_task() -> None:
                 """Асинхронная задача сервера с проверкой остановки."""
@@ -295,8 +307,14 @@ def run_serve(args: argparse.Namespace) -> None:
         web_ui=f"http://{host}:{port}/" if enable_web else "disabled",
     )
 
+    # Создаём хранилище сессий в ~/.codelab/data/sessions/
+    from codelab.server.storage.json_file import JsonFileStorage
+
+    sessions_dir = CODELAB_HOME / "data" / "sessions"
+    storage = JsonFileStorage(sessions_dir)
+
     # Создаём и запускаем сервер
-    server = ACPHttpServer(host=host, port=port, enable_web=enable_web)
+    server = ACPHttpServer(host=host, port=port, enable_web=enable_web, storage=storage)
 
     try:
         asyncio.run(server.run())

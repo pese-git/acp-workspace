@@ -85,7 +85,7 @@ class ChatViewModel(BaseViewModel):
             event_bus: EventBus для публикации/подписки на события
             logger: Logger для логирования
             history_dir: Директория локального persistence истории
-                (приоритет: аргумент history_dir -> CODELAB_CLIENT_HISTORY_DIR -> ~/.codelab/history)
+                (приоритет: history_dir -> CODELAB_CLIENT_HISTORY_DIR -> ~/.codelab/data/history)
             fs_executor: FileSystemExecutor для обработки fs/* callbacks (синхронно)
             terminal_executor: TerminalExecutor для обработки terminal/* callbacks (синхронно)
             plan_vm: PlanViewModel для обработки plan updates из session/update
@@ -104,7 +104,7 @@ class ChatViewModel(BaseViewModel):
         elif env_history_dir:
             resolved_history_dir = Path(env_history_dir)
         else:
-            resolved_history_dir = Path.home() / ".codelab" / "history"
+            resolved_history_dir = Path.home() / ".codelab" / "data" / "history"
         self._history_dir = resolved_history_dir
         try:
             self._history_dir.mkdir(parents=True, exist_ok=True)
