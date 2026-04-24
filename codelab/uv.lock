@@ -272,6 +272,7 @@ dependencies = [
     { name = "rich" },
     { name = "structlog" },
     { name = "textual" },
+    { name = "textual-web" },
     { name = "tomli" },
     { name = "websockets" },
 ]
@@ -320,6 +321,7 @@ requires-dist = [
     { name = "structlog", specifier = ">=24.1.0" },
     { name = "textual", specifier = ">=0.40" },
     { name = "textual", marker = "extra == 'tui'", specifier = ">=0.40" },
+    { name = "textual-web", specifier = ">=0.5" },
     { name = "textual-web", marker = "extra == 'web'", specifier = ">=0.5" },
     { name = "tomli", specifier = ">=2.0.0" },
     { name = "ty", marker = "extra == 'dev'", specifier = ">=0.0.1a11" },
