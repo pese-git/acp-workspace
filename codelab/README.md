@@ -85,6 +85,37 @@ logger = setup_logging(level="DEBUG", log_file="default")
 logger.info("app_started", version="1.0.0")
 ```
 
+## Домашняя директория
+
+При первом запуске `codelab` автоматически создаётся домашняя директория `~/.codelab/` со следующей структурой:
+
+```
+~/.codelab/
+├── config/   # Конфигурационные файлы
+├── logs/     # Файлы логов (codelab.log)
+├── data/     # Сессии, история
+└── cache/    # Кэш MCP и временные данные
+```
+
+## Конфигурация
+
+Создайте файл `.env` на основе `.env.example`:
+
+```bash
+cp .env.example .env
+```
+
+Основные переменные окружения:
+
+| Переменная | Описание | По умолчанию |
+|------------|----------|--------------|
+| `CODELAB_LLM_PROVIDER` | Провайдер LLM (openai, mock) | `mock` |
+| `OPENAI_API_KEY` | API ключ OpenAI | - |
+| `CODELAB_LLM_MODEL` | Модель LLM | `gpt-4o` |
+| `CODELAB_PORT` | Порт сервера | `8765` |
+| `CODELAB_HOST` | Хост сервера | `127.0.0.1` |
+| `CODELAB_LOG_LEVEL` | Уровень логирования | `INFO` |
+
 ## Разработка
 
 ```bash

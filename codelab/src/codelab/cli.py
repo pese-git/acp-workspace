@@ -18,6 +18,7 @@ import asyncio
 import logging
 import sys
 import threading
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import structlog
@@ -31,6 +32,34 @@ logger = structlog.get_logger("codelab.cli")
 # Порт по умолчанию для WebSocket сервера
 DEFAULT_PORT = 8765
 DEFAULT_HOST = "127.0.0.1"
+
+# Домашняя директория CodeLab
+CODELAB_HOME = Path.home() / ".codelab"
+
+
+def ensure_home_directory() -> None:
+    """Создать домашнюю директорию ~/.codelab/ с поддиректориями.
+
+    Создаёт структуру директорий для хранения конфигурации,
+    логов, данных сессий и кэша приложения.
+
+    Структура:
+        ~/.codelab/
+        ├── config/   # Конфигурационные файлы
+        ├── logs/     # Файлы логов
+        ├── data/     # Сессии, история
+        └── cache/    # Кэш MCP и временные данные
+    """
+    directories = [
+        CODELAB_HOME,
+        CODELAB_HOME / "config",  # Конфигурация
+        CODELAB_HOME / "logs",  # Логи
+        CODELAB_HOME / "data",  # Сессии, история
+        CODELAB_HOME / "cache",  # Кэш MCP
+    ]
+
+    for directory in directories:
+        directory.mkdir(parents=True, exist_ok=True)
 
 
 def _configure_logging(verbose: bool = False) -> None:
@@ -141,6 +170,9 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+
+    # Создаём домашнюю директорию ~/.codelab/ с поддиректориями
+    ensure_home_directory()
 
     # Настраиваем логирование
     _configure_logging(verbose=getattr(args, "verbose", False))
