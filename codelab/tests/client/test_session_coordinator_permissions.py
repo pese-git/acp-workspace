@@ -13,9 +13,6 @@ from unittest.mock import Mock
 
 import pytest
 
-# Все тесты в этом модуле - async
-pytestmark = pytest.mark.asyncio
-
 from codelab.client.application.permission_handler import (
     PermissionHandler,
     PermissionRequest,
@@ -30,6 +27,9 @@ from codelab.client.messages import (
     RequestPermissionRequest,
     SelectedPermissionOutcome,
 )
+
+# Все тесты в этом модуле - async
+pytestmark = pytest.mark.asyncio
 
 
 class TestSessionCoordinatorPermissions:

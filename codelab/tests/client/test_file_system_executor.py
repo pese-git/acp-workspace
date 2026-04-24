@@ -11,10 +11,10 @@ from pathlib import Path
 
 import pytest
 
+from codelab.client.infrastructure.services.file_system_executor import FileSystemExecutor
+
 # Маркируем все async тесты в модуле
 pytestmark = pytest.mark.asyncio
-
-from codelab.client.infrastructure.services.file_system_executor import FileSystemExecutor
 
 
 @pytest.fixture

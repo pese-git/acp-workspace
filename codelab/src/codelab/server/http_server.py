@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import subprocess
 import sys
 import time
@@ -183,10 +184,8 @@ server.serve()
                 logger.info("web ui subprocess stopped")
             except Exception as e:
                 logger.warning("failed to stop web ui subprocess", error=str(e))
-                try:
+                with contextlib.suppress(Exception):
                     self._web_ui_process.kill()
-                except Exception:
-                    pass
             finally:
                 self._web_ui_process = None
 
@@ -333,7 +332,12 @@ server.serve()
         from .web_app import get_fallback_html, is_web_ui_available
         
         # Если subprocess с textual-web запущен и URL получен - показываем redirect/iframe
-        if self._web_ui_process is not None and self._web_ui_process.poll() is None and self._web_ui_url:
+        web_ui_running = (
+            self._web_ui_process is not None
+            and self._web_ui_process.poll() is None
+            and self._web_ui_url
+        )
+        if web_ui_running:
             # Subprocess работает - редиректим на облачный URL или показываем iframe
             web_ui_url = self._web_ui_url
             html = f"""<!DOCTYPE html>
@@ -456,7 +460,8 @@ server.serve()
         <h1>🔬 CodeLab</h1>
         <p>Textual Web установлен, но процесс Web UI не запустился.</p>
         <p>Запустите вручную (публикация через Ganglion):</p>
-        <pre><code>textual-web --run "python -m codelab.client.tui.app --host {self.host} --port {self.port}"</code></pre>
+        <pre><code>textual-web --run \
+"python -m codelab.client.tui.app --host {self.host} --port {self.port}"</code></pre>
         <p>Или используйте TUI клиент:</p>
         <pre><code>codelab connect --host {self.host} --port {self.port}</code></pre>
         <p>WebSocket endpoint: <span class="url">ws://{self.host}:{self.port}/acp/ws</span></p>

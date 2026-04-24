@@ -11,7 +11,6 @@ import base64
 import json
 from typing import Any
 
-from codelab.client.infrastructure.message_parser import MessageParser
 from codelab.shared.content import (
     AudioContent,
     EmbeddedResourceContent,
@@ -310,9 +309,8 @@ class TestMixedContentTypesClientIntegration:
                 restored_items.append(ImageContent.model_validate(item))
             elif content_type == "resource_link":
                 restored_items.append(ResourceLinkContent.model_validate(item))
-            elif content_type == "resource":
-                if "resource" in item:
-                    restored_items.append(EmbeddedResourceContent.model_validate(item))
+            elif content_type == "resource" and "resource" in item:
+                restored_items.append(EmbeddedResourceContent.model_validate(item))
 
         assert len(restored_items) == 3
         assert isinstance(restored_items[0], TextContent)
@@ -347,9 +345,7 @@ class TestContentMessageParserIntegration:
 
     def test_message_parser_with_content(self) -> None:
         """Проверка что MessageParser может работать с Content."""
-        parser = MessageParser()
-
-        # Создать сообщение с контентом
+        # Проверяем работу с контентом (MessageParser используется внутренне)
         message_data = {
             "jsonrpc": "2.0",
             "id": "test_1",
@@ -375,8 +371,7 @@ class TestContentMessageParserIntegration:
 
     def test_multiple_messages_with_content(self) -> None:
         """Проверка нескольких сообщений с контентом."""
-        parser = MessageParser()
-
+        # Проверяем работу с несколькими сообщениями
         messages = [
             {
                 "role": "user",

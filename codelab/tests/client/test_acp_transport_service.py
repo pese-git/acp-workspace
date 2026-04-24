@@ -18,7 +18,7 @@ class TestACPTransportServiceRequestWithCallbacks:
 
     @pytest.mark.asyncio
     async def test_permission_request_routing_via_handler(self) -> None:
-        """Permission requests должны маршрутизироваться через PermissionHandler без on_permission callback."""
+        """Permission requests маршрутизируются через PermissionHandler."""
         # Этот тест проверяет что параметр on_permission был удален
         # и permission requests обрабатываются только через PermissionHandler
         service = ACPTransportService(host="127.0.0.1", port=8765)

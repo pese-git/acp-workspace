@@ -14,11 +14,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-# Маркируем все async тесты в модуле
-pytestmark = pytest.mark.asyncio
-
 from codelab.client.infrastructure.handlers.terminal_handler import TerminalHandler
 from codelab.client.infrastructure.services.terminal_executor import TerminalExecutor
+
+# Маркируем все async тесты в модуле
+pytestmark = pytest.mark.asyncio
 
 
 @pytest.fixture

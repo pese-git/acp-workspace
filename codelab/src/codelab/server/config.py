@@ -48,7 +48,9 @@ class LLMConfig(BaseModel):
     temperature: float = Field(
         default_factory=lambda: float(os.getenv("CODELAB_LLM_TEMPERATURE", "0.7"))
     )
-    max_tokens: int = Field(default_factory=lambda: int(os.getenv("CODELAB_LLM_MAX_TOKENS", "8192")))
+    max_tokens: int = Field(
+        default_factory=lambda: int(os.getenv("CODELAB_LLM_MAX_TOKENS", "8192"))
+    )
 
 
 class AgentConfig(BaseModel):
