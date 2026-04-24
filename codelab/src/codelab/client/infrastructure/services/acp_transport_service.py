@@ -587,22 +587,43 @@ class ACPTransportService(TransportService):
                         notification_task = asyncio.create_task(
                             asyncio.wait_for(self._queues.notification_queue.get(), timeout=0.1)
                         )
+                        # Permission requests важны - даём больше времени на получение
+                        # Если permission в очереди, get() вернётся мгновенно
                         permission_task = asyncio.create_task(
-                            asyncio.wait_for(self._queues.permission_queue.get(), timeout=0.1)
+                            asyncio.wait_for(self._queues.permission_queue.get(), timeout=1.0)
                         )
 
                     # Ждем первого результата.
-                    done, pending = await asyncio.wait(
+                    tasks_to_wait = (
                         [response_task]
                         if notification_task is None or permission_task is None
-                        else [response_task, notification_task, permission_task],
+                        else [response_task, notification_task, permission_task]
+                    )
+                    done, pending = await asyncio.wait(
+                        tasks_to_wait,
                         return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    
+                    # Диагностика: какие задачи завершились
+                    notif_done = notification_task in done if notification_task else None
+                    perm_done = permission_task in done if permission_task else None
+                    self._logger.debug(
+                        "asyncio_wait_completed",
+                        method=method,
+                        request_id=request_id,
+                        done_count=len(done),
+                        pending_count=len(pending),
+                        response_in_done=response_task in done,
+                        notification_in_done=notif_done,
+                        permission_in_done=perm_done,
                     )
 
                     # Отменяем оставшиеся задачи.
+                    # В Python 3.11+ при отмене задачи с вложенным wait_for,
+                    # CancelledError может преобразовываться в TimeoutError.
                     for task in pending:
                         task.cancel()
-                        with contextlib.suppress(asyncio.CancelledError):
+                        with contextlib.suppress(asyncio.CancelledError, TimeoutError):
                             await task
 
                     # Сначала обрабатываем notification, если она уже получена.
@@ -688,8 +709,10 @@ class ACPTransportService(TransportService):
                                 # Небольшой grace period нужен, чтобы забрать события,
                                 # которые могли прийти сразу после response и попасть
                                 # в очередь чуть позже этой проверки.
+                                # Ограничиваем количество итераций чтобы избежать deadlock.
                                 remaining_notifications = 0
-                                while True:
+                                max_remaining_iterations = 10
+                                for _ in range(max_remaining_iterations):
                                     try:
                                         notification_data = await asyncio.wait_for(
                                             self._queues.notification_queue.get(),
@@ -716,6 +739,7 @@ class ACPTransportService(TransportService):
                                             "error_processing_remaining_notification",
                                             error=str(e),
                                         )
+                                        break
 
                                 if remaining_notifications > 0:
                                     self._logger.info(
