@@ -74,6 +74,7 @@ class UIViewModel(BaseViewModel):
             ConnectionStatus.DISCONNECTED
         )
         self.sidebar_tab: Observable[SidebarTab] = Observable(SidebarTab.SESSIONS)
+        self.sidebar_collapsed: Observable[bool] = Observable(False)
         self.sessions_expanded: Observable[bool] = Observable(True)
         self.files_expanded: Observable[bool] = Observable(True)
         self.is_loading: Observable[bool] = Observable(False)

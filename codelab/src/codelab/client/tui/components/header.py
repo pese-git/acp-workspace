@@ -1,9 +1,11 @@
 """Верхняя информационная панель приложения с интеграцией MVVM.
 
+Референс: OpenCode packages/web/src/ui/header.tsx
+
 Отвечает за отображение:
-- Статуса соединения с сервером
-- Индикатора загрузки
-- Базовой информации о приложении
+- Логотип/название слева
+- Центр: breadcrumbs или title сессии
+- Справа: статус соединения, настройки
 """
 
 from __future__ import annotations
@@ -13,11 +15,16 @@ from typing import TYPE_CHECKING
 from textual.widgets import Static
 
 if TYPE_CHECKING:
-    from codelab.client.presentation.ui_view_model import UIViewModel
+    from codelab.client.presentation.ui_view_model import ConnectionStatus, UIViewModel
 
 
 class HeaderBar(Static):
     """Header с MVVM интеграцией для отображения статуса приложения.
+
+    Структура по образцу OpenCode:
+    - Left: логотип и название приложения
+    - Center: breadcrumbs / title сессии
+    - Right: статус соединения, индикатор загрузки, настройки
 
     Обязательно требует UIViewModel для работы. Подписывается на Observable свойства:
     - connection_status: текущий статус соединения
@@ -32,14 +39,28 @@ class HeaderBar(Static):
         >>> ui_vm.connection_status.value = ConnectionStatus.CONNECTED
     """
 
-    def __init__(self, ui_vm: UIViewModel) -> None:
+    # Настройки отображения
+    APP_NAME = "CodeLab"
+    APP_ICON = "⚡"
+
+    def __init__(
+        self,
+        ui_vm: UIViewModel,
+        *,
+        session_title: str = "",
+        show_breadcrumbs: bool = True,
+    ) -> None:
         """Инициализирует HeaderBar с обязательным UIViewModel.
 
         Args:
             ui_vm: UIViewModel для управления состоянием header'a
+            session_title: Название текущей сессии
+            show_breadcrumbs: Показывать ли breadcrumbs
         """
         super().__init__("", id="header")
         self.ui_vm = ui_vm
+        self._session_title = session_title
+        self._show_breadcrumbs = show_breadcrumbs
 
         # Подписываемся на изменения в UIViewModel
         self.ui_vm.connection_status.subscribe(self._on_connection_status_changed)
@@ -60,7 +81,7 @@ class HeaderBar(Static):
         """Обновить header при изменении статуса загрузки.
 
         Args:
-            is_loading: True если идет загрузка, False иначе
+            is_loading: True если идет загрузки, False иначе
         """
         self._update_display()
 
@@ -69,8 +90,73 @@ class HeaderBar(Static):
         if self.ui_vm is None:
             return
 
-        status_text = self.ui_vm.connection_status.value.value
-        loading_indicator = "⟳ " if self.ui_vm.is_loading.value else ""
+        # Собираем части header'a
+        left_part = self._build_left_part()
+        center_part = self._build_center_part()
+        right_part = self._build_right_part()
 
-        display_text = f"{loading_indicator}ACP-Client TUI | {status_text}"
+        # Форматируем строку с выравниванием
+        display_text = f"{left_part} │ {center_part} │ {right_part}"
         self.update(display_text)
+
+    def _build_left_part(self) -> str:
+        """Собрать левую часть header'a: логотип и название."""
+        return f"{self.APP_ICON} {self.APP_NAME}"
+
+    def _build_center_part(self) -> str:
+        """Собрать центральную часть header'a: breadcrumbs или title сессии."""
+        if self._session_title:
+            return f"📝 {self._session_title}"
+        if self._show_breadcrumbs:
+            return "Home"
+        return ""
+
+    def _build_right_part(self) -> str:
+        """Собрать правую часть header'a: статус и индикаторы."""
+        status = self.ui_vm.connection_status.value
+        is_loading = self.ui_vm.is_loading.value
+
+        # Формируем статус с иконкой
+        status_icon = self._get_status_icon(status)
+        status_text = status.value
+
+        # Индикатор загрузки
+        loading_indicator = "⟳ " if is_loading else ""
+
+        return f"{loading_indicator}{status_icon} {status_text}"
+
+    def _get_status_icon(self, status: ConnectionStatus) -> str:
+        """Получить иконку для статуса соединения.
+
+        Args:
+            status: Статус соединения
+
+        Returns:
+            Иконка в виде emoji/символа
+        """
+        status_icons = {
+            "connected": "🟢",
+            "connecting": "🟡",
+            "reconnecting": "🟡",
+            "disconnected": "⚪",
+            "error": "🔴",
+        }
+        return status_icons.get(status.value, "⚪")
+
+    def set_session_title(self, title: str) -> None:
+        """Установить заголовок текущей сессии.
+
+        Args:
+            title: Новый заголовок
+        """
+        self._session_title = title
+        self._update_display()
+
+    def set_breadcrumbs(self, breadcrumbs: list[str]) -> None:
+        """Установить breadcrumbs для навигации.
+
+        Args:
+            breadcrumbs: Список элементов пути
+        """
+        self._session_title = " > ".join(breadcrumbs) if breadcrumbs else ""
+        self._update_display()
