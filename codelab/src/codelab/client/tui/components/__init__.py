@@ -12,11 +12,23 @@
 - MessageBubble, Avatar, MessageRole: отображение сообщений
 - MessageList, DateSeparator: список сообщений
 - SessionTurn, TurnStatus, TurnData: turn компоненты
+
+Фаза 3 (Tool Components):
+- ActionButton, IconButton: стилизованные кнопки
+- ActionBar: панель с кнопками действий
+- PermissionBadge: badge статуса разрешения
+- PermissionRequest: виджет запроса разрешения
+- ToolCallCard: карточка tool call
+- ToolCallList: список tool calls
+- FileChangePreview, DiffLine: предпросмотр изменений файла
 """
 
+from .action_bar import ActionBar
+from .action_button import ActionButton, ButtonVariant, IconButton
 from .chat_view import ChatView
 from .chat_view_permission_manager import ChatViewPermissionManager
 from .container import Card, ContainerVariant, StyledContainer
+from .file_change_preview import DiffLine, FileChangePreview
 from .file_tree import FileTree
 from .file_viewer import FileViewerModal
 from .footer import AgentStatus, FooterBar
@@ -28,7 +40,9 @@ from .markdown import CodeBlock, InlineMarkdown, MarkdownViewer
 from .message_bubble import Avatar, MessageBubble, MessageRole
 from .message_list import DateSeparator, MessageList
 from .panel import AccordionPanel, CollapsiblePanel
+from .permission_badge import PermissionBadge, PermissionStatus
 from .permission_modal import PermissionModal
+from .permission_request import PermissionRequest, PermissionType
 from .plan_panel import PlanPanel
 from .prompt_input import PromptInput
 from .session_turn import SessionTurn, TurnData, TurnStatus
@@ -36,6 +50,8 @@ from .sidebar import Sidebar
 from .streaming_text import StreamingText, ThinkingIndicator, TypewriterText
 from .terminal_log_modal import TerminalLogModal
 from .terminal_output import TerminalOutputPanel
+from .tool_call_card import ToolCallCard, ToolCallStatus
+from .tool_call_list import ToolCallList
 from .tool_panel import ToolPanel
 
 __all__ = [
@@ -87,4 +103,18 @@ __all__ = [
     "SessionTurn",
     "TurnStatus",
     "TurnData",
+    # Фаза 3: Tool компоненты
+    "ActionButton",
+    "IconButton",
+    "ButtonVariant",
+    "ActionBar",
+    "PermissionBadge",
+    "PermissionStatus",
+    "PermissionRequest",
+    "PermissionType",
+    "ToolCallCard",
+    "ToolCallStatus",
+    "ToolCallList",
+    "FileChangePreview",
+    "DiffLine",
 ]
