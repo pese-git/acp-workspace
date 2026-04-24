@@ -2,25 +2,26 @@
 
 Позволяет запустить TUI клиент в браузере.
 Модуль предоставляет graceful fallback если textual-web не установлен.
+
+ПРИМЕЧАНИЕ: textual-web работает как CLI инструмент (textual serve),
+а не как библиотека. Для Web UI используется отдельный процесс.
 """
 
 from __future__ import annotations
+
+import importlib.util
 
 import structlog
 
 logger = structlog.get_logger(__name__)
 
-# Флаг доступности textual-web
-TEXTUAL_WEB_AVAILABLE = False
-TextualWeb = None
+# Проверяем наличие пакета textual-web через importlib
+# textual-web работает как CLI (textual serve), а не как библиотека
+TEXTUAL_WEB_AVAILABLE = importlib.util.find_spec("textual_web") is not None
 
-try:
-    from textual_web import TextualWeb as _TextualWeb
-
-    TextualWeb = _TextualWeb
-    TEXTUAL_WEB_AVAILABLE = True
+if TEXTUAL_WEB_AVAILABLE:
     logger.debug("textual_web_available", version=">=0.5")
-except ImportError:
+else:
     logger.debug("textual_web_not_available")
 
 
@@ -36,16 +37,19 @@ def is_web_ui_available() -> bool:
 def create_web_app(server_url: str = "ws://localhost:8765/acp/ws"):
     """Создать веб-приложение для TUI.
     
+    ПРИМЕЧАНИЕ: textual-web работает через CLI команду 'textual serve',
+    а не как библиотека. Эта функция возвращает конфигурацию для запуска.
+    
     Args:
         server_url: URL WebSocket сервера для подключения
         
     Returns:
-        TextualWeb instance если доступен, иначе None
+        Словарь с конфигурацией для запуска textual serve
         
     Raises:
         RuntimeError: если textual-web не установлен
     """
-    if not TEXTUAL_WEB_AVAILABLE or TextualWeb is None:
+    if not TEXTUAL_WEB_AVAILABLE:
         raise RuntimeError(
             "textual-web не установлен. "
             "Установите: pip install 'codelab[web]' или pip install textual-web"
@@ -62,12 +66,6 @@ def create_web_app(server_url: str = "ws://localhost:8765/acp/ws"):
         host = "localhost"
         port = 8765
     
-    # Фабрика для создания TUI приложения
-    def app_factory():
-        """Создаёт экземпляр TUI приложения для Web."""
-        from codelab.client.tui.app import ACPClientApp
-        return ACPClientApp(host=host, port=port)
-    
     logger.info(
         "creating_web_app",
         server_url=server_url,
@@ -75,7 +73,9 @@ def create_web_app(server_url: str = "ws://localhost:8765/acp/ws"):
         port=port,
     )
     
-    return TextualWeb(app_factory)
+    # Возвращаем конфигурацию вместо TextualWeb instance
+    # Web UI реализован через fallback HTML страницу
+    return {"host": host, "port": port, "server_url": server_url}
 
 
 def get_fallback_html(host: str, port: int) -> str:
