@@ -35,6 +35,9 @@
 from .action_bar import ActionBar
 from .action_button import ActionButton, ButtonVariant, IconButton
 from .chat_view import ChatView
+from .chat_view_permission_manager import ChatViewPermissionManager
+from .command_palette import Command, CommandCategory, CommandItem, CommandPalette
+from .container import Card, ContainerVariant, StyledContainer
 from .context_menu import (
     ContextMenu,
     ContextMenuItem,
@@ -43,8 +46,6 @@ from .context_menu import (
     MenuItem,
     MenuSeparator,
 )
-from .chat_view_permission_manager import ChatViewPermissionManager
-from .container import Card, ContainerVariant, StyledContainer
 from .file_change_preview import DiffLine, FileChangePreview
 from .file_tree import FileTree
 from .file_viewer import FileViewerModal
@@ -52,6 +53,16 @@ from .footer import AgentStatus, FooterBar
 from .header import HeaderBar
 from .help_modal import HelpModal
 from .inline_permission_widget import InlinePermissionWidget
+from .keyboard_manager import (
+    CATEGORY_NAMES,
+    DEFAULT_BINDINGS,
+    HotkeyBinding,
+    HotkeyCategory,
+    HotkeyGroup,
+    KeyboardManager,
+    get_keyboard_manager,
+    set_keyboard_manager,
+)
 from .main_layout import MainLayout
 from .markdown import CodeBlock, InlineMarkdown, MarkdownViewer
 from .message_bubble import Avatar, MessageBubble, MessageRole
@@ -67,6 +78,7 @@ from .search_input import SearchInput
 from .session_turn import SessionTurn, TurnData, TurnStatus
 from .sidebar import Sidebar
 from .spinner import LoadingIndicator, Spinner, SpinnerSize, SpinnerVariant
+from .status_line import CompactStatusLine, StatusIndicator, StatusLine, StatusMode
 from .streaming_text import StreamingText, ThinkingIndicator, TypewriterText
 from .tabs import Tab, TabBar, TabbedContainer, TabData, TabPanel
 from .terminal_log_modal import TerminalLogModal
@@ -167,4 +179,21 @@ __all__ = [
     "TerminalSession",
     "TerminalOutput",
     "TerminalToolbar",
+    # Фаза 5: Polish компоненты
+    "KeyboardManager",
+    "HotkeyBinding",
+    "HotkeyCategory",
+    "HotkeyGroup",
+    "CATEGORY_NAMES",
+    "DEFAULT_BINDINGS",
+    "get_keyboard_manager",
+    "set_keyboard_manager",
+    "CommandPalette",
+    "Command",
+    "CommandCategory",
+    "CommandItem",
+    "StatusLine",
+    "CompactStatusLine",
+    "StatusMode",
+    "StatusIndicator",
 ]

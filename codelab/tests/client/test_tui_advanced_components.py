@@ -13,7 +13,16 @@
 
 from __future__ import annotations
 
-# Тесты для ThemeManager
+from codelab.client.tui.components.context_menu import (
+    MenuGroup,
+    MenuItem,
+    MenuSeparator,
+)
+from codelab.client.tui.components.progress import ProgressVariant
+from codelab.client.tui.components.spinner import SpinnerSize, SpinnerVariant
+from codelab.client.tui.components.tabs import TabData
+from codelab.client.tui.components.terminal_panel import TerminalSession
+from codelab.client.tui.components.toast import ToastData, ToastType
 from codelab.client.tui.themes import Theme, ThemeManager, ThemeType
 
 
@@ -97,10 +106,6 @@ class TestThemeType:
         assert ThemeType.LIGHT.value == "light"
 
 
-# Тесты для Toast компонентов
-from codelab.client.tui.components.toast import ToastData, ToastType
-
-
 class TestToastData:
     """Тесты для ToastData."""
 
@@ -139,10 +144,6 @@ class TestToastType:
         assert ToastType.ERROR.value == "error"
 
 
-# Тесты для Tab компонентов
-from codelab.client.tui.components.tabs import TabData
-
-
 class TestTabData:
     """Тесты для TabData."""
 
@@ -170,10 +171,6 @@ class TestTabData:
         assert data.icon == "📁"
 
 
-# Тесты для ProgressBar
-from codelab.client.tui.components.progress import ProgressVariant
-
-
 class TestProgressVariant:
     """Тесты для ProgressVariant enum."""
 
@@ -184,10 +181,6 @@ class TestProgressVariant:
         assert ProgressVariant.SUCCESS.value == "success"
         assert ProgressVariant.WARNING.value == "warning"
         assert ProgressVariant.ERROR.value == "error"
-
-
-# Тесты для Spinner
-from codelab.client.tui.components.spinner import SpinnerSize, SpinnerVariant
 
 
 class TestSpinnerEnums:
@@ -206,14 +199,6 @@ class TestSpinnerEnums:
         assert SpinnerVariant.CIRCLE.value == "circle"
         assert SpinnerVariant.ARROW.value == "arrow"
         assert SpinnerVariant.PULSE.value == "pulse"
-
-
-# Тесты для ContextMenu
-from codelab.client.tui.components.context_menu import (
-    MenuGroup,
-    MenuItem,
-    MenuSeparator,
-)
 
 
 class TestMenuItem:
@@ -275,10 +260,6 @@ class TestMenuGroup:
 
         assert len(group.items) == 3
         assert group.title == "Group"
-
-
-# Тесты для TerminalSession
-from codelab.client.tui.components.terminal_panel import TerminalSession
 
 
 class TestTerminalSession:

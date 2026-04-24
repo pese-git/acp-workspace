@@ -33,6 +33,7 @@ from codelab.client.tui.navigation import NavigationManager
 
 from .components import (
     ChatView,
+    CommandPalette,
     FileTree,
     FooterBar,
     HeaderBar,
@@ -44,6 +45,7 @@ from .components import (
     ToolPanel,
 )
 from .config import TUIConfigStore, resolve_tui_connection
+from .themes import ThemeManager, ThemeType
 
 
 class ACPClientApp(App[None]):
@@ -54,21 +56,25 @@ class ACPClientApp(App[None]):
     """
 
     BINDINGS = [
-        ("ctrl+q", "quit", "Quit"),
-        ("ctrl+n", "new_session", "New Session"),
-        ("ctrl+r", "retry_prompt", "Retry Prompt"),
-        ("ctrl+b", "focus_sidebar", "Focus Sessions"),
-        ("ctrl+s", "focus_session_list", "Focus Sessions"),
-        ("ctrl+j", "next_session", "Next Session"),
-        ("ctrl+k", "previous_session", "Prev Session"),
-        ("ctrl+l", "clear_chat", "Clear Chat"),
-        ("ctrl+h", "open_help", "Help"),
-        ("?", "show_hotkeys", "Hotkeys"),
-        ("ctrl+tab", "next_sidebar_tab", "Next Sidebar Tab"),
-        ("ctrl+shift+tab", "previous_sidebar_tab", "Prev Sidebar Tab"),
-        ("ctrl+t", "open_terminal_output", "Terminal Output"),
-        ("tab", "cycle_focus", "Cycle Focus"),
-        ("ctrl+c", "cancel_prompt", "Cancel"),
+        ("ctrl+q", "quit", "Выход"),
+        ("ctrl+n", "new_session", "Новая сессия"),
+        ("ctrl+r", "retry_prompt", "Повторить"),
+        ("ctrl+b", "toggle_sidebar", "Sidebar"),
+        ("ctrl+s", "focus_session_list", "Список сессий"),
+        ("ctrl+j", "next_session", "Следующая сессия"),
+        ("ctrl+k", "previous_session", "Предыдущая сессия"),
+        ("ctrl+l", "clear_chat", "Очистить чат"),
+        ("ctrl+h", "open_help", "Справка"),
+        ("?", "show_hotkeys", "Горячие клавиши"),
+        ("ctrl+tab", "next_sidebar_tab", "Вкладка sidebar"),
+        ("ctrl+shift+tab", "previous_sidebar_tab", "Предыдущая вкладка"),
+        ("ctrl+`", "open_terminal_output", "Терминал"),
+        ("tab", "cycle_focus", "Переключить фокус"),
+        ("ctrl+c", "cancel_prompt", "Отменить"),
+        # Новые горячие клавиши Фазы 5
+        ("ctrl+p", "command_palette", "Палитра команд"),
+        ("ctrl+t", "toggle_theme", "Переключить тему"),
+        ("escape", "close_modal", "Закрыть"),
     ]
 
     CSS_PATH = str(Path(__file__).with_name("styles") / "app.tcss")
@@ -105,6 +111,12 @@ class ACPClientApp(App[None]):
         self._cwd = cwd
         self._config_store = TUIConfigStore()
         self._app_logger = structlog.get_logger("acp_client.tui.app")
+
+        # ThemeManager для переключения тем
+        self._theme_manager = ThemeManager(app=self)
+        
+        # Флаг видимости sidebar
+        self._sidebar_visible = True
 
         # NavigationManager будет инициализирован в on_mount
         self._navigation_manager: NavigationManager | None = None
@@ -303,6 +315,16 @@ class ACPClientApp(App[None]):
             exclusive=False,
         )
 
+    def action_toggle_sidebar(self) -> None:
+        """Показывает/скрывает боковую панель."""
+        try:
+            sidebar_column = self.query_one("#sidebar-column")
+            self._sidebar_visible = not self._sidebar_visible
+            sidebar_column.display = self._sidebar_visible
+            self._app_logger.debug("sidebar_toggled", visible=self._sidebar_visible)
+        except Exception as e:
+            self._app_logger.warning("toggle_sidebar_failed", error=str(e))
+
     def action_focus_sidebar(self) -> None:
         """Переводит фокус в список сессий."""
 
@@ -331,6 +353,54 @@ class ACPClientApp(App[None]):
         """Показать отдельный экран со списком горячих клавиш."""
 
         self.push_screen(HelpModal(context="global", show_hotkeys=True))
+
+    def action_command_palette(self) -> None:
+        """Открывает палитру команд."""
+        self._app_logger.debug("opening_command_palette")
+
+        def on_command_selected(result: object) -> None:
+            """Обработка выбранной команды."""
+            if result is not None:
+                # Выполняем action команды
+                from .components import Command
+                if isinstance(result, Command) and result.action:
+                    self._app_logger.debug(
+                        "command_selected",
+                        command_id=result.id,
+                        action=result.action,
+                    )
+                    try:
+                        self.action(result.action)
+                    except Exception as e:
+                        self._app_logger.warning(
+                            "command_action_failed",
+                            action=result.action,
+                            error=str(e),
+                        )
+
+        self.push_screen(CommandPalette(), callback=on_command_selected)
+
+    def action_toggle_theme(self) -> None:
+        """Переключает между светлой и тёмной темой."""
+        current = self._theme_manager.current_theme
+        if current == ThemeType.DARK:
+            self._theme_manager.set_theme(ThemeType.LIGHT.value)
+        else:
+            self._theme_manager.set_theme(ThemeType.DARK.value)
+        self._app_logger.debug(
+            "theme_toggled",
+            new_theme=self._theme_manager.current_theme.value,
+        )
+
+    def action_close_modal(self) -> None:
+        """Закрывает текущее модальное окно."""
+        # Textual автоматически обрабатывает escape для модальных окон,
+        # но этот action может быть вызван из других мест
+        if self.screen.is_modal:
+            self.pop_screen()
+        else:
+            # Если нет модального окна, отменяем текущий ввод
+            self.action_cancel_prompt()
 
     def action_next_session(self) -> None:
         """Выбирает следующую сессию в sidebar и применяет выбор."""

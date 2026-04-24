@@ -36,7 +36,9 @@ def test_header_bar_initializes_with_ui_view_model(ui_view_model: UIViewModel) -
 def test_header_bar_displays_initial_status(header_bar: HeaderBar) -> None:
     """Проверить что HeaderBar отображает начальный статус (DISCONNECTED)."""
     # Начальный статус — DISCONNECTED, не загружается
-    assert "ACP-Client TUI | disconnected" in cast(Any, header_bar.render()).plain
+    rendered = cast(Any, header_bar.render()).plain
+    assert "CodeLab" in rendered
+    assert "disconnected" in rendered
 
 
 def test_header_bar_updates_on_connection_status_change(
@@ -49,7 +51,7 @@ def test_header_bar_updates_on_connection_status_change(
     
     rendered = cast(Any, header_bar.render()).plain
     assert "connecting" in rendered
-    assert "ACP-Client TUI" in rendered
+    assert "CodeLab" in rendered
 
 
 def test_header_bar_shows_loading_indicator_when_loading(
@@ -62,7 +64,7 @@ def test_header_bar_shows_loading_indicator_when_loading(
     
     rendered = cast(Any, header_bar.render()).plain
     assert "⟳" in rendered
-    assert "ACP-Client TUI" in rendered
+    assert "CodeLab" in rendered
 
 
 def test_header_bar_hides_loading_indicator_when_not_loading(

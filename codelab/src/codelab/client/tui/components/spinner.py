@@ -127,9 +127,9 @@ class Spinner(Widget):
             classes: CSS классы
         """
         super().__init__(name=name, id=id or "spinner", classes=classes)
-        self._size = size
-        self._variant = variant
-        self._frame_index = 0
+        self._size: SpinnerSize = size
+        self._variant: SpinnerVariant = variant
+        self._frame_index: int = 0
         self._animation_task: asyncio.Task | None = None
 
         # Добавляем класс размера
@@ -281,9 +281,9 @@ class LoadingIndicator(Widget):
             classes: CSS классы
         """
         super().__init__(name=name, id=id or "loading-indicator", classes=classes)
-        self._text = text
-        self._size = size
-        self._variant = variant
+        self._text: str = text
+        self._size: SpinnerSize = size
+        self._variant: SpinnerVariant = variant
         self.visible = visible
 
     def compose(self) -> ComposeResult:
