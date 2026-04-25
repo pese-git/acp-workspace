@@ -1,14 +1,17 @@
 """Нижняя строка статуса приложения с MVVM интеграцией.
 
+Референс: OpenCode packages/web/src/ui/footer.tsx
+
 Отвечает за:
-- Отображение статуса соединения
-- Показ ошибок и уведомлений
-- Показ информационных сообщений
-- Подсказки по управлению
+- Hotkey hints (подсказки по горячим клавишам)
+- Статус агента (thinking, idle)
+- Токены/стоимость
+- Отображение ошибок и уведомлений
 """
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import TYPE_CHECKING
 
 from textual.widgets import Static
@@ -17,14 +20,29 @@ if TYPE_CHECKING:
     from codelab.client.presentation.ui_view_model import ConnectionStatus, UIViewModel
 
 
+class AgentStatus(Enum):
+    """Статус агента."""
+
+    IDLE = "idle"
+    THINKING = "thinking"
+    EXECUTING = "executing"
+    WAITING = "waiting"
+
+
 class FooterBar(Static):
     """Нижняя строка статуса с MVVM интеграцией.
+
+    Структура по образцу OpenCode:
+    - Left: hotkey hints (F1 help, ? hotkeys, etc.)
+    - Center: статус агента (idle/thinking/executing)
+    - Right: токены и стоимость запроса
 
     Обязательно требует UIViewModel для работы. Подписывается на Observable свойства:
     - connection_status: статус соединения
     - error_message: последняя ошибка
     - info_message: информационное сообщение
     - warning_message: предупреждение
+    - is_loading: индикатор загрузки
 
     Примеры использования:
         >>> from codelab.client.presentation.ui_view_model import UIViewModel
@@ -35,14 +53,36 @@ class FooterBar(Static):
         >>> ui_vm.error_message.value = "Connection failed"
     """
 
-    def __init__(self, ui_vm: UIViewModel) -> None:
+    # Конфигурация hotkeys для отображения
+    DEFAULT_HOTKEYS = [
+        ("F1", "help"),
+        ("?", "hotkeys"),
+        ("Ctrl+B", "sidebar"),
+        ("Ctrl+N", "new"),
+        ("Ctrl+Q", "quit"),
+    ]
+
+    def __init__(
+        self,
+        ui_vm: UIViewModel,
+        *,
+        show_tokens: bool = True,
+        show_hotkeys: bool = True,
+    ) -> None:
         """Инициализирует FooterBar с обязательным UIViewModel.
 
         Args:
             ui_vm: UIViewModel для управления состояниями
+            show_tokens: Показывать ли токены/стоимость
+            show_hotkeys: Показывать ли подсказки по горячим клавишам
         """
         super().__init__("", id="footer")
         self.ui_vm = ui_vm
+        self._show_tokens = show_tokens
+        self._show_hotkeys = show_hotkeys
+        self._agent_status = AgentStatus.IDLE
+        self._tokens_used: int = 0
+        self._cost: float = 0.0
 
         # Подписываемся на изменения в UIViewModel
         self.ui_vm.connection_status.subscribe(self._on_connection_status_changed)
@@ -64,13 +104,24 @@ class FooterBar(Static):
         self._update_display()
 
     def _on_loading_changed(self, is_loading: bool) -> None:
-        """Обновить footer при изменении глобальной загрузки."""
+        """Обновить footer при изменении глобальной загрузки.
 
+        Args:
+            is_loading: True если идет загрузка
+        """
+        # Обновляем статус агента на основе загрузки
+        if is_loading:
+            self._agent_status = AgentStatus.THINKING
+        else:
+            self._agent_status = AgentStatus.IDLE
         self._update_display()
 
     def _on_loading_message_changed(self, message: str | None) -> None:
-        """Обновить footer при изменении сообщения загрузки."""
+        """Обновить footer при изменении сообщения загрузки.
 
+        Args:
+            message: Сообщение о загрузке
+        """
         self._update_display()
 
     def _on_error_message_changed(self, message: str | None) -> None:
@@ -102,36 +153,85 @@ class FooterBar(Static):
         if self.ui_vm is None:
             return
 
-        # Приоритет: ошибка > предупреждение > информация > статус соединения
+        # Приоритет: ошибка > предупреждение > информация > статус
         if self.ui_vm.error_message.value:
             display_text = f"❌ Error: {self.ui_vm.error_message.value}"
         elif self.ui_vm.warning_message.value:
-            display_text = f"⚠️ Warning: {self.ui_vm.warning_message.value}"
+            display_text = f"⚠️  Warning: {self.ui_vm.warning_message.value}"
         elif self.ui_vm.info_message.value:
-            display_text = f"ℹ️ {self.ui_vm.info_message.value}"
+            display_text = f"ℹ️  {self.ui_vm.info_message.value}"
         else:
             display_text = self._build_status_line()
 
         self.update(display_text)
 
     def _build_status_line(self) -> str:
-        """Собрать основную статусную строку с учетом loading и hotkeys."""
+        """Собрать основную статусную строку."""
+        parts = []
 
+        # Левая часть: hotkeys
+        if self._show_hotkeys:
+            hotkeys_text = self._build_hotkeys_text()
+            parts.append(hotkeys_text)
+
+        # Центр: статус агента с индикатором соединения
+        status_text = self._build_agent_status_text()
+        parts.append(status_text)
+
+        # Правая часть: токены/стоимость
+        if self._show_tokens and (self._tokens_used > 0 or self._cost > 0):
+            tokens_text = self._build_tokens_text()
+            parts.append(tokens_text)
+
+        return " │ ".join(parts)
+
+    def _build_hotkeys_text(self) -> str:
+        """Собрать текст с подсказками по горячим клавишам."""
+        hotkey_parts = []
+        for key, label in self.DEFAULT_HOTKEYS[:4]:  # Показываем максимум 4
+            hotkey_parts.append(f"{key} {label}")
+        return " | ".join(hotkey_parts)
+
+    def _build_agent_status_text(self) -> str:
+        """Собрать текст статуса агента."""
         connection_status = self.ui_vm.connection_status.value
         status_prefix = self._status_prefix(connection_status)
-        status_text = connection_status.value
-        if self.ui_vm.is_loading.value:
-            loading_text = self.ui_vm.loading_message.value or "processing..."
-            hotkeys = "F1 help | ? hotkeys | Ctrl+Q quit"
-            return f"{status_prefix} {status_text} | {loading_text} | {hotkeys}"
 
-        hotkeys = "F1 help | ? hotkeys | Ctrl+Tab sidebar | Ctrl+Q quit"
-        return f"{status_prefix} {status_text} | {hotkeys}"
+        # Статус агента с иконкой
+        agent_icons = {
+            AgentStatus.IDLE: "○",
+            AgentStatus.THINKING: "◐",
+            AgentStatus.EXECUTING: "●",
+            AgentStatus.WAITING: "◑",
+        }
+        agent_icon = agent_icons.get(self._agent_status, "○")
+
+        # Если есть сообщение загрузки - показываем его
+        if self.ui_vm.is_loading.value:
+            loading_msg = self.ui_vm.loading_message.value or "processing..."
+            return f"{status_prefix} {agent_icon} {loading_msg}"
+
+        return f"{status_prefix} {connection_status.value}"
+
+    def _build_tokens_text(self) -> str:
+        """Собрать текст с информацией о токенах и стоимости."""
+        parts = []
+        if self._tokens_used > 0:
+            parts.append(f"🎯 {self._tokens_used:,} tokens")
+        if self._cost > 0:
+            parts.append(f"💰 ${self._cost:.4f}")
+        return " ".join(parts)
 
     @staticmethod
     def _status_prefix(status: ConnectionStatus) -> str:
-        """Вернуть короткий индикатор для статуса подключения."""
+        """Вернуть короткий индикатор для статуса подключения.
 
+        Args:
+            status: Статус соединения
+
+        Returns:
+            Символ индикатора
+        """
         if status.value == "connected":
             return "✓"
         if status.value in {"connecting", "reconnecting"}:
@@ -139,3 +239,23 @@ class FooterBar(Static):
         if status.value == "error":
             return "✗"
         return "○"
+
+    def set_agent_status(self, status: AgentStatus) -> None:
+        """Установить статус агента.
+
+        Args:
+            status: Новый статус агента
+        """
+        self._agent_status = status
+        self._update_display()
+
+    def update_tokens(self, tokens: int, cost: float = 0.0) -> None:
+        """Обновить информацию о токенах и стоимости.
+
+        Args:
+            tokens: Количество использованных токенов
+            cost: Стоимость запроса в долларах
+        """
+        self._tokens_used = tokens
+        self._cost = cost
+        self._update_display()

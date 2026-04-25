@@ -16,7 +16,6 @@ from pathlib import Path
 
 import structlog
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal, Vertical
 
 from codelab.client.infrastructure.di_bootstrapper import DIBootstrapper
 from codelab.client.messages import PermissionOption, PermissionToolCall
@@ -33,17 +32,24 @@ from codelab.client.tui.navigation import NavigationManager
 
 from .components import (
     ChatView,
+    CommandPalette,
+    FileChangePreviewModal,
     FileTree,
     FooterBar,
     HeaderBar,
     HelpModal,
+    MainLayout,
     PermissionModal,
     PlanPanel,
     PromptInput,
+    QuickActionsBar,
     Sidebar,
+    ToastContainer,
+    ToolCallCard,
     ToolPanel,
 )
 from .config import TUIConfigStore, resolve_tui_connection
+from .themes import ThemeManager, ThemeType
 
 
 class ACPClientApp(App[None]):
@@ -54,21 +60,25 @@ class ACPClientApp(App[None]):
     """
 
     BINDINGS = [
-        ("ctrl+q", "quit", "Quit"),
-        ("ctrl+n", "new_session", "New Session"),
-        ("ctrl+r", "retry_prompt", "Retry Prompt"),
-        ("ctrl+b", "focus_sidebar", "Focus Sessions"),
-        ("ctrl+s", "focus_session_list", "Focus Sessions"),
-        ("ctrl+j", "next_session", "Next Session"),
-        ("ctrl+k", "previous_session", "Prev Session"),
-        ("ctrl+l", "clear_chat", "Clear Chat"),
-        ("ctrl+h", "open_help", "Help"),
-        ("?", "show_hotkeys", "Hotkeys"),
-        ("ctrl+tab", "next_sidebar_tab", "Next Sidebar Tab"),
-        ("ctrl+shift+tab", "previous_sidebar_tab", "Prev Sidebar Tab"),
-        ("ctrl+t", "open_terminal_output", "Terminal Output"),
-        ("tab", "cycle_focus", "Cycle Focus"),
-        ("ctrl+c", "cancel_prompt", "Cancel"),
+        ("ctrl+q", "quit", "Выход"),
+        ("ctrl+n", "new_session", "Новая сессия"),
+        ("ctrl+r", "retry_prompt", "Повторить"),
+        ("ctrl+b", "toggle_sidebar", "Sidebar"),
+        ("ctrl+s", "focus_session_list", "Список сессий"),
+        ("ctrl+j", "next_session", "Следующая сессия"),
+        ("ctrl+k", "previous_session", "Предыдущая сессия"),
+        ("ctrl+l", "clear_chat", "Очистить чат"),
+        ("ctrl+h", "open_help", "Справка"),
+        ("?", "show_hotkeys", "Горячие клавиши"),
+        ("ctrl+tab", "next_sidebar_tab", "Вкладка sidebar"),
+        ("ctrl+shift+tab", "previous_sidebar_tab", "Предыдущая вкладка"),
+        ("ctrl+`", "open_terminal_output", "Терминал"),
+        ("tab", "cycle_focus", "Переключить фокус"),
+        ("ctrl+c", "cancel_prompt", "Отменить"),
+        # Новые горячие клавиши Фазы 5
+        ("ctrl+p", "command_palette", "Палитра команд"),
+        ("ctrl+t", "toggle_theme", "Переключить тему"),
+        ("escape", "close_modal", "Закрыть"),
     ]
 
     CSS_PATH = str(Path(__file__).with_name("styles") / "app.tcss")
@@ -106,8 +116,17 @@ class ACPClientApp(App[None]):
         self._config_store = TUIConfigStore()
         self._app_logger = structlog.get_logger("acp_client.tui.app")
 
+        # ThemeManager для переключения тем
+        self._theme_manager = ThemeManager(app=self)
+        
+        # Флаг видимости sidebar
+        self._sidebar_visible = True
+
         # NavigationManager будет инициализирован в on_mount
         self._navigation_manager: NavigationManager | None = None
+        
+        # MainLayout будет инициализирован в compose()
+        self._main_layout: MainLayout | None = None
 
         # Блокировка предотвращает параллельные `session/load`, которые могут
         # перемешивать `session/update` между конкурентными запросами.
@@ -159,29 +178,34 @@ class ACPClientApp(App[None]):
             raise RuntimeError(f"Failed to initialize ViewModels: {e}") from e
 
     def compose(self) -> ComposeResult:
-        """Собирает базовый layout приложения."""
+        """Собирает базовый layout приложения в стиле OpenCode.
+        
+        Структура (OpenCode-style):
+        - HeaderBar (titlebar)
+        - MainLayout (id="body"):
+            - sidebar-column: Sidebar, FileTree (монтируются в on_ready)
+            - main-column:
+                - content-area: ChatView, PlanPanel (монтируются в on_ready)
+                - dock-region: PromptInput, QuickActionsBar (монтируются в on_ready)
+            - right-panel-column: ToolPanel (монтируется в on_ready)
+        - FooterBar (статус-бар внизу)
+        - ToastContainer (overlay)
+        """
         yield HeaderBar(self._ui_vm)
-        with Horizontal(id="body"):
-            with Vertical(id="sidebar-column"):
-                yield Sidebar(self._session_vm, self._ui_vm)
-                # Передаем cwd в FileTree для отображения структуры проекта
-                yield FileTree(
-                    filesystem_vm=self._filesystem_vm,
-                    root_path=self._cwd,
-                )
-            with Vertical(id="main-column"):
-                # Передаем permission_vm в ChatView для встроенного виджета разрешения
-                self._chat_view = ChatView(self._chat_vm, self._permission_vm)
-                yield self._chat_view
-                yield PlanPanel(self._plan_vm)
-            yield ToolPanel(self._chat_vm, self._terminal_vm)
-        with Vertical(id="bottom"):
-            yield PromptInput(self._chat_vm)
-            yield FooterBar(self._ui_vm)
+        # MainLayout с dock-region внутри main-column (OpenCode-style)
+        self._main_layout = MainLayout(ui_vm=self._ui_vm, id="body")
+        yield self._main_layout
+        # FooterBar как отдельный элемент внизу экрана
+        yield FooterBar(self._ui_vm)
+        # ToastContainer должен быть поверх других элементов (в конце compose)
+        yield ToastContainer(id="toast-container")
 
     def on_ready(self) -> None:
         """Запускается когда приложение готово к работе."""
         self._app_logger.info("app_ready")
+
+        # Монтируем компоненты в контейнеры MainLayout
+        self._mount_main_layout_children()
 
         # Инициализируем NavigationManager
         try:
@@ -197,6 +221,55 @@ class ACPClientApp(App[None]):
         self._app_logger.info("starting_connection_worker")
         self.run_worker(self._initialize_connection(), exclusive=False)
         self._on_sidebar_state_changed(None)
+
+    def _mount_main_layout_children(self) -> None:
+        """Монтирует дочерние компоненты в контейнеры MainLayout (OpenCode-style).
+        
+        Эта функция вызывается в on_ready после того как MainLayout создан в compose().
+        
+        OpenCode-style layout:
+        - sidebar-column: Sidebar, FileTree
+        - main-column:
+            - content-area: ChatView, PlanPanel
+            - dock-region: PromptInput, QuickActionsBar
+        - right-panel-column: ToolPanel
+        """
+        if self._main_layout is None:
+            self._app_logger.error("main_layout_not_initialized")
+            return
+        
+        # Монтируем компоненты в sidebar
+        sidebar_column = self._main_layout.sidebar_column
+        if sidebar_column is not None:
+            sidebar_column.mount(Sidebar(self._session_vm, self._ui_vm))
+            sidebar_column.mount(
+                FileTree(
+                    filesystem_vm=self._filesystem_vm,
+                    root_path=self._cwd,
+                )
+            )
+            self._app_logger.debug("sidebar_components_mounted")
+        
+        # Монтируем компоненты в content-area
+        content_area = self._main_layout.content_area
+        if content_area is not None:
+            self._chat_view = ChatView(self._chat_vm, self._permission_vm)
+            content_area.mount(self._chat_view)
+            content_area.mount(PlanPanel(self._plan_vm))
+            self._app_logger.debug("content_area_components_mounted")
+        
+        # Монтируем PromptInput и QuickActionsBar в dock-region (OpenCode-style)
+        dock_region = self._main_layout.dock_region
+        if dock_region is not None:
+            dock_region.mount(PromptInput(self._chat_vm))
+            dock_region.mount(QuickActionsBar(self._ui_vm))
+            self._app_logger.debug("dock_region_components_mounted")
+        
+        # Монтируем ToolPanel в right-panel-column
+        right_panel = self._main_layout.right_panel_column
+        if right_panel is not None:
+            right_panel.mount(ToolPanel(self._chat_vm, self._terminal_vm))
+            self._app_logger.debug("right_panel_components_mounted")
 
     async def _initialize_connection(self) -> None:
         """Инициализирует подключение к серверу."""
@@ -223,6 +296,9 @@ class ACPClientApp(App[None]):
             # Обновляем статус подключения в UI
             self._ui_vm.set_connection_status(ConnectionStatus.CONNECTED)
             self._ui_vm.set_loading(False)
+
+            # Показываем toast о успешном подключении
+            self.show_toast("Подключено к серверу", level="success")
 
             # Устанавливаем callback для показа permission modal в UI.
             # Это необходимо, чтобы при получении session/request_permission от сервера
@@ -268,6 +344,31 @@ class ACPClientApp(App[None]):
             self._ui_vm.set_connection_status(ConnectionStatus.DISCONNECTED)
             self._ui_vm.set_loading(False)
 
+            # Показываем toast об ошибке подключения
+            self.show_toast(f"Ошибка подключения: {e}", level="error")
+
+    def show_toast(self, message: str, level: str = "info", timeout: float = 3.0) -> None:
+        """Показывает toast-уведомление.
+
+        Args:
+            message: Текст уведомления
+            level: Уровень уведомления (info, success, warning, error)
+            timeout: Время отображения в секундах
+        """
+        try:
+            toast_container = self.query_one("#toast-container", ToastContainer)
+            # Вызываем соответствующий метод в зависимости от уровня
+            if level == "success":
+                toast_container.success(message, duration=timeout)
+            elif level == "warning":
+                toast_container.warning(message, duration=timeout)
+            elif level == "error":
+                toast_container.error(message, duration=timeout)
+            else:
+                toast_container.info(message, duration=timeout)
+        except Exception as e:
+            self._app_logger.warning("failed_to_show_toast", error=str(e))
+
     def _on_sidebar_state_changed(self, _: object) -> None:
         """Синхронизировать видимость FileTree с активной вкладкой sidebar."""
 
@@ -303,6 +404,16 @@ class ACPClientApp(App[None]):
             exclusive=False,
         )
 
+    def action_toggle_sidebar(self) -> None:
+        """Показывает/скрывает боковую панель."""
+        try:
+            sidebar_column = self.query_one("#sidebar-column")
+            self._sidebar_visible = not self._sidebar_visible
+            sidebar_column.display = self._sidebar_visible
+            self._app_logger.debug("sidebar_toggled", visible=self._sidebar_visible)
+        except Exception as e:
+            self._app_logger.warning("toggle_sidebar_failed", error=str(e))
+
     def action_focus_sidebar(self) -> None:
         """Переводит фокус в список сессий."""
 
@@ -331,6 +442,54 @@ class ACPClientApp(App[None]):
         """Показать отдельный экран со списком горячих клавиш."""
 
         self.push_screen(HelpModal(context="global", show_hotkeys=True))
+
+    def action_command_palette(self) -> None:
+        """Открывает палитру команд."""
+        self._app_logger.debug("opening_command_palette")
+
+        def on_command_selected(result: object) -> None:
+            """Обработка выбранной команды."""
+            if result is not None:
+                # Выполняем action команды
+                from .components import Command
+                if isinstance(result, Command) and result.action:
+                    self._app_logger.debug(
+                        "command_selected",
+                        command_id=result.id,
+                        action=result.action,
+                    )
+                    try:
+                        self.action(result.action)
+                    except Exception as e:
+                        self._app_logger.warning(
+                            "command_action_failed",
+                            action=result.action,
+                            error=str(e),
+                        )
+
+        self.push_screen(CommandPalette(), callback=on_command_selected)
+
+    def action_toggle_theme(self) -> None:
+        """Переключает между светлой и тёмной темой."""
+        current = self._theme_manager.current_theme
+        if current == ThemeType.DARK:
+            self._theme_manager.set_theme(ThemeType.LIGHT.value)
+        else:
+            self._theme_manager.set_theme(ThemeType.DARK.value)
+        self._app_logger.debug(
+            "theme_toggled",
+            new_theme=self._theme_manager.current_theme.name,
+        )
+
+    def action_close_modal(self) -> None:
+        """Закрывает текущее модальное окно."""
+        # Textual автоматически обрабатывает escape для модальных окон,
+        # но этот action может быть вызван из других мест
+        if self.screen.is_modal:
+            self.pop_screen()
+        else:
+            # Если нет модального окна, отменяем текущий ввод
+            self.action_cancel_prompt()
 
     def action_next_session(self) -> None:
         """Выбирает следующую сессию в sidebar и применяет выбор."""
@@ -366,6 +525,38 @@ class ACPClientApp(App[None]):
             exclusive=False,
         )
 
+    # =========================================================================
+    # Обработчики QuickActionsBar
+    # =========================================================================
+
+    def on_quick_actions_bar_new_session_requested(
+        self, event: QuickActionsBar.NewSessionRequested
+    ) -> None:
+        """Обработчик запроса создания новой сессии из QuickActionsBar."""
+        self._app_logger.info("quick_actions_new_session_requested")
+        self.action_new_session()
+
+    def on_quick_actions_bar_cancel_requested(
+        self, event: QuickActionsBar.CancelRequested
+    ) -> None:
+        """Обработчик запроса отмены из QuickActionsBar."""
+        self._app_logger.info("quick_actions_cancel_requested")
+        self.action_cancel_prompt()
+
+    def on_quick_actions_bar_help_requested(
+        self, event: QuickActionsBar.HelpRequested
+    ) -> None:
+        """Обработчик запроса справки из QuickActionsBar."""
+        self._app_logger.info("quick_actions_help_requested")
+        self.action_open_help()
+
+    def on_quick_actions_bar_theme_toggle_requested(
+        self, event: QuickActionsBar.ThemeToggleRequested
+    ) -> None:
+        """Обработчик запроса переключения темы из QuickActionsBar."""
+        self._app_logger.info("quick_actions_theme_toggle_requested")
+        self.action_toggle_theme()
+
     def on_prompt_input_submitted(self, event: PromptInput.Submitted) -> None:
         """Обработать отправку промпта пользователем.
 
@@ -389,11 +580,18 @@ class ACPClientApp(App[None]):
         # Добавляем сообщение пользователя в чат
         self._chat_vm.add_message("user", event.text, session_id=session_id)
 
+        # Устанавливаем состояние загрузки ДО запуска async worker'а
+        # чтобы LoadingIndicator показался сразу
+        self._chat_vm.is_streaming.value = True
+
         # Запускаем отправку промпта асинхронно
         self.run_worker(
             self._chat_vm.send_prompt_cmd.execute(session_id, event.text),
             exclusive=False,
         )
+
+        # Показываем toast о отправке запроса
+        self.show_toast("Запрос отправлен", level="info")
 
     def _on_selected_session_changed(self, session_id: str | None) -> None:
         """Обновляет ChatView при смене активной сессии."""
@@ -514,6 +712,89 @@ class ACPClientApp(App[None]):
                     request_id=request_id,
                     error=str(fallback_error),
                 )
+
+    def on_tool_call_card_selected(self, event: ToolCallCard.Selected) -> None:
+        """Обработчик выбора карточки tool call.
+        
+        Показывает модальное окно FileChangePreviewModal для инструментов
+        типа write_file, file_edit и подобных, которые изменяют файлы.
+        
+        Args:
+            event: Событие выбора карточки tool call
+        """
+        card = event.card
+        tool_name = card.tool_name
+        tool_call_id = card.tool_call_id
+        
+        self._app_logger.debug(
+            "tool_call_card_selected",
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
+        )
+        
+        # Проверяем, является ли инструмент файловым
+        file_tools = {"write_file", "file_edit", "create_file", "edit_file", "patch_file"}
+        if tool_name not in file_tools:
+            # Для не-файловых инструментов просто логируем
+            self._app_logger.debug(
+                "tool_call_card_selected_non_file_tool",
+                tool_call_id=tool_call_id,
+                tool_name=tool_name,
+            )
+            return
+        
+        # Получаем данные о tool call из ChatViewModel
+        tool_calls = self._chat_vm.tool_calls.value
+        tool_call_data = None
+        
+        for tc in tool_calls:
+            if isinstance(tc, dict):
+                tc_id = tc.get("toolCallId") or tc.get("id")
+            else:
+                tc_id = getattr(tc, "toolCallId", None) or getattr(tc, "id", None)
+            
+            if tc_id == tool_call_id:
+                tool_call_data = tc
+                break
+        
+        if tool_call_data is None:
+            self._app_logger.warning(
+                "tool_call_data_not_found",
+                tool_call_id=tool_call_id,
+            )
+            return
+        
+        # Извлекаем параметры для FileChangePreview
+        if isinstance(tool_call_data, dict):
+            params = tool_call_data.get("parameters") or tool_call_data.get("rawInput") or {}
+        else:
+            params = getattr(tool_call_data, "parameters", {}) or {}
+        
+        file_path = (
+            params.get("path") or params.get("file_path")
+            or params.get("filePath") or "unknown"
+        )
+        old_content = params.get("old_content") or params.get("oldContent") or ""
+        new_content = (
+            params.get("content") or params.get("new_content")
+            or params.get("newContent") or ""
+        )
+        
+        # Показываем модальное окно предпросмотра изменений
+        self._app_logger.info(
+            "showing_file_change_preview_modal",
+            tool_call_id=tool_call_id,
+            file_path=file_path,
+        )
+        
+        modal = FileChangePreviewModal(
+            file_path=file_path,
+            old_content=old_content,
+            new_content=new_content,
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
+        )
+        self.push_screen(modal)
 
     async def on_unmount(self) -> None:
         """Очистка ресурсов при завершении приложения."""
