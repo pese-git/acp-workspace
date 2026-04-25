@@ -4,6 +4,7 @@
 - Отображение списка сессий из SessionViewModel
 - Навигацию по сессиям (Up/Down)
 - Выбор сессии (Enter)
+- Фильтрацию сессий через SearchInput
 - Реактивные обновления при изменении состояния
 """
 
@@ -12,8 +13,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from textual import events
+from textual.app import ComposeResult
+from textual.containers import Vertical
 from textual.message import Message
+from textual.reactive import reactive
 from textual.widgets import Static
+
+from codelab.client.tui.components.search_input import SearchInput
 
 if TYPE_CHECKING:
     from codelab.client.presentation.session_view_model import SessionViewModel
@@ -22,13 +28,15 @@ if TYPE_CHECKING:
 from codelab.client.presentation.ui_view_model import SidebarTab
 
 
-class Sidebar(Static):
-    """Панель сессий с MVVM интеграцией.
+class Sidebar(Vertical):
+    """Панель сессий с MVVM интеграцией и поиском.
 
     Обязательно требует SessionViewModel для работы. Подписывается на Observable свойства:
     - sessions: список доступных сессий
     - selected_session_id: текущая выбранная сессия
     - is_loading_sessions: флаг загрузки сессий
+
+    Поддерживает фильтрацию сессий через встроенный SearchInput.
 
     Примеры использования:
         >>> from codelab.client.presentation.session_view_model import SessionViewModel
@@ -40,6 +48,9 @@ class Sidebar(Static):
     """
 
     can_focus = True
+
+    # Текущий фильтр поиска сессий
+    search_filter: reactive[str] = reactive("", init=False)
 
     class SessionSelected(Message):
         """Событие выбора сессии по Enter в sidebar."""
@@ -58,8 +69,9 @@ class Sidebar(Static):
 
         Args:
             session_vm: SessionViewModel для управления состоянием сессий
+            ui_vm: UIViewModel для управления UI состоянием (опционально)
         """
-        super().__init__("", id="sidebar")
+        super().__init__(id="sidebar")
         self.session_vm = session_vm
         self.ui_vm = ui_vm
         self._selected_index: int = 0
@@ -72,8 +84,14 @@ class Sidebar(Static):
             self.ui_vm.sidebar_tab.subscribe(self._on_sidebar_tab_changed)
             self.ui_vm.sessions_expanded.subscribe(self._on_sessions_expanded_changed)
 
-        # Инициализируем UI с текущим состоянием
-        self._update_display()
+    def compose(self) -> ComposeResult:
+        """Создаёт содержимое Sidebar: SearchInput и список сессий."""
+        yield SearchInput(
+            placeholder="Поиск сессий...",
+            debounce=0.2,
+            id="sidebar-search",
+        )
+        yield Static("", id="sidebar-sessions-list")
 
     def _on_sessions_changed(self, sessions: list) -> None:
         """Обновить sidebar при изменении списка сессий.
@@ -112,42 +130,88 @@ class Sidebar(Static):
 
         self._update_display()
 
+    def on_mount(self) -> None:
+        """Вызывается при монтировании виджета. Инициализирует отображение."""
+        self._update_display()
+
     def _update_display(self) -> None:
         """Обновить отображение sidebar'а на основе текущего состояния."""
-        self.update(self._render_text())
+        try:
+            sessions_list = self.query_one("#sidebar-sessions-list", Static)
+            sessions_list.update(self._render_text())
+        except Exception:
+            # Виджет ещё не смонтирован
+            pass
+
+    def on_search_input_search_changed(self, event: SearchInput.SearchChanged) -> None:
+        """Обрабатывает изменение поискового запроса.
+
+        Args:
+            event: Событие изменения поиска с новым значением
+        """
+        self.search_filter = event.value
+        # Сбрасываем выделение при изменении фильтра
+        self._selected_index = 0
+        self._update_display()
+
+    def on_search_input_search_cleared(self, event: SearchInput.SearchCleared) -> None:
+        """Обрабатывает очистку поискового запроса."""
+        self.search_filter = ""
+        self._selected_index = 0
+        self._update_display()
+
+    def _get_filtered_sessions(self) -> list:
+        """Возвращает отфильтрованный список сессий по текущему фильтру.
+
+        Returns:
+            Список сессий, соответствующих фильтру поиска
+        """
+        sessions = self.session_vm.sessions.value
+        if not self.search_filter:
+            return sessions
+
+        filter_lower = self.search_filter.lower()
+        filtered = []
+        for session in sessions:
+            title = self._extract_session_title(session).lower()
+            session_id = self._extract_session_id(session) or ""
+            # Ищем совпадение в title или sessionId
+            if filter_lower in title or filter_lower in session_id.lower():
+                filtered.append(session)
+        return filtered
 
     def select_next(self) -> None:
-        """Смещает выделение к следующей сессии."""
-        sessions = self.session_vm.sessions.value
-        if not sessions:
+        """Смещает выделение к следующей сессии (учитывает фильтрацию)."""
+        filtered_sessions = self._get_filtered_sessions()
+        if not filtered_sessions:
             return
 
         self._selected_index += 1
-        if self._selected_index >= len(sessions):
+        if self._selected_index >= len(filtered_sessions):
             self._selected_index = 0
 
         # Обновить выбранную сессию в ViewModel
         self._update_selected_session()
 
     def select_previous(self) -> None:
-        """Смещает выделение к предыдущей сессии."""
-        sessions = self.session_vm.sessions.value
-        if not sessions:
+        """Смещает выделение к предыдущей сессии (учитывает фильтрацию)."""
+        filtered_sessions = self._get_filtered_sessions()
+        if not filtered_sessions:
             return
 
         self._selected_index -= 1
         if self._selected_index < 0:
-            self._selected_index = len(sessions) - 1
+            self._selected_index = len(filtered_sessions) - 1
 
         # Обновить выбранную сессию в ViewModel
         self._update_selected_session()
 
     def get_selected_session_id(self) -> str | None:
-        """Возвращает sessionId для текущей выделенной строки."""
-        sessions = self.session_vm.sessions.value
-        if not sessions or self._selected_index >= len(sessions):
+        """Возвращает sessionId для текущей выделенной строки (учитывает фильтрацию)."""
+        filtered_sessions = self._get_filtered_sessions()
+        if not filtered_sessions or self._selected_index >= len(filtered_sessions):
             return None
-        return self._extract_session_id(sessions[self._selected_index])
+        return self._extract_session_id(filtered_sessions[self._selected_index])
 
     def _update_selected_session(self) -> None:
         """Обновить выбранную сессию в ViewModel."""
@@ -177,7 +241,7 @@ class Sidebar(Static):
             event.stop()
 
     def _render_text(self) -> str:
-        """Формирует текстовое представление списка сессий."""
+        """Формирует текстовое представление списка сессий с учётом фильтра."""
         if self.ui_vm is not None:
             active_tab = self.ui_vm.sidebar_tab.value
             if active_tab == SidebarTab.FILES:
@@ -185,7 +249,7 @@ class Sidebar(Static):
             if active_tab == SidebarTab.SETTINGS:
                 return self._render_settings_tab_placeholder()
 
-        sessions = self.session_vm.sessions.value
+        all_sessions = self.session_vm.sessions.value
         is_loading = self.session_vm.is_loading_sessions.value
         selected_id = self.session_vm.selected_session_id.value
 
@@ -195,20 +259,33 @@ class Sidebar(Static):
         if is_loading:
             return self._with_tabs_header("Сессии загружаются...")
 
-        if not sessions:
+        if not all_sessions:
             return self._with_tabs_header("Сессий пока нет")
+
+        # Получаем отфильтрованные сессии
+        filtered_sessions = self._get_filtered_sessions()
 
         lines: list[str] = [
             self._tabs_header(),
             "",
-            "Сессии (Up/Down + Enter):",
         ]
-        for index, session in enumerate(sessions[:10]):
-            session_id = self._extract_session_id(session)
-            marker = "*" if session_id == selected_id else " "
-            cursor = ">" if index == self._selected_index else " "
-            title = self._extract_session_title(session)
-            lines.append(f"{cursor}{marker} {title}")
+
+        # Показываем информацию о фильтрации если есть фильтр
+        if self.search_filter:
+            lines.append(f"Найдено: {len(filtered_sessions)} из {len(all_sessions)}")
+        else:
+            lines.append("Сессии (Up/Down + Enter):")
+
+        if not filtered_sessions and self.search_filter:
+            lines.append("Ничего не найдено")
+        else:
+            for index, session in enumerate(filtered_sessions[:10]):
+                session_id = self._extract_session_id(session)
+                marker = "*" if session_id == selected_id else " "
+                cursor = ">" if index == self._selected_index else " "
+                title = self._extract_session_title(session)
+                lines.append(f"{cursor}{marker} {title}")
+
         if self.ui_vm is not None:
             lines.extend(["", "Space - свернуть список"])
         return "\n".join(lines)
@@ -269,11 +346,15 @@ class Sidebar(Static):
         return "\n".join(lines)
 
     def _sync_selected_index(self) -> None:
-        """Синхронизирует выделение с выбранной сессией из ViewModel."""
-        sessions = self.session_vm.sessions.value
+        """Синхронизирует выделение с выбранной сессией из ViewModel.
+
+        Учитывает текущий фильтр поиска - индекс ищется
+        в отфильтрованном списке сессий.
+        """
+        filtered_sessions = self._get_filtered_sessions()
         selected_id = self.session_vm.selected_session_id.value
 
-        if not sessions:
+        if not filtered_sessions:
             self._selected_index = 0
             return
 
@@ -281,13 +362,13 @@ class Sidebar(Static):
             self._selected_index = 0
             return
 
-        # Найти индекс выбранной сессии
-        for index, session in enumerate(sessions):
+        # Найти индекс выбранной сессии в отфильтрованном списке
+        for index, session in enumerate(filtered_sessions):
             if self._extract_session_id(session) == selected_id:
                 self._selected_index = index
                 return
 
-        # Если не нашли, выбрать первую
+        # Если не нашли в отфильтрованном списке, выбрать первую
         self._selected_index = 0
 
     @staticmethod

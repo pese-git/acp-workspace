@@ -39,7 +39,7 @@ class SearchInput(Widget):
         height: 100%;
         layout: horizontal;
         border: solid $border;
-        background: $input-bg;
+        background: $surface;
     }
 
     SearchInput .search-container:focus-within {
