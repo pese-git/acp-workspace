@@ -47,6 +47,7 @@ from .context_menu import (
     MenuSeparator,
 )
 from .file_change_preview import DiffLine, FileChangePreview
+from .file_change_preview_modal import FileChangePreviewModal
 from .file_tree import FileTree
 from .file_viewer import FileViewerModal
 from .footer import AgentStatus, FooterBar
@@ -151,6 +152,7 @@ __all__ = [
     "ToolCallStatus",
     "ToolCallList",
     "FileChangePreview",
+    "FileChangePreviewModal",
     "DiffLine",
     # Фаза 4: Advanced компоненты
     "Toast",

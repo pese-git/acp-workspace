@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from codelab.client.tui.components.action_bar import ActionBar
 from codelab.client.tui.components.action_button import ActionButton, IconButton
 from codelab.client.tui.components.file_change_preview import DiffLine, FileChangePreview
+from codelab.client.tui.components.file_change_preview_modal import FileChangePreviewModal
 from codelab.client.tui.components.permission_badge import PermissionBadge
 from codelab.client.tui.components.tool_call_card import ToolCallCard
 from codelab.client.tui.components.tool_call_list import ToolCallList
@@ -540,3 +541,82 @@ class TestActionBar:
         
         bar._buttons.clear()
         assert len(bar._buttons) == 0
+
+
+# === FileChangePreviewModal тесты ===
+
+
+class TestFileChangePreviewModal:
+    """Тесты для FileChangePreviewModal."""
+
+    def test_file_change_preview_modal_creates_with_file_path(self) -> None:
+        """FileChangePreviewModal создаётся с путём к файлу."""
+        modal = FileChangePreviewModal(file_path="/home/user/test.py")
+        assert modal.file_path == "/home/user/test.py"
+
+    def test_file_change_preview_modal_stores_old_content(self) -> None:
+        """FileChangePreviewModal сохраняет старое содержимое."""
+        modal = FileChangePreviewModal(
+            file_path="/test.py",
+            old_content="old content",
+        )
+        assert modal._old_content == "old content"
+
+    def test_file_change_preview_modal_stores_new_content(self) -> None:
+        """FileChangePreviewModal сохраняет новое содержимое."""
+        modal = FileChangePreviewModal(
+            file_path="/test.py",
+            new_content="new content",
+        )
+        assert modal._new_content == "new content"
+
+    def test_file_change_preview_modal_stores_tool_call_id(self) -> None:
+        """FileChangePreviewModal сохраняет ID tool call."""
+        modal = FileChangePreviewModal(
+            file_path="/test.py",
+            tool_call_id="call_123",
+        )
+        assert modal.tool_call_id == "call_123"
+
+    def test_file_change_preview_modal_default_tool_name(self) -> None:
+        """FileChangePreviewModal имеет tool_name по умолчанию."""
+        modal = FileChangePreviewModal(file_path="/test.py")
+        assert modal._tool_name == "file_edit"
+
+    def test_file_change_preview_modal_custom_tool_name(self) -> None:
+        """FileChangePreviewModal принимает custom tool_name."""
+        modal = FileChangePreviewModal(
+            file_path="/test.py",
+            tool_name="write_file",
+        )
+        assert modal._tool_name == "write_file"
+
+    def test_file_change_preview_modal_with_all_params(self) -> None:
+        """FileChangePreviewModal создаётся со всеми параметрами."""
+        modal = FileChangePreviewModal(
+            file_path="/home/user/app.py",
+            old_content="line1\nline2",
+            new_content="line1\nline3\nline4",
+            tool_call_id="call_456",
+            tool_name="patch_file",
+        )
+        assert modal.file_path == "/home/user/app.py"
+        assert modal._old_content == "line1\nline2"
+        assert modal._new_content == "line1\nline3\nline4"
+        assert modal.tool_call_id == "call_456"
+        assert modal._tool_name == "patch_file"
+
+    def test_file_change_preview_modal_empty_content(self) -> None:
+        """FileChangePreviewModal обрабатывает пустой контент."""
+        modal = FileChangePreviewModal(
+            file_path="/test.py",
+            old_content="",
+            new_content="",
+        )
+        assert modal._old_content == ""
+        assert modal._new_content == ""
+
+    def test_file_change_preview_modal_tool_call_id_none(self) -> None:
+        """FileChangePreviewModal может иметь tool_call_id=None."""
+        modal = FileChangePreviewModal(file_path="/test.py")
+        assert modal.tool_call_id is None

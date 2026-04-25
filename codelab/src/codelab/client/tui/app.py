@@ -34,6 +34,7 @@ from codelab.client.tui.navigation import NavigationManager
 from .components import (
     ChatView,
     CommandPalette,
+    FileChangePreviewModal,
     FileTree,
     FooterBar,
     HeaderBar,
@@ -43,6 +44,7 @@ from .components import (
     PromptInput,
     Sidebar,
     ToastContainer,
+    ToolCallCard,
     ToolPanel,
 )
 from .config import TUIConfigStore, resolve_tui_connection
@@ -622,6 +624,89 @@ class ACPClientApp(App[None]):
                     request_id=request_id,
                     error=str(fallback_error),
                 )
+
+    def on_tool_call_card_selected(self, event: ToolCallCard.Selected) -> None:
+        """Обработчик выбора карточки tool call.
+        
+        Показывает модальное окно FileChangePreviewModal для инструментов
+        типа write_file, file_edit и подобных, которые изменяют файлы.
+        
+        Args:
+            event: Событие выбора карточки tool call
+        """
+        card = event.card
+        tool_name = card.tool_name
+        tool_call_id = card.tool_call_id
+        
+        self._app_logger.debug(
+            "tool_call_card_selected",
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
+        )
+        
+        # Проверяем, является ли инструмент файловым
+        file_tools = {"write_file", "file_edit", "create_file", "edit_file", "patch_file"}
+        if tool_name not in file_tools:
+            # Для не-файловых инструментов просто логируем
+            self._app_logger.debug(
+                "tool_call_card_selected_non_file_tool",
+                tool_call_id=tool_call_id,
+                tool_name=tool_name,
+            )
+            return
+        
+        # Получаем данные о tool call из ChatViewModel
+        tool_calls = self._chat_vm.tool_calls.value
+        tool_call_data = None
+        
+        for tc in tool_calls:
+            if isinstance(tc, dict):
+                tc_id = tc.get("toolCallId") or tc.get("id")
+            else:
+                tc_id = getattr(tc, "toolCallId", None) or getattr(tc, "id", None)
+            
+            if tc_id == tool_call_id:
+                tool_call_data = tc
+                break
+        
+        if tool_call_data is None:
+            self._app_logger.warning(
+                "tool_call_data_not_found",
+                tool_call_id=tool_call_id,
+            )
+            return
+        
+        # Извлекаем параметры для FileChangePreview
+        if isinstance(tool_call_data, dict):
+            params = tool_call_data.get("parameters") or tool_call_data.get("rawInput") or {}
+        else:
+            params = getattr(tool_call_data, "parameters", {}) or {}
+        
+        file_path = (
+            params.get("path") or params.get("file_path")
+            or params.get("filePath") or "unknown"
+        )
+        old_content = params.get("old_content") or params.get("oldContent") or ""
+        new_content = (
+            params.get("content") or params.get("new_content")
+            or params.get("newContent") or ""
+        )
+        
+        # Показываем модальное окно предпросмотра изменений
+        self._app_logger.info(
+            "showing_file_change_preview_modal",
+            tool_call_id=tool_call_id,
+            file_path=file_path,
+        )
+        
+        modal = FileChangePreviewModal(
+            file_path=file_path,
+            old_content=old_content,
+            new_content=new_content,
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
+        )
+        self.push_screen(modal)
 
     async def on_unmount(self) -> None:
         """Очистка ресурсов при завершении приложения."""
