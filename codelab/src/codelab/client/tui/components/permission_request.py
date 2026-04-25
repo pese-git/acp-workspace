@@ -22,6 +22,7 @@ from textual.widgets import Static
 
 from codelab.client.messages import PermissionOption
 
+from .action_bar import ActionBar
 from .action_button import ActionButton
 from .permission_badge import PermissionBadge
 
@@ -219,6 +220,9 @@ class PermissionRequest(Static):
         
         # Статус решения
         self._resolved = False
+        
+        # Ссылка на ActionBar (инициализируется в compose)
+        self._action_bar: ActionBar | None = None
     
     @property
     def request_id(self) -> str | int:
@@ -267,35 +271,43 @@ class PermissionRequest(Static):
                 id="permission-req-timer",
             )
         
-        # Кнопки действий
-        with Horizontal(id="permission-req-actions"):
-            # Кнопка Allow
-            yield ActionButton(
+        # Кнопки действий через ActionBar
+        action_bar = ActionBar(align="left", id="permission-req-actions")
+        yield action_bar
+        
+        # Сохраняем ссылку на ActionBar для добавления кнопок после mount
+        self._action_bar = action_bar
+    
+    def on_mount(self) -> None:
+        """Запускает таймер автоотклонения при монтировании и добавляет кнопки в ActionBar."""
+        # Добавляем кнопки в ActionBar
+        if self._action_bar:
+            # Кнопка Allow (primary)
+            self._action_bar.add_action(
                 "Allow",
                 variant="primary",
                 icon="✓",
-                id="perm-allow",
+                action_id="perm-allow",
             )
             
-            # Кнопка Deny
-            yield ActionButton(
+            # Кнопка Deny (danger)
+            self._action_bar.add_action(
                 "Deny",
                 variant="danger",
                 icon="✗",
-                id="perm-deny",
+                action_id="perm-deny",
             )
             
             # Кнопка Always Allow (если есть такая опция)
             if any(opt.kind == "always" for opt in self._options):
-                yield ActionButton(
+                self._action_bar.add_action(
                     "Always",
                     variant="secondary",
                     icon="∞",
-                    id="perm-always",
+                    action_id="perm-always",
                 )
-    
-    def on_mount(self) -> None:
-        """Запускает таймер автоотклонения при монтировании."""
+        
+        # Запуск таймера автоотклонения
         if self._auto_deny_seconds and self._auto_deny_seconds > 0:
             self._auto_deny_timer = self.set_interval(1.0, self._tick_auto_deny)
     

@@ -42,6 +42,7 @@ from .components import (
     PermissionModal,
     PlanPanel,
     PromptInput,
+    QuickActionsBar,
     Sidebar,
     ToastContainer,
     ToolCallCard,
@@ -192,6 +193,7 @@ class ACPClientApp(App[None]):
             yield ToolPanel(self._chat_vm, self._terminal_vm)
         with Vertical(id="bottom"):
             yield PromptInput(self._chat_vm)
+            yield QuickActionsBar(self._ui_vm)
             yield FooterBar(self._ui_vm)
         # ToastContainer должен быть поверх других элементов (в конце compose)
         yield ToastContainer(id="toast-container")
@@ -468,6 +470,38 @@ class ACPClientApp(App[None]):
             self._session_vm.switch_session_cmd.execute(event.session_id),
             exclusive=False,
         )
+
+    # =========================================================================
+    # Обработчики QuickActionsBar
+    # =========================================================================
+
+    def on_quick_actions_bar_new_session_requested(
+        self, event: QuickActionsBar.NewSessionRequested
+    ) -> None:
+        """Обработчик запроса создания новой сессии из QuickActionsBar."""
+        self._app_logger.info("quick_actions_new_session_requested")
+        self.action_new_session()
+
+    def on_quick_actions_bar_cancel_requested(
+        self, event: QuickActionsBar.CancelRequested
+    ) -> None:
+        """Обработчик запроса отмены из QuickActionsBar."""
+        self._app_logger.info("quick_actions_cancel_requested")
+        self.action_cancel_prompt()
+
+    def on_quick_actions_bar_help_requested(
+        self, event: QuickActionsBar.HelpRequested
+    ) -> None:
+        """Обработчик запроса справки из QuickActionsBar."""
+        self._app_logger.info("quick_actions_help_requested")
+        self.action_open_help()
+
+    def on_quick_actions_bar_theme_toggle_requested(
+        self, event: QuickActionsBar.ThemeToggleRequested
+    ) -> None:
+        """Обработчик запроса переключения темы из QuickActionsBar."""
+        self._app_logger.info("quick_actions_theme_toggle_requested")
+        self.action_toggle_theme()
 
     def on_prompt_input_submitted(self, event: PromptInput.Submitted) -> None:
         """Обработать отправку промпта пользователем.

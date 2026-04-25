@@ -42,7 +42,11 @@ class ActionBar(Horizontal):
     }
     
     ActionBar.spread {
-        justify: space-between;
+        width: 100%;
+    }
+    
+    ActionBar.spread > ActionButton {
+        width: 1fr;
     }
     
     ActionBar > ActionButton {

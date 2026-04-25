@@ -75,6 +75,7 @@ from .permission_request import PermissionRequest, PermissionType
 from .plan_panel import PlanPanel
 from .progress import ProgressBar, ProgressVariant
 from .prompt_input import PromptInput
+from .quick_actions_bar import QuickActionsBar
 from .search_input import SearchInput
 from .session_turn import SessionTurn, TurnData, TurnStatus
 from .sidebar import Sidebar
@@ -205,4 +206,6 @@ __all__ = [
     "CompactStatusLine",
     "StatusMode",
     "StatusIndicator",
+    # Панель быстрых действий
+    "QuickActionsBar",
 ]
