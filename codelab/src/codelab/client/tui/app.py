@@ -424,7 +424,7 @@ class ACPClientApp(App[None]):
             self._theme_manager.set_theme(ThemeType.DARK.value)
         self._app_logger.debug(
             "theme_toggled",
-            new_theme=self._theme_manager.current_theme.value,
+            new_theme=self._theme_manager.current_theme.name,
         )
 
     def action_close_modal(self) -> None:
