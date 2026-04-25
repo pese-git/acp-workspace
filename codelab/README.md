@@ -2,6 +2,26 @@
 
 Унифицированная реализация ACP (Agent Client Protocol) — сервер агента и клиент в одном пакете.
 
+## Быстрый старт за 5 минут
+
+Запуск CodeLab с локальной LLM через Ollama:
+
+```bash
+# 1. Установка Ollama (macOS)
+brew install ollama
+
+# 2. Скачивание модели
+ollama pull gemma4:e2b
+
+# 3. Установка CodeLab
+pipx install "git+https://github.com/pese-git/codelab-ai.git#subdirectory=codelab"
+
+# 4. Запуск приложения
+CODELAB_LLM_PROVIDER=ollama CODELAB_LLM_MODEL=gemma4:e2b CODELAB_LLM_BASE_URL=http://localhost:11434 codelab
+```
+
+> 📖 Подробнее: [Настройка Ollama](../doc/product/getting-started/05-ollama-setup.md)
+
 ## Установка
 
 ```bash
