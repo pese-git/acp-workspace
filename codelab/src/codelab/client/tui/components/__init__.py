@@ -35,7 +35,7 @@
 from .action_bar import ActionBar
 from .action_button import ActionButton, ButtonVariant, IconButton
 from .chat_view import ChatView
-from .chat_view_permission_manager import ChatViewPermissionManager
+from .chat_view_permission_manager import ChatViewPermissionManager, PermissionWidgetType
 from .command_palette import Command, CommandCategory, CommandItem, CommandPalette
 from .container import Card, ContainerVariant, StyledContainer
 from .context_menu import (
@@ -111,6 +111,7 @@ __all__ = [
     # Chat
     "ChatView",
     "ChatViewPermissionManager",
+    "PermissionWidgetType",
     # Files
     "FileTree",
     "FileViewerModal",

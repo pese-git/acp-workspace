@@ -1,31 +1,69 @@
 """Менеджер встроенного виджета разрешения в ChatView.
 
-Управляет жизненным циклом InlinePermissionWidget:
+Управляет жизненным циклом виджетов разрешения:
+- InlinePermissionWidget: базовый виджет с кнопками
+- PermissionRequest: расширенный виджет с иконками, типами и автоотклонением
+
+Поддерживает:
 - Создание и монтирование в ChatView
 - Скрытие и удаление
 - Синхронизация с PermissionViewModel
+- Выбор типа виджета (inline/request)
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
+from enum import Enum
 from typing import TYPE_CHECKING
 
 import structlog
 
 from codelab.client.messages import PermissionOption, PermissionToolCall
 from codelab.client.tui.components.inline_permission_widget import InlinePermissionWidget
+from codelab.client.tui.components.permission_request import (
+    PermissionRequest,
+    PermissionType,
+)
 
 if TYPE_CHECKING:
     from codelab.client.presentation.permission_view_model import PermissionViewModel
     from codelab.client.tui.components.chat_view import ChatView
 
 
+class PermissionWidgetType(Enum):
+    """Тип виджета разрешения.
+    
+    - INLINE: базовый виджет с кнопками (InlinePermissionWidget)
+    - REQUEST: расширенный виджет с иконками и автоотклонением (PermissionRequest)
+    """
+    
+    INLINE = "inline"
+    REQUEST = "request"
+
+
+# Маппинг tool_call.kind -> PermissionType
+_TOOL_KIND_TO_PERMISSION_TYPE: dict[str, PermissionType] = {
+    "read_file": "file_read",
+    "file_read": "file_read",
+    "write_file": "file_write",
+    "file_write": "file_write",
+    "delete_file": "file_delete",
+    "file_delete": "file_delete",
+    "execute": "execute_command",
+    "execute_command": "execute_command",
+    "terminal": "execute_command",
+    "mcp": "mcp_access",
+    "mcp_access": "mcp_access",
+}
+
+
 class ChatViewPermissionManager:
     """Менеджер встроенного виджета разрешения в ChatView.
 
     Ответственность:
-    - Управление жизненным циклом InlinePermissionWidget
+    - Управление жизненным циклом виджетов разрешения
+    - Поддержка InlinePermissionWidget и PermissionRequest
     - Интеграция с ChatView._content_container
     - Синхронизация с PermissionViewModel через Observable паттерн
     - Показ/скрытие виджета разрешения
@@ -35,16 +73,19 @@ class ChatViewPermissionManager:
         self,
         chat_view: ChatView,
         permission_vm: PermissionViewModel,
+        widget_type: PermissionWidgetType = PermissionWidgetType.REQUEST,
     ) -> None:
         """Инициализирует менеджер разрешений.
 
         Args:
             chat_view: ChatView компонент для монтирования виджета
             permission_vm: PermissionViewModel для управления состоянием
+            widget_type: Тип виджета разрешения (по умолчанию REQUEST)
         """
         self.chat_view = chat_view
         self.permission_vm = permission_vm
-        self._current_widget: InlinePermissionWidget | None = None
+        self.widget_type = widget_type
+        self._current_widget: InlinePermissionWidget | PermissionRequest | None = None
         self._logger = structlog.get_logger("chat_view_permission_manager")
 
         # Подписаться на изменения видимости в ViewModel
@@ -56,30 +97,51 @@ class ChatViewPermissionManager:
         tool_call: PermissionToolCall,
         options: list[PermissionOption],
         on_choice: Callable[[str | int, str], None],
+        *,
+        auto_deny_seconds: int | None = None,
     ) -> None:
-        """Показать встроенный виджет разрешения в ChatView.
+        """Показать виджет разрешения в ChatView.
 
-        Монтирует новый InlinePermissionWidget в контейнер ChatView
-        и выполняет автоскролл к нему.
+        В зависимости от widget_type создаёт:
+        - INLINE: InlinePermissionWidget (базовый)
+        - REQUEST: PermissionRequest (расширенный с иконками и автоотклонением)
 
         Args:
             request_id: ID permission request
             tool_call: Информация о tool call
             options: Доступные опции для выбора
             on_choice: Callback при выборе (request_id, option_id)
+            auto_deny_seconds: Время до автоотклонения (только для REQUEST)
         """
         # Если виджет уже показан, скрыть его перед созданием нового
         if self._current_widget is not None:
             self.hide_permission_request()
 
-        # Создать новый виджет разрешения
-        self._current_widget = InlinePermissionWidget(
-            permission_vm=self.permission_vm,
-            request_id=request_id,
-            tool_call=tool_call,
-            options=options,
-            on_choice=on_choice,
-        )
+        # Создать виджет в зависимости от типа
+        if self.widget_type == PermissionWidgetType.REQUEST:
+            # Определяем тип разрешения из tool_call.kind
+            kind = tool_call.kind or "unknown"
+            permission_type = self._get_permission_type(kind)
+            
+            self._current_widget = PermissionRequest(
+                permission_vm=self.permission_vm,
+                request_id=request_id,
+                permission_type=permission_type,
+                resource=tool_call.title or "",
+                message=self.permission_vm.message.value,
+                options=options,
+                on_choice=on_choice,
+                auto_deny_seconds=auto_deny_seconds,
+            )
+        else:
+            # Создать InlinePermissionWidget (INLINE по умолчанию для обратной совместимости)
+            self._current_widget = InlinePermissionWidget(
+                permission_vm=self.permission_vm,
+                request_id=request_id,
+                tool_call=tool_call,
+                options=options,
+                on_choice=on_choice,
+            )
 
         # Монтировать в контейнер ChatView если он доступен
         if self.chat_view._content_container is not None:
@@ -90,12 +152,24 @@ class ChatViewPermissionManager:
                 "permission_widget_mounted",
                 request_id=request_id,
                 tool_call_kind=tool_call.kind,
+                widget_type=self.widget_type.value,
             )
         else:
             self._logger.error(
                 "chat_view_content_container_not_available",
                 request_id=request_id,
             )
+    
+    def _get_permission_type(self, kind: str) -> PermissionType:
+        """Преобразовать tool_call.kind в PermissionType.
+        
+        Args:
+            kind: Тип tool call
+            
+        Returns:
+            Соответствующий PermissionType
+        """
+        return _TOOL_KIND_TO_PERMISSION_TYPE.get(kind, "unknown")
 
     def hide_permission_request(self) -> None:
         """Скрыть и удалить встроенный виджет разрешения.

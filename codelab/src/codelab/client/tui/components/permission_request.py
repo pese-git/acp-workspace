@@ -329,33 +329,31 @@ class PermissionRequest(Static):
         button_id = event.button.id
         
         if button_id == "perm-allow":
-            # Ищем опцию "allow once"
-            option_id = self._find_option_id("once", "allow")
+            # Ищем опцию "allow_once"
+            option_id = self._find_option_id("allow_once")
             self._select_option(option_id or "allow")
         
         elif button_id == "perm-deny":
-            # Ищем опцию "deny once"
-            option_id = self._find_option_id("once", "deny")
+            # Ищем опцию "reject_once"
+            option_id = self._find_option_id("reject_once")
             self._select_option(option_id or "deny")
         
         elif button_id == "perm-always":
-            # Ищем опцию "always allow"
-            option_id = self._find_option_id("always", "allow")
+            # Ищем опцию "allow_always"
+            option_id = self._find_option_id("allow_always")
             self._select_option(option_id or "always")
     
-    def _find_option_id(self, kind: str, name_contains: str = "") -> str | None:
-        """Найти ID опции по типу и имени.
+    def _find_option_id(self, kind: str) -> str | None:
+        """Найти ID опции по типу (kind).
         
         Args:
-            kind: Тип опции (once, always, session)
-            name_contains: Подстрока в имени опции
+            kind: Тип опции (allow_once, reject_once, allow_always, reject_always)
             
         Returns:
             ID опции или None
         """
         for opt in self._options:
-            name_match = not name_contains or name_contains.lower() in opt.name.lower()
-            if opt.kind == kind and name_match:
+            if opt.kind == kind:
                 return opt.optionId
         return None
     
@@ -406,15 +404,15 @@ class PermissionRequest(Static):
     
     def allow(self) -> None:
         """Программно выбрать Allow."""
-        option_id = self._find_option_id("once", "allow")
+        option_id = self._find_option_id("allow_once")
         self._select_option(option_id or "allow")
     
     def deny(self) -> None:
         """Программно выбрать Deny."""
-        option_id = self._find_option_id("once", "deny")
+        option_id = self._find_option_id("reject_once")
         self._select_option(option_id or "deny")
     
     def always_allow(self) -> None:
         """Программно выбрать Always Allow."""
-        option_id = self._find_option_id("always", "allow")
+        option_id = self._find_option_id("allow_always")
         self._select_option(option_id or "always")
