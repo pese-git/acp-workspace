@@ -179,6 +179,7 @@ class ContextMenu(Vertical):
     """Контекстное меню.
 
     Выпадающее меню с пунктами, разделителями и горячими клавишами.
+    Поддерживает позиционирование относительно курсора или виджета.
     """
 
     DEFAULT_CSS = """
@@ -191,6 +192,10 @@ class ContextMenu(Vertical):
         border: solid $border;
         padding: 0;
         layer: context-menu;
+    }
+
+    ContextMenu.-hidden {
+        display: none;
     }
 
     ContextMenu .menu-title {
@@ -223,7 +228,7 @@ class ContextMenu(Vertical):
 
     def __init__(
         self,
-        items: list[MenuItem | MenuSeparator | MenuGroup],
+        items: list[MenuItem | MenuSeparator | MenuGroup] | None = None,
         *,
         title: str | None = None,
         name: str | None = None,
@@ -240,10 +245,74 @@ class ContextMenu(Vertical):
             classes: CSS классы
         """
         super().__init__(name=name, id=id or "context-menu", classes=classes)
-        self._items = items
+        self._items = items or []
         self._title = title
         self._menu_items: list[ContextMenuItem] = []
         self._selected_index: int = -1
+        self._visible: bool = True
+
+    @classmethod
+    def from_items(
+        cls,
+        items: list[MenuItem | MenuSeparator | MenuGroup],
+        *,
+        title: str | None = None,
+    ) -> ContextMenu:
+        """Фабричный метод для создания контекстного меню.
+
+        Args:
+            items: Элементы меню
+            title: Опциональный заголовок
+
+        Returns:
+            Экземпляр ContextMenu
+        """
+        return cls(items, title=title)
+
+    def show(
+        self,
+        items: list[MenuItem | MenuSeparator | MenuGroup] | None = None,
+        x: int | None = None,
+        y: int | None = None,
+    ) -> None:
+        """Показывает меню в указанной позиции.
+
+        Args:
+            items: Новые элементы меню (опционально, обновляет items)
+            x: Позиция X (offset left)
+            y: Позиция Y (offset top)
+        """
+        if items is not None:
+            self._items = items
+            # Перестроить меню с новыми элементами
+            self._rebuild_menu()
+
+        if x is not None:
+            self.styles.offset = (x, y or 0)
+
+        self.remove_class("-hidden")
+        self._visible = True
+        self._select_first_enabled()
+        self.focus()
+
+    def hide(self) -> None:
+        """Скрывает меню."""
+        self.add_class("-hidden")
+        self._visible = False
+        self.post_message(self.Closed())
+
+    def _rebuild_menu(self) -> None:
+        """Перестраивает меню с новыми элементами."""
+        # Очищаем старые элементы
+        self._menu_items.clear()
+        self.remove_children()
+        # Создаём новые
+        self.mount_all(self.compose())
+
+    @property
+    def visible(self) -> bool:
+        """Возвращает состояние видимости меню."""
+        return self._visible
 
     def compose(self) -> ComposeResult:
         """Создаёт содержимое меню."""
