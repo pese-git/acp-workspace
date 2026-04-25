@@ -253,26 +253,26 @@ class MessageBubble(Vertical):
         padding: 1;
         margin: 0 0 1 0;
         background: $surface;
-        border: solid $primary-background;
+        border: solid $primary 20%;
     }
     
     MessageBubble.user {
-        background: $primary-background;
+        background: $primary 20%;
         border: solid $primary;
     }
     
     MessageBubble.assistant {
-        background: $success-background;
+        background: $success 20%;
         border: solid $success;
     }
     
     MessageBubble.system {
-        background: $warning-background;
+        background: $warning 20%;
         border: solid $warning;
     }
     
     MessageBubble.error {
-        background: $error-background;
+        background: $error 20%;
         border: solid $error;
     }
     

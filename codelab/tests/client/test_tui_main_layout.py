@@ -17,13 +17,14 @@ class TestLayoutConfig:
     """Тесты для LayoutConfig dataclass."""
 
     def test_default_values(self) -> None:
-        """LayoutConfig имеет корректные значения по умолчанию."""
+        """LayoutConfig имеет корректные значения по умолчанию (OpenCode-style)."""
         config = LayoutConfig()
         
         assert config.sidebar_width == 30
         assert config.sidebar_visible is True
         assert config.bottom_panel_height == 10
-        assert config.bottom_panel_visible is False
+        # OpenCode-style: dock region (bottom_panel) виден по умолчанию
+        assert config.bottom_panel_visible is True
         assert config.min_width_for_sidebar == 80
 
     def test_custom_values(self) -> None:
@@ -31,6 +32,8 @@ class TestLayoutConfig:
         config = LayoutConfig(
             sidebar_width=40,
             sidebar_visible=False,
+            right_panel_width=35,
+            right_panel_visible=False,
             bottom_panel_height=15,
             bottom_panel_visible=True,
             min_width_for_sidebar=100,
@@ -38,20 +41,30 @@ class TestLayoutConfig:
         
         assert config.sidebar_width == 40
         assert config.sidebar_visible is False
+        assert config.right_panel_width == 35
+        assert config.right_panel_visible is False
         assert config.bottom_panel_height == 15
         assert config.bottom_panel_visible is True
         assert config.min_width_for_sidebar == 100
+
+    def test_right_panel_default_values(self) -> None:
+        """LayoutConfig имеет дефолтные значения для правой панели."""
+        config = LayoutConfig()
+        
+        assert config.right_panel_width == 30
+        assert config.right_panel_visible is True
 
 
 class TestMainLayout:
     """Тесты для MainLayout компонента."""
 
     def test_default_initialization(self) -> None:
-        """MainLayout инициализируется с дефолтной конфигурацией."""
+        """MainLayout инициализируется с дефолтной конфигурацией (OpenCode-style)."""
         layout = MainLayout()
         
         assert layout.sidebar_visible is True
-        assert layout.bottom_panel_visible is False
+        # OpenCode-style: dock region виден по умолчанию
+        assert layout.bottom_panel_visible is True
         assert layout.config.sidebar_width == 30
 
     def test_initialization_with_config(self) -> None:
@@ -81,19 +94,47 @@ class TestMainLayout:
         assert layout.sidebar_visible is True
 
     def test_toggle_bottom_panel(self) -> None:
-        """toggle_bottom_panel() переключает видимость нижней панели."""
+        """toggle_bottom_panel() переключает видимость dock region."""
         layout = MainLayout()
         
-        # Изначально скрыта
-        assert layout.bottom_panel_visible is False
-        
-        # Переключаем
-        layout.toggle_bottom_panel()
+        # OpenCode-style: изначально видим (dock region для PromptInput)
         assert layout.bottom_panel_visible is True
         
-        # Переключаем обратно
+        # Переключаем (скрываем)
         layout.toggle_bottom_panel()
         assert layout.bottom_panel_visible is False
+        
+        # Переключаем обратно (показываем)
+        layout.toggle_bottom_panel()
+        assert layout.bottom_panel_visible is True
+
+    def test_toggle_right_panel(self) -> None:
+        """toggle_right_panel() переключает видимость правой панели."""
+        layout = MainLayout()
+        
+        # Изначально видима
+        assert layout.right_panel_visible is True
+        
+        # Переключаем
+        layout.toggle_right_panel()
+        assert layout.right_panel_visible is False
+        
+        # Переключаем обратно
+        layout.toggle_right_panel()
+        assert layout.right_panel_visible is True
+
+    def test_right_panel_default_visible(self) -> None:
+        """Правая панель видима по умолчанию."""
+        layout = MainLayout()
+        
+        assert layout.right_panel_visible is True
+
+    def test_right_panel_initial_hidden(self) -> None:
+        """Правую панель можно скрыть через конфигурацию."""
+        config = LayoutConfig(right_panel_visible=False)
+        layout = MainLayout(config=config)
+        
+        assert layout.right_panel_visible is False
 
     def test_config_property(self) -> None:
         """config property возвращает конфигурацию."""
@@ -133,7 +174,16 @@ class TestMainLayoutContainers:
         # До compose все контейнеры None
         assert layout.sidebar_column is None
         assert layout.content_area is None
-        assert layout.bottom_panel is None
+        assert layout.dock_region is None  # OpenCode-style dock region
+        assert layout.bottom_panel is None  # Alias для обратной совместимости
+        assert layout.right_panel_column is None
+
+    def test_dock_region_alias_matches_bottom_panel(self) -> None:
+        """dock_region и bottom_panel ссылаются на один контейнер."""
+        layout = MainLayout()
+        
+        # Оба свойства возвращают один и тот же контейнер
+        assert layout.dock_region is layout.bottom_panel
 
 
 class TestMainLayoutCSS:
@@ -143,8 +193,9 @@ class TestMainLayoutCSS:
         """MainLayout имеет DEFAULT_CSS."""
         assert MainLayout.DEFAULT_CSS is not None
         assert "MainLayout" in MainLayout.DEFAULT_CSS
-        assert "sidebar-column" in MainLayout.DEFAULT_CSS
-        assert "bottom-panel" in MainLayout.DEFAULT_CSS
+        assert "#sidebar-column" in MainLayout.DEFAULT_CSS
+        assert "#dock-region" in MainLayout.DEFAULT_CSS  # OpenCode-style
+        assert "#main-column" in MainLayout.DEFAULT_CSS
 
     def test_css_contains_hidden_rules(self) -> None:
         """CSS содержит правила для скрытия элементов."""
@@ -152,6 +203,12 @@ class TestMainLayoutCSS:
         
         assert ".hidden" in css
         assert "display: none" in css
+
+    def test_css_contains_right_panel_rules(self) -> None:
+        """CSS содержит правила для правой панели."""
+        css = MainLayout.DEFAULT_CSS
+        
+        assert "right-panel-column" in css
 
 
 class TestMainLayoutIntegration:
@@ -179,8 +236,10 @@ class TestMainLayoutIntegration:
             expected = i % 2 == 0  # False, True, False, True, False
             assert layout.sidebar_visible is not expected
         
-        # Несколько переключений bottom panel
+        # Несколько переключений dock region (bottom panel)
+        # OpenCode-style: начальное значение = True
+        # после toggle: False, True, False, True, False
         for i in range(5):
             layout.toggle_bottom_panel()
-            expected = i % 2 == 0  # True, False, True, False, True
+            expected = i % 2 != 0  # False, True, False, True, False
             assert layout.bottom_panel_visible is expected

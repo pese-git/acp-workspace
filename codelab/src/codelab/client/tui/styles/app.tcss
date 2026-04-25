@@ -154,10 +154,20 @@ Screen {
     padding: 0 1;
 }
 
-/* --- Bottom Container --- */
-#bottom {
+/* --- Dock Region (OpenCode-style) --- */
+/* Область для PromptInput и QuickActionsBar внутри main-column */
+#dock-region {
     height: auto;
+    min-height: 6;
+    max-height: 15;
     layout: vertical;
+    background: #f8fafc;
+    border-top: solid #6d7f9a;
+    padding: 0 1;
+}
+
+#dock-region.hidden {
+    display: none;
 }
 
 /* --- Messages --- */

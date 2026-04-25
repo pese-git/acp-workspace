@@ -46,11 +46,12 @@ class TestMainLayout:
     """Тесты для MainLayout компонента."""
 
     def test_main_layout_creation(self) -> None:
-        """MainLayout создается с дефолтными параметрами."""
+        """MainLayout создается с дефолтными параметрами (OpenCode-style)."""
         layout = MainLayout()
         assert layout is not None
         assert layout.sidebar_visible is True
-        assert layout.bottom_panel_visible is False
+        # OpenCode-style: dock region (bottom_panel) виден по умолчанию
+        assert layout.bottom_panel_visible is True
 
     def test_main_layout_with_ui_vm(self, ui_vm: UIViewModel) -> None:
         """MainLayout интегрируется с UIViewModel."""
@@ -69,15 +70,16 @@ class TestMainLayout:
         assert layout.sidebar_visible is True
 
     def test_toggle_bottom_panel(self) -> None:
-        """toggle_bottom_panel переключает видимость нижней панели."""
+        """toggle_bottom_panel переключает видимость dock region (OpenCode-style)."""
         layout = MainLayout()
-        assert layout.bottom_panel_visible is False
-        
-        layout.toggle_bottom_panel()
+        # OpenCode-style: dock region виден по умолчанию
         assert layout.bottom_panel_visible is True
         
         layout.toggle_bottom_panel()
         assert layout.bottom_panel_visible is False
+        
+        layout.toggle_bottom_panel()
+        assert layout.bottom_panel_visible is True
 
     def test_sidebar_collapsed_sync(self, ui_vm: UIViewModel) -> None:
         """sidebar_collapsed в UIViewModel синхронизируется с layout."""

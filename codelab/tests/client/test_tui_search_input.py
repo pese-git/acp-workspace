@@ -177,7 +177,8 @@ class TestSearchInputCSS:
 
     def test_css_uses_theme_variables(self) -> None:
         """CSS использует переменные темы."""
-        assert "$input-bg" in SearchInput.DEFAULT_CSS
+        # $surface используется для background (обновлено: $input-bg → $surface)
+        assert "$surface" in SearchInput.DEFAULT_CSS
         assert "$border" in SearchInput.DEFAULT_CSS
         assert "$primary" in SearchInput.DEFAULT_CSS
         assert "$error" in SearchInput.DEFAULT_CSS

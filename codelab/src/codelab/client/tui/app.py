@@ -16,7 +16,6 @@ from pathlib import Path
 
 import structlog
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal, Vertical
 
 from codelab.client.infrastructure.di_bootstrapper import DIBootstrapper
 from codelab.client.messages import PermissionOption, PermissionToolCall
@@ -39,6 +38,7 @@ from .components import (
     FooterBar,
     HeaderBar,
     HelpModal,
+    MainLayout,
     PermissionModal,
     PlanPanel,
     PromptInput,
@@ -124,6 +124,9 @@ class ACPClientApp(App[None]):
 
         # NavigationManager будет инициализирован в on_mount
         self._navigation_manager: NavigationManager | None = None
+        
+        # MainLayout будет инициализирован в compose()
+        self._main_layout: MainLayout | None = None
 
         # Блокировка предотвращает параллельные `session/load`, которые могут
         # перемешивать `session/update` между конкурентными запросами.
@@ -175,32 +178,34 @@ class ACPClientApp(App[None]):
             raise RuntimeError(f"Failed to initialize ViewModels: {e}") from e
 
     def compose(self) -> ComposeResult:
-        """Собирает базовый layout приложения."""
+        """Собирает базовый layout приложения в стиле OpenCode.
+        
+        Структура (OpenCode-style):
+        - HeaderBar (titlebar)
+        - MainLayout (id="body"):
+            - sidebar-column: Sidebar, FileTree (монтируются в on_ready)
+            - main-column:
+                - content-area: ChatView, PlanPanel (монтируются в on_ready)
+                - dock-region: PromptInput, QuickActionsBar (монтируются в on_ready)
+            - right-panel-column: ToolPanel (монтируется в on_ready)
+        - FooterBar (статус-бар внизу)
+        - ToastContainer (overlay)
+        """
         yield HeaderBar(self._ui_vm)
-        with Horizontal(id="body"):
-            with Vertical(id="sidebar-column"):
-                yield Sidebar(self._session_vm, self._ui_vm)
-                # Передаем cwd в FileTree для отображения структуры проекта
-                yield FileTree(
-                    filesystem_vm=self._filesystem_vm,
-                    root_path=self._cwd,
-                )
-            with Vertical(id="main-column"):
-                # Передаем permission_vm в ChatView для встроенного виджета разрешения
-                self._chat_view = ChatView(self._chat_vm, self._permission_vm)
-                yield self._chat_view
-                yield PlanPanel(self._plan_vm)
-            yield ToolPanel(self._chat_vm, self._terminal_vm)
-        with Vertical(id="bottom"):
-            yield PromptInput(self._chat_vm)
-            yield QuickActionsBar(self._ui_vm)
-            yield FooterBar(self._ui_vm)
+        # MainLayout с dock-region внутри main-column (OpenCode-style)
+        self._main_layout = MainLayout(ui_vm=self._ui_vm, id="body")
+        yield self._main_layout
+        # FooterBar как отдельный элемент внизу экрана
+        yield FooterBar(self._ui_vm)
         # ToastContainer должен быть поверх других элементов (в конце compose)
         yield ToastContainer(id="toast-container")
 
     def on_ready(self) -> None:
         """Запускается когда приложение готово к работе."""
         self._app_logger.info("app_ready")
+
+        # Монтируем компоненты в контейнеры MainLayout
+        self._mount_main_layout_children()
 
         # Инициализируем NavigationManager
         try:
@@ -216,6 +221,55 @@ class ACPClientApp(App[None]):
         self._app_logger.info("starting_connection_worker")
         self.run_worker(self._initialize_connection(), exclusive=False)
         self._on_sidebar_state_changed(None)
+
+    def _mount_main_layout_children(self) -> None:
+        """Монтирует дочерние компоненты в контейнеры MainLayout (OpenCode-style).
+        
+        Эта функция вызывается в on_ready после того как MainLayout создан в compose().
+        
+        OpenCode-style layout:
+        - sidebar-column: Sidebar, FileTree
+        - main-column:
+            - content-area: ChatView, PlanPanel
+            - dock-region: PromptInput, QuickActionsBar
+        - right-panel-column: ToolPanel
+        """
+        if self._main_layout is None:
+            self._app_logger.error("main_layout_not_initialized")
+            return
+        
+        # Монтируем компоненты в sidebar
+        sidebar_column = self._main_layout.sidebar_column
+        if sidebar_column is not None:
+            sidebar_column.mount(Sidebar(self._session_vm, self._ui_vm))
+            sidebar_column.mount(
+                FileTree(
+                    filesystem_vm=self._filesystem_vm,
+                    root_path=self._cwd,
+                )
+            )
+            self._app_logger.debug("sidebar_components_mounted")
+        
+        # Монтируем компоненты в content-area
+        content_area = self._main_layout.content_area
+        if content_area is not None:
+            self._chat_view = ChatView(self._chat_vm, self._permission_vm)
+            content_area.mount(self._chat_view)
+            content_area.mount(PlanPanel(self._plan_vm))
+            self._app_logger.debug("content_area_components_mounted")
+        
+        # Монтируем PromptInput и QuickActionsBar в dock-region (OpenCode-style)
+        dock_region = self._main_layout.dock_region
+        if dock_region is not None:
+            dock_region.mount(PromptInput(self._chat_vm))
+            dock_region.mount(QuickActionsBar(self._ui_vm))
+            self._app_logger.debug("dock_region_components_mounted")
+        
+        # Монтируем ToolPanel в right-panel-column
+        right_panel = self._main_layout.right_panel_column
+        if right_panel is not None:
+            right_panel.mount(ToolPanel(self._chat_vm, self._terminal_vm))
+            self._app_logger.debug("right_panel_components_mounted")
 
     async def _initialize_connection(self) -> None:
         """Инициализирует подключение к серверу."""

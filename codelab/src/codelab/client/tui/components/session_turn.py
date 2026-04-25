@@ -230,15 +230,15 @@ class SessionTurn(Vertical):
         height: auto;
         padding: 1;
         margin: 0 0 1 0;
-        border: solid $primary-background;
+        border: solid $primary 30%;
     }
     
     SessionTurn.complete {
-        border: solid $success-background;
+        border: solid $success 30%;
     }
     
     SessionTurn.error {
-        border: solid $error-background;
+        border: solid $error 30%;
     }
     
     SessionTurn > .turn-header {
