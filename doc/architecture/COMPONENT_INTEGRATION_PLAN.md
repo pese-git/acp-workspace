@@ -6,31 +6,66 @@
 
 ---
 
+## Прогресс интеграции
+
+| Приоритет | Статус | Story Points | Прогресс |
+|-----------|--------|--------------|----------|
+| **P0** | ✅ Завершено | 6 / 6 SP | 100% |
+| **P1** | ✅ Завершено | 19 / 19 SP | 100% |
+| **P2** | 🔜 Следующий этап | 0 / 12 SP | 0% |
+| **Итого** | | **25 / 37 SP** | **68%** |
+
+### Выполненные задачи P1
+
+| # | Компонент | SP | Коммит | Описание |
+|---|-----------|----|---------|-----------| 
+| 1 | **ToolCallList** | 3 | [`b5808d4`](https://github.com/OpenIdeaLab/acp-protocol/commit/b5808d4) | Интеграция в `ToolPanel` с ProgressBar |
+| 2 | **FileChangePreview** | 3 | [`4dba8c2`](https://github.com/OpenIdeaLab/acp-protocol/commit/4dba8c2) | [`FileChangePreviewModal`](codelab/src/codelab/client/tui/components/file_change_preview_modal.py) — модальное окно diff для файловых операций |
+| 3 | **MessageBubble** | 7 | [`7b29afb`](https://github.com/OpenIdeaLab/acp-protocol/commit/7b29afb) | Интеграция в `ChatView` — стилизованные сообщения с ролями |
+| 4 | **TerminalPanel** | 3 | [`d399baa`](https://github.com/OpenIdeaLab/acp-protocol/commit/d399baa) | Улучшенный `TerminalOutputPanel` с toolbar |
+| 5 | **PermissionRequest** | 2 | [`4116439`](https://github.com/OpenIdeaLab/acp-protocol/commit/4116439) | Альтернатива InlinePermissionWidget в [`ChatViewPermissionManager`](codelab/src/codelab/client/tui/components/chat_view_permission_manager.py) |
+| 6 | **ActionBar** | 2 | [`27582c3`](https://github.com/OpenIdeaLab/acp-protocol/commit/27582c3), [`a84d476`](https://github.com/OpenIdeaLab/acp-protocol/commit/a84d476) | [`QuickActionsBar`](codelab/src/codelab/client/tui/components/quick_actions_bar.py) с MVVM интеграцией |
+
+### Новые файлы P1
+
+- [`file_change_preview_modal.py`](codelab/src/codelab/client/tui/components/file_change_preview_modal.py)
+- [`quick_actions_bar.py`](codelab/src/codelab/client/tui/components/quick_actions_bar.py)
+- [`test_tui_permission_request.py`](codelab/tests/client/test_tui_permission_request.py)
+- [`test_tui_action_bar.py`](codelab/tests/client/test_tui_action_bar.py)
+
+### Результаты проверок (P1)
+
+```
+✅ ruff check:  All passed
+✅ ty check:    All passed  
+✅ pytest:      2087 passed, 7 skipped (33s)
+```
+
+---
+
 ## 1. Приоритеты внедрения
 
-### P0 - Критично для UX
+### P0 - Критично для UX ✅
 
-| Компонент | Обоснование | Зависимости |
-|-----------|-------------|-------------|
-| [`ToastContainer`](codelab/src/codelab/client/tui/components/toast.py) | Уведомления об ошибках, успехах, предупреждениях | UIViewModel |
-| [`Spinner`](codelab/src/codelab/client/tui/components/spinner.py) | Индикатор загрузки при ожидании ответа | ChatViewModel |
-| [`LoadingIndicator`](codelab/src/codelab/client/tui/components/spinner.py) | Визуальная обратная связь | UIViewModel |
-| [`ProgressBar`](codelab/src/codelab/client/tui/components/progress.py) | Прогресс долгих операций | ChatViewModel |
+| Компонент | Обоснование | Зависимости | Статус |
+|-----------|-------------|-------------|--------|
+| [`ToastContainer`](codelab/src/codelab/client/tui/components/toast.py) | Уведомления об ошибках, успехах, предупреждениях | UIViewModel | ✅ |
+| [`Spinner`](codelab/src/codelab/client/tui/components/spinner.py) | Индикатор загрузки при ожидании ответа | ChatViewModel | ✅ |
+| [`LoadingIndicator`](codelab/src/codelab/client/tui/components/spinner.py) | Визуальная обратная связь | UIViewModel | ✅ |
+| [`ProgressBar`](codelab/src/codelab/client/tui/components/progress.py) | Прогресс долгих операций | ChatViewModel | ✅ |
 
-### P1 - Улучшает функциональность
+### P1 - Улучшает функциональность ✅
 
-| Компонент | Обоснование | Зависимости |
-|-----------|-------------|-------------|
-| [`MessageList`](codelab/src/codelab/client/tui/components/message_list.py) | Структурированный список сообщений | ChatViewModel |
-| [`SessionTurn`](codelab/src/codelab/client/tui/components/session_turn.py) | Отображение turn сессии | SessionViewModel |
-| [`ToolCallList`](codelab/src/codelab/client/tui/components/tool_call_list.py) | Список tool calls в ToolPanel | ChatViewModel |
-| [`FileChangePreview`](codelab/src/codelab/client/tui/components/file_change_preview.py) | Превью изменений файлов | FileViewerViewModel |
-| [`PermissionRequest`](codelab/src/codelab/client/tui/components/permission_request.py) | Альтернатива InlinePermissionWidget | PermissionViewModel |
-| [`ActionBar`](codelab/src/codelab/client/tui/components/action_bar.py) | Панель быстрых действий | UIViewModel |
-| [`MarkdownViewer`](codelab/src/codelab/client/tui/components/markdown.py) | Полноэкранный просмотр markdown | - |
-| [`TerminalPanel`](codelab/src/codelab/client/tui/components/terminal_panel.py) | Панель терминала с toolbar | TerminalViewModel |
+| Компонент | Обоснование | Зависимости | Статус |
+|-----------|-------------|-------------|--------|
+| [`MessageBubble`](codelab/src/codelab/client/tui/components/message_bubble.py) | Стилизованные сообщения с ролями | ChatViewModel | ✅ `7b29afb` |
+| [`ToolCallList`](codelab/src/codelab/client/tui/components/tool_call_list.py) | Список tool calls в ToolPanel | ChatViewModel | ✅ `b5808d4` |
+| [`FileChangePreviewModal`](codelab/src/codelab/client/tui/components/file_change_preview_modal.py) | Превью изменений файлов (модальное окно) | FileViewerViewModel | ✅ `4dba8c2` |
+| [`PermissionRequest`](codelab/src/codelab/client/tui/components/permission_request.py) | Альтернатива InlinePermissionWidget | PermissionViewModel | ✅ `4116439` |
+| [`QuickActionsBar`](codelab/src/codelab/client/tui/components/quick_actions_bar.py) | Панель быстрых действий с MVVM | UIViewModel | ✅ `27582c3` |
+| [`TerminalOutputPanel`](codelab/src/codelab/client/tui/components/terminal_output.py) | Улучшенная панель терминала с toolbar | TerminalViewModel | ✅ `d399baa` |
 
-### P2 - Nice-to-have
+### P2 - Nice-to-have 🔜
 
 | Компонент | Обоснование | Зависимости |
 |-----------|-------------|-------------|
@@ -346,25 +381,24 @@ flowchart TB
         FileViewerViewModel
     end
 
-    subgraph P0_Components[P0: Критичные]
-        ToastContainer --> UIViewModel
-        Toast --> ToastContainer
-        Spinner --> ChatViewModel
-        LoadingIndicator --> UIViewModel
-        ProgressBar --> ChatViewModel
+    subgraph P0_Components["P0: Критичные ✅"]
+        ToastContainer["ToastContainer ✅"] --> UIViewModel
+        Toast["Toast ✅"] --> ToastContainer
+        Spinner["Spinner ✅"] --> ChatViewModel
+        LoadingIndicator["LoadingIndicator ✅"] --> UIViewModel
+        ProgressBar["ProgressBar ✅"] --> ChatViewModel
     end
 
-    subgraph P1_Components[P1: Функциональные]
-        MessageList --> ChatViewModel
-        SessionTurn --> SessionViewModel
-        ToolCallList --> ChatViewModel
-        FileChangePreview --> FileViewerViewModel
-        PermissionRequest --> PermissionViewModel
-        ActionBar --> UIViewModel
-        TerminalPanel --> TerminalViewModel
+    subgraph P1_Components["P1: Функциональные ✅"]
+        MessageBubble["MessageBubble ✅"] --> ChatViewModel
+        ToolCallList["ToolCallList ✅"] --> ChatViewModel
+        FileChangePreviewModal["FileChangePreviewModal ✅"] --> FileViewerViewModel
+        PermissionRequest["PermissionRequest ✅"] --> PermissionViewModel
+        QuickActionsBar["QuickActionsBar ✅"] --> UIViewModel
+        TerminalOutputPanel["TerminalOutputPanel ✅"] --> TerminalViewModel
     end
 
-    subgraph P2_Components[P2: Nice-to-have]
+    subgraph P2_Components["P2: Nice-to-have 🔜"]
         MainLayout --> UIViewModel
         CollapsiblePanel
         AccordionPanel
@@ -388,17 +422,26 @@ flowchart TB
         FooterBar --> UIViewModel
     end
 
-    ToastContainer -.-> CurrentLayout
-    Spinner -.-> ChatView
-    LoadingIndicator -.-> PromptInput
-    ProgressBar -.-> ToolPanel
-    MessageList -.-> ChatView
-    ToolCallList -.-> ToolPanel
-    SearchInput -.-> Sidebar
-    SearchInput -.-> FileTree
-    ContextMenu -.-> Sidebar
-    ContextMenu -.-> FileTree
-    MainLayout -.-> CurrentLayout
+    %% P0 интеграции (выполнено)
+    ToastContainer -.->|"✅"| CurrentLayout
+    Spinner -.->|"✅"| ChatView
+    LoadingIndicator -.->|"✅"| PromptInput
+    ProgressBar -.->|"✅"| ToolPanel
+    
+    %% P1 интеграции (выполнено)
+    MessageBubble -.->|"✅"| ChatView
+    ToolCallList -.->|"✅"| ToolPanel
+    FileChangePreviewModal -.->|"✅"| ToolPanel
+    PermissionRequest -.->|"✅"| ChatView
+    QuickActionsBar -.->|"✅"| CurrentLayout
+    TerminalOutputPanel -.->|"✅"| ToolPanel
+    
+    %% P2 планируемые интеграции
+    SearchInput -.->|"🔜"| Sidebar
+    SearchInput -.->|"🔜"| FileTree
+    ContextMenu -.->|"🔜"| Sidebar
+    ContextMenu -.->|"🔜"| FileTree
+    MainLayout -.->|"🔜"| CurrentLayout
 ```
 
 ---
@@ -407,55 +450,64 @@ flowchart TB
 
 ### Сводная таблица по приоритетам
 
-| Приоритет | Компоненты | Story Points |
-|-----------|------------|--------------|
-| **P0** | Toast, Spinner, LoadingIndicator, ProgressBar | 6 SP |
-| **P1** | MessageList, SessionTurn, ToolCallList, FileChangePreview, PermissionRequest, ActionBar, TerminalPanel | 19 SP |
-| **P2** | MainLayout, Panels, SearchInput, ContextMenu, StatusLine | 12 SP |
-| **Итого** | 20 компонентов | **37 SP** |
+| Приоритет | Компоненты | Story Points | Статус |
+|-----------|------------|--------------|--------|
+| **P0** | Toast, Spinner, LoadingIndicator, ProgressBar | 6 SP | ✅ Выполнено |
+| **P1** | MessageBubble, ToolCallList, FileChangePreviewModal, PermissionRequest, QuickActionsBar, TerminalOutputPanel | 19 SP | ✅ Выполнено |
+| **P2** | MainLayout, Panels, SearchInput, ContextMenu, StatusLine | 12 SP | 🔜 Следующий |
+| **Итого** | 20 компонентов | **25/37 SP** | **68%** |
 
 ### Детальная оценка
 
-| Компонент | SP | Комментарий |
-|-----------|------|-------------|
-| ToastContainer | 2 | Простая интеграция |
-| Spinner/LoadingIndicator | 2 | Простая интеграция |
-| ProgressBar | 2 | Простая интеграция |
-| MessageList | 5 | Рефакторинг ChatView |
-| SessionTurn | 2 | Интеграция с MessageList |
-| ToolCallList | 3 | Средняя сложность |
-| FileChangePreview | 3 | Модальное окно |
-| PermissionRequest | 2 | Альтернатива |
-| ActionBar | 2 | Простая интеграция |
-| TerminalPanel | 3 | Замена существующего |
-| MainLayout | 5 | Рефакторинг layout |
-| CollapsiblePanel/AccordionPanel | 2 | Простая интеграция |
-| SearchInput | 2 | Простая интеграция |
-| ContextMenu | 3 | Новый паттерн |
+| Компонент | SP | Комментарий | Статус |
+|-----------|------|-------------|--------|
+| ToastContainer | 2 | Простая интеграция | ✅ |
+| Spinner/LoadingIndicator | 2 | Простая интеграция | ✅ |
+| ProgressBar | 2 | Простая интеграция | ✅ |
+| MessageBubble | 7 | Интеграция в ChatView | ✅ `7b29afb` |
+| ToolCallList | 3 | Средняя сложность | ✅ `b5808d4` |
+| FileChangePreviewModal | 3 | Модальное окно diff | ✅ `4dba8c2` |
+| PermissionRequest | 2 | Альтернатива InlinePermissionWidget | ✅ `4116439` |
+| QuickActionsBar | 2 | Панель с MVVM | ✅ `27582c3` |
+| TerminalOutputPanel | 3 | Улучшенный с toolbar | ✅ `d399baa` |
+| MainLayout | 5 | Рефакторинг layout | 🔜 |
+| CollapsiblePanel/AccordionPanel | 2 | Простая интеграция | 🔜 |
+| SearchInput | 2 | Простая интеграция | 🔜 |
+| ContextMenu | 3 | Новый паттерн | 🔜 |
 
 ---
 
 ## 6. Рекомендуемый порядок внедрения
 
-### Фаза 1: P0 - Базовый UX
+### Фаза 1: P0 - Базовый UX ✅
 
-1. ToastContainer + Toast
-2. Spinner + LoadingIndicator
-3. ProgressBar
+1. ✅ ToastContainer + Toast
+2. ✅ Spinner + LoadingIndicator
+3. ✅ ProgressBar
 
-### Фаза 2: P1 - Функциональность
+### Фаза 2: P1 - Функциональность ✅
 
-1. ToolCallList в ToolPanel
-2. FileChangePreview
-3. MessageList + SessionTurn в ChatView
-4. TerminalPanel
+1. ✅ ToolCallList в ToolPanel (`b5808d4`)
+2. ✅ FileChangePreviewModal (`4dba8c2`)
+3. ✅ MessageBubble в ChatView (`7b29afb`)
+4. ✅ TerminalOutputPanel с toolbar (`d399baa`)
+5. ✅ PermissionRequest в ChatViewPermissionManager (`4116439`)
+6. ✅ QuickActionsBar (`27582c3`, `a84d476`)
 
-### Фаза 3: P2 - Полировка
+### Фаза 3: P2 - Полировка 🔜 (12 SP)
 
-1. SearchInput в Sidebar и FileTree
-2. CollapsiblePanel/AccordionPanel
-3. ContextMenu
-4. MainLayout миграция
+| # | Компонент | SP | Описание |
+|---|-----------|-----|----------|
+| 1 | SearchInput | 2 | Поиск в Sidebar и FileTree |
+| 2 | CollapsiblePanel/AccordionPanel | 2 | Сворачиваемые секции |
+| 3 | ContextMenu | 3 | Контекстное меню для Sidebar/FileTree |
+| 4 | MainLayout | 5 | Рефакторинг layout в app.py |
+
+**Приоритет P2:**
+1. **SearchInput** — улучшит навигацию по файлам и сессиям
+2. **CollapsiblePanel** — компактность интерфейса
+3. **ContextMenu** — дополнительные действия
+4. **MainLayout** — финальный рефакторинг
 
 ---
 

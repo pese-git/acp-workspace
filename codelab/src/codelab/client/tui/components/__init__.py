@@ -65,7 +65,7 @@ from .keyboard_manager import (
     get_keyboard_manager,
     set_keyboard_manager,
 )
-from .main_layout import MainLayout
+from .main_layout import LayoutConfig, MainLayout
 from .markdown import CodeBlock, InlineMarkdown, MarkdownViewer
 from .message_bubble import Avatar, MessageBubble, MessageRole
 from .message_list import DateSeparator, MessageList
@@ -99,6 +99,7 @@ from .tool_panel import ToolPanel
 __all__ = [
     # Layout компоненты (Фаза 1)
     "MainLayout",
+    "LayoutConfig",
     "StyledContainer",
     "ContainerVariant",
     "Card",

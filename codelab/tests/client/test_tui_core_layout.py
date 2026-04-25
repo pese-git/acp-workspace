@@ -17,7 +17,7 @@ from codelab.client.presentation.ui_view_model import ConnectionStatus, UIViewMo
 from codelab.client.tui.components.container import Card, ContainerVariant, StyledContainer
 from codelab.client.tui.components.footer import AgentStatus, FooterBar
 from codelab.client.tui.components.header import HeaderBar
-from codelab.client.tui.components.main_layout import MainLayout
+from codelab.client.tui.components.main_layout import LayoutConfig, MainLayout
 from codelab.client.tui.components.panel import AccordionPanel, CollapsiblePanel
 
 # =============================================================================
@@ -50,7 +50,7 @@ class TestMainLayout:
         layout = MainLayout()
         assert layout is not None
         assert layout.sidebar_visible is True
-        assert layout.right_panel_visible is False
+        assert layout.bottom_panel_visible is False
 
     def test_main_layout_with_ui_vm(self, ui_vm: UIViewModel) -> None:
         """MainLayout интегрируется с UIViewModel."""
@@ -68,16 +68,16 @@ class TestMainLayout:
         layout.toggle_sidebar()
         assert layout.sidebar_visible is True
 
-    def test_toggle_right_panel(self) -> None:
-        """toggle_right_panel переключает видимость правой панели."""
+    def test_toggle_bottom_panel(self) -> None:
+        """toggle_bottom_panel переключает видимость нижней панели."""
         layout = MainLayout()
-        assert layout.right_panel_visible is False
+        assert layout.bottom_panel_visible is False
         
-        layout.toggle_right_panel()
-        assert layout.right_panel_visible is True
+        layout.toggle_bottom_panel()
+        assert layout.bottom_panel_visible is True
         
-        layout.toggle_right_panel()
-        assert layout.right_panel_visible is False
+        layout.toggle_bottom_panel()
+        assert layout.bottom_panel_visible is False
 
     def test_sidebar_collapsed_sync(self, ui_vm: UIViewModel) -> None:
         """sidebar_collapsed в UIViewModel синхронизируется с layout."""
@@ -91,10 +91,11 @@ class TestMainLayout:
         assert layout.sidebar_visible is False
 
     def test_custom_widths(self) -> None:
-        """MainLayout принимает кастомные ширины."""
-        layout = MainLayout(sidebar_width=40, right_panel_width=50)
-        assert layout._sidebar_width == 40
-        assert layout._right_panel_width == 50
+        """MainLayout принимает кастомные конфигурацию."""
+        config = LayoutConfig(sidebar_width=40, bottom_panel_height=15)
+        layout = MainLayout(config=config)
+        assert layout.config.sidebar_width == 40
+        assert layout.config.bottom_panel_height == 15
 
 
 # =============================================================================
