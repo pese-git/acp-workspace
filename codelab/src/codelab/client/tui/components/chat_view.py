@@ -19,6 +19,7 @@ from textual.containers import Container, VerticalScroll
 from textual.widgets import Static
 
 from codelab.client.messages import PermissionOption, PermissionToolCall
+from codelab.client.tui.components.message_bubble import MessageBubble, MessageRole
 from codelab.client.tui.components.spinner import LoadingIndicator
 
 if TYPE_CHECKING:
@@ -164,7 +165,10 @@ class ChatView(VerticalScroll):
         self.scroll_end()
 
     def _render_message(self, message: object) -> None:
-        """Отобразить одно сообщение.
+        """Отобразить одно сообщение через MessageBubble.
+
+        Использует MessageBubble для улучшенного рендеринга сообщений с аватарами
+        и стилизацией в зависимости от роли.
 
         Args:
             message: Объект сообщения (dict с ключами role и content)
@@ -175,28 +179,34 @@ class ChatView(VerticalScroll):
         # Извлекаем роль и содержимое из сообщения
         if isinstance(message, dict):
             # Поддерживаем оба варианта: "role" (предпочтительно) и "type" (для совместимости)
-            # Кастируем как Dict[str, Any] для правильной типизации
             msg_dict = dict(message)  # type: ignore[arg-type]
             msg_role_value = msg_dict.get("role")
             if msg_role_value is None:
                 msg_role_value = msg_dict.get("type", "unknown")
-            msg_role: str = str(msg_role_value)
+            msg_role_str: str = str(msg_role_value)
             content: str = str(msg_dict.get("content", ""))
 
-            # Форматируем сообщение в зависимости от роли с использованием Rich разметки
-            if msg_role == "user":
-                formatted = f"[bold blue]Ты:[/bold blue] {content}"
-            elif msg_role == "assistant":
-                formatted = f"[bold green]Агент:[/bold green] {content}"
-            elif msg_role == "system":
-                formatted = f"[bold yellow]Система:[/bold yellow] {content}"
-            else:
-                formatted = content
-        else:
-            formatted = str(message)
+            # Конвертируем строковую роль в MessageRole enum
+            role_map = {
+                "user": MessageRole.USER,
+                "assistant": MessageRole.ASSISTANT,
+                "system": MessageRole.SYSTEM,
+                "error": MessageRole.ERROR,
+            }
+            msg_role = role_map.get(msg_role_str, MessageRole.SYSTEM)
 
-        # Монтируем виджет с сообщением в контейнер, используя timestamp для уникальности ID
-        message_widget = Static(formatted, id=f"msg_{time.time_ns()}", classes="message")
+            # Создаем MessageBubble с улучшенным отображением
+            message_widget = MessageBubble(
+                role=msg_role,
+                content=content,
+                show_avatar=True,
+                show_header=True,
+                id=f"msg_{time.time_ns()}",
+            )
+        else:
+            # Fallback для неизвестных типов - используем Static
+            message_widget = Static(str(message), id=f"msg_{time.time_ns()}", classes="message")
+
         self._content_container.mount(message_widget)
 
     def _render_streaming_text(self, text: str) -> None:
