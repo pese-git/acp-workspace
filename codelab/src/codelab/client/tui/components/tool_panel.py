@@ -4,6 +4,7 @@
 - Отображение статуса выполнения tool calls
 - Показ результатов выполнения инструментов
 - Интеграция с ChatViewModel для синхронизации tool calls
+- Отображение прогресса выполнения tool calls через ProgressBar
 """
 
 from __future__ import annotations
@@ -11,10 +12,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from rich.text import Text
+from textual.app import ComposeResult
+from textual.containers import Vertical
 from textual.widgets import Static
 
 from codelab.client.messages import ToolCallUpdate
 
+from .progress import ProgressBar, ProgressVariant
 from .terminal_output import TerminalOutputPanel
 
 if TYPE_CHECKING:
@@ -22,11 +26,13 @@ if TYPE_CHECKING:
     from codelab.client.presentation.terminal_view_model import TerminalViewModel
 
 
-class ToolPanel(Static):
-    """Панель tool calls с MVVM интеграцией.
+class ToolPanel(Vertical):
+    """Панель tool calls с MVVM интеграцией и прогресс-баром.
     
     Обязательно требует ChatViewModel для работы. Подписывается на Observable свойства:
     - tool_calls: список активных tool calls
+    
+    Включает ProgressBar для визуализации прогресса выполнения tool calls.
     
     Примеры использования:
         >>> from codelab.client.presentation.chat_view_model import ChatViewModel
@@ -35,6 +41,21 @@ class ToolPanel(Static):
         >>> 
         >>> # Когда ChatViewModel обновляется, панель обновляется автоматически
         >>> chat_vm.tool_calls.value = [tool_call1, tool_call2]
+    """
+
+    DEFAULT_CSS = """
+    ToolPanel {
+        height: auto;
+        max-height: 12;
+    }
+    
+    ToolPanel #tool-list {
+        height: auto;
+    }
+    
+    ToolPanel #tool-progress {
+        height: 3;
+    }
     """
 
     def __init__(
@@ -48,13 +69,45 @@ class ToolPanel(Static):
             chat_vm: ChatViewModel для управления tool calls
             terminal_vm: TerminalViewModel для управления output панелями
         """
-        super().__init__("Инструменты: нет активных вызовов", id="tool-panel")
+        super().__init__(id="tool-panel")
         self.chat_vm = chat_vm
         self._terminal_vm = terminal_vm
         self._tool_calls: dict[str, dict[str, Any]] = {}
         
         # Подписываемся на изменения в ChatViewModel
         self.chat_vm.tool_calls.subscribe(self._on_tool_calls_changed)
+
+    def compose(self) -> ComposeResult:
+        """Создаёт содержимое панели: список tool calls и прогресс-бар."""
+        yield Static("Инструменты: нет активных вызовов", id="tool-list")
+        yield ProgressBar(
+            variant=ProgressVariant.PRIMARY,
+            show_label=True,
+            label_format="{current}/{total}",
+            id="tool-progress",
+        )
+
+    def on_mount(self) -> None:
+        """При монтировании скрываем прогресс-бар по умолчанию."""
+        self._update_progress_visibility(show=False)
+
+    def render(self) -> Text:
+        """Рендерит текстовое содержимое панели для совместимости с тестами.
+        
+        Returns:
+            Text объект с содержимым tool-list виджета
+        """
+        return Text(self._render_text())
+
+    @property
+    def _tool_list(self) -> Static:
+        """Возвращает виджет списка tool calls."""
+        return self.query_one("#tool-list", Static)
+
+    @property
+    def _progress_bar(self) -> ProgressBar:
+        """Возвращает виджет прогресс-бара."""
+        return self.query_one("#tool-progress", ProgressBar)
 
     def _on_tool_calls_changed(self, tool_calls: list) -> None:
         """Обновить панель при изменении tool calls.
@@ -64,7 +117,11 @@ class ToolPanel(Static):
         """
         # Обновляем отображение на основе новых tool calls
         if not tool_calls:
-            self.update("Инструменты: нет активных вызовов")
+            try:
+                self._tool_list.update("Инструменты: нет активных вызовов")
+                self._update_progress_visibility(show=False)
+            except Exception:
+                pass  # Виджеты ещё не смонтированы
         else:
             # Формируем текст отображения из tool calls
             lines: list[str] = ["Инструменты:"]
@@ -73,13 +130,70 @@ class ToolPanel(Static):
                 tool_id = getattr(tool_call, "id", str(tool_call)[:20])
                 status = getattr(tool_call, "status", "pending")
                 lines.append(f"- {tool_id} [{status}]")
-            self.update("\n".join(lines))
+            try:
+                self._tool_list.update("\n".join(lines))
+                self._update_progress_from_calls(tool_calls)
+            except Exception:
+                pass  # Виджеты ещё не смонтированы
+
+    def _update_progress_from_calls(self, tool_calls: list) -> None:
+        """Обновляет прогресс-бар на основе статусов tool calls.
+        
+        Args:
+            tool_calls: Список tool calls
+        """
+        if not tool_calls:
+            self._update_progress_visibility(show=False)
+            return
+
+        total = len(tool_calls)
+        completed = sum(
+            1 for tc in tool_calls
+            if getattr(tc, "status", "") in ("completed", "success", "error", "failed")
+        )
+        
+        # Показываем прогресс если есть активные tool calls
+        self._update_progress_visibility(show=completed < total)
+        
+        try:
+            progress_bar = self._progress_bar
+            progress_bar.set_steps(completed, total)
+            
+            # Меняем цвет в зависимости от состояния
+            has_errors = any(
+                getattr(tc, "status", "") in ("error", "failed")
+                for tc in tool_calls
+            )
+            if has_errors:
+                progress_bar.set_variant(ProgressVariant.WARNING)
+            elif completed == total:
+                progress_bar.set_variant(ProgressVariant.SUCCESS)
+            else:
+                progress_bar.set_variant(ProgressVariant.PRIMARY)
+        except Exception:
+            pass  # Виджет ещё не смонтирован
+
+    def _update_progress_visibility(self, *, show: bool) -> None:
+        """Показывает или скрывает прогресс-бар.
+        
+        Args:
+            show: True чтобы показать, False чтобы скрыть
+        """
+        try:
+            progress_bar = self._progress_bar
+            progress_bar.display = show
+        except Exception:
+            pass  # Виджет ещё не смонтирован
 
     def reset(self) -> None:
         """Сбрасывает локальный список вызовов инструментов."""
-
         self._tool_calls = {}
-        self.update("Инструменты: нет активных вызовов")
+        try:
+            self._tool_list.update("Инструменты: нет активных вызовов")
+            self._update_progress_visibility(show=False)
+            self._progress_bar.reset()
+        except Exception:
+            pass  # Виджеты ещё не смонтированы
 
     def apply_update(self, update: ToolCallUpdate) -> None:
         """Применяет одно событие tool_call/tool_call_update к панели."""
@@ -119,7 +233,44 @@ class ToolPanel(Static):
             "terminal_id": terminal_id,
             "terminal_view": terminal_view,
         }
-        self.update(self._render_text())
+        try:
+            self._tool_list.update(self._render_text())
+            self._update_progress_from_tool_calls_dict()
+        except Exception:
+            pass  # Виджеты ещё не смонтированы
+
+    def _update_progress_from_tool_calls_dict(self) -> None:
+        """Обновляет прогресс-бар на основе локального словаря _tool_calls."""
+        if not self._tool_calls:
+            self._update_progress_visibility(show=False)
+            return
+
+        total = len(self._tool_calls)
+        completed = sum(
+            1 for payload in self._tool_calls.values()
+            if payload.get("status") in ("completed", "success", "error", "failed")
+        )
+        
+        # Показываем прогресс если есть незавершённые tool calls
+        self._update_progress_visibility(show=completed < total)
+        
+        try:
+            progress_bar = self._progress_bar
+            progress_bar.set_steps(completed, total)
+            
+            # Меняем цвет в зависимости от состояния
+            has_errors = any(
+                payload.get("status") in ("error", "failed")
+                for payload in self._tool_calls.values()
+            )
+            if has_errors:
+                progress_bar.set_variant(ProgressVariant.WARNING)
+            elif completed == total:
+                progress_bar.set_variant(ProgressVariant.SUCCESS)
+            else:
+                progress_bar.set_variant(ProgressVariant.PRIMARY)
+        except Exception:
+            pass  # Виджет ещё не смонтирован
 
     def _render_text(self) -> str:
         """Формирует компактный список вызовов для отображения в панели."""

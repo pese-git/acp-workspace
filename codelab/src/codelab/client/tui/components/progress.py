@@ -47,7 +47,7 @@ class ProgressBar(Widget):
     ProgressBar .progress-container {
         width: 1fr;
         height: 1;
-        background: $background-tertiary;
+        background: $surface;
         margin: 1 0;
     }
 
