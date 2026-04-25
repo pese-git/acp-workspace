@@ -154,8 +154,18 @@ class ToolCallList(VerticalScroll):
         for tc in tool_calls:
             tc_id = getattr(tc, "id", None) or str(tc)[:20]
             tc_name = getattr(tc, "name", "unknown")
-            tc_status = getattr(tc, "status", "pending")
+            raw_status = getattr(tc, "status", "pending")
             tc_params = getattr(tc, "parameters", {})
+            
+            # Маппинг статусов протокола на внутренние статусы
+            # Протокол: pending, in_progress, completed, failed
+            # Внутренние: pending, running, success, error, cancelled
+            status_map = {
+                "in_progress": "running",
+                "completed": "success",
+                "failed": "error",
+            }
+            tc_status = status_map.get(raw_status, raw_status)
             
             if tc_id not in self._tool_calls:
                 # Новый tool call

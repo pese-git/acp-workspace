@@ -20,6 +20,7 @@ from codelab.client.messages import ToolCallUpdate
 
 from .progress import ProgressBar, ProgressVariant
 from .terminal_output import TerminalOutputPanel
+from .tool_call_list import ToolCallList
 
 if TYPE_CHECKING:
     from codelab.client.presentation.chat_view_model import ChatViewModel
@@ -46,11 +47,17 @@ class ToolPanel(Vertical):
     DEFAULT_CSS = """
     ToolPanel {
         height: auto;
+        max-height: 20;
+    }
+    
+    ToolPanel #tool-call-list {
+        height: auto;
         max-height: 12;
     }
     
     ToolPanel #tool-list {
         height: auto;
+        display: none;  /* Скрываем текстовый список, используем ToolCallList */
     }
     
     ToolPanel #tool-progress {
@@ -78,7 +85,16 @@ class ToolPanel(Vertical):
         self.chat_vm.tool_calls.subscribe(self._on_tool_calls_changed)
 
     def compose(self) -> ComposeResult:
-        """Создаёт содержимое панели: список tool calls и прогресс-бар."""
+        """Создаёт содержимое панели: ToolCallList, список tool calls и прогресс-бар."""
+        # ToolCallList для отображения карточек tool calls
+        # Автоматически подписывается на chat_vm.tool_calls
+        yield ToolCallList(
+            chat_vm=self.chat_vm,
+            show_summary=True,
+            group_by_status=False,
+            id="tool-call-list",
+        )
+        # Текстовый список для совместимости со старым API
         yield Static("Инструменты: нет активных вызовов", id="tool-list")
         yield ProgressBar(
             variant=ProgressVariant.PRIMARY,
@@ -108,6 +124,11 @@ class ToolPanel(Vertical):
     def _progress_bar(self) -> ProgressBar:
         """Возвращает виджет прогресс-бара."""
         return self.query_one("#tool-progress", ProgressBar)
+
+    @property
+    def _tool_call_list(self) -> ToolCallList:
+        """Возвращает виджет ToolCallList."""
+        return self.query_one("#tool-call-list", ToolCallList)
 
     def _on_tool_calls_changed(self, tool_calls: list) -> None:
         """Обновить панель при изменении tool calls.
@@ -186,10 +207,11 @@ class ToolPanel(Vertical):
             pass  # Виджет ещё не смонтирован
 
     def reset(self) -> None:
-        """Сбрасывает локальный список вызовов инструментов."""
+        """Сбрасывает локальный список вызовов инструментов и ToolCallList."""
         self._tool_calls = {}
         try:
             self._tool_list.update("Инструменты: нет активных вызовов")
+            self._tool_call_list.clear()  # Очищаем ToolCallList
             self._update_progress_visibility(show=False)
             self._progress_bar.reset()
         except Exception:

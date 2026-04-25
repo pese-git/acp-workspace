@@ -305,6 +305,46 @@ class TestToolCallList:
         assert "completed" in summary
         assert "pending" in summary
 
+    def test_tool_call_list_status_mapping(self) -> None:
+        """ToolCallList маппит статусы протокола на внутренние."""
+        from unittest.mock import MagicMock
+        
+        tool_list = ToolCallList()
+        
+        # Создаём mock объекты tool call с протокольными статусами
+        tc_pending = MagicMock()
+        tc_pending.id = "call_1"
+        tc_pending.name = "test"
+        tc_pending.status = "pending"  # pending -> pending
+        tc_pending.parameters = {}
+        
+        tc_in_progress = MagicMock()
+        tc_in_progress.id = "call_2"
+        tc_in_progress.name = "test"
+        tc_in_progress.status = "in_progress"  # in_progress -> running
+        tc_in_progress.parameters = {}
+        
+        tc_completed = MagicMock()
+        tc_completed.id = "call_3"
+        tc_completed.name = "test"
+        tc_completed.status = "completed"  # completed -> success
+        tc_completed.parameters = {}
+        
+        tc_failed = MagicMock()
+        tc_failed.id = "call_4"
+        tc_failed.name = "test"
+        tc_failed.status = "failed"  # failed -> error
+        tc_failed.parameters = {}
+        
+        # Вызываем обработчик
+        tool_list._on_tool_calls_changed([tc_pending, tc_in_progress, tc_completed, tc_failed])
+        
+        # Проверяем маппинг статусов
+        assert tool_list.get_tool_call("call_1")["status"] == "pending"
+        assert tool_list.get_tool_call("call_2")["status"] == "running"
+        assert tool_list.get_tool_call("call_3")["status"] == "success"
+        assert tool_list.get_tool_call("call_4")["status"] == "error"
+
 
 # === FileChangePreview тесты ===
 
