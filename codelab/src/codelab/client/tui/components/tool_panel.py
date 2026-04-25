@@ -190,6 +190,19 @@ class ToolPanel(Vertical):
             except Exception:
                 pass  # Виджеты ещё не смонтированы
 
+    def _get_tc_status(self, tc: dict | Any) -> str:
+        """Извлекает статус из tool call (dict или объект).
+        
+        Args:
+            tc: Tool call (словарь или объект)
+            
+        Returns:
+            Статус tool call
+        """
+        if isinstance(tc, dict):
+            return tc.get("status") or ""
+        return getattr(tc, "status", "")
+
     def _update_progress_from_calls(self, tool_calls: list) -> None:
         """Обновляет прогресс-бар на основе статусов tool calls.
         
@@ -203,7 +216,7 @@ class ToolPanel(Vertical):
         total = len(tool_calls)
         completed = sum(
             1 for tc in tool_calls
-            if getattr(tc, "status", "") in ("completed", "success", "error", "failed")
+            if self._get_tc_status(tc) in ("completed", "success", "error", "failed")
         )
         
         # Показываем прогресс если есть активные tool calls
@@ -215,7 +228,7 @@ class ToolPanel(Vertical):
             
             # Меняем цвет в зависимости от состояния
             has_errors = any(
-                getattr(tc, "status", "") in ("error", "failed")
+                self._get_tc_status(tc) in ("error", "failed")
                 for tc in tool_calls
             )
             if has_errors:
