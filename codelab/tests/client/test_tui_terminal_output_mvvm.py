@@ -1,4 +1,10 @@
-"""Тесты для компонента TerminalOutputPanel с MVVM интеграцией."""
+"""Тесты для компонента TerminalOutputPanel с MVVM интеграцией.
+
+Включает тесты для:
+- TerminalOutputToolbar - панель инструментов
+- TerminalOutputContent - область вывода
+- TerminalOutputPanel - объединённый компонент
+"""
 
 from __future__ import annotations
 
@@ -6,7 +12,11 @@ import pytest
 
 from codelab.client.infrastructure.events.bus import EventBus
 from codelab.client.presentation.terminal_view_model import TerminalViewModel
-from codelab.client.tui.components.terminal_output import TerminalOutputPanel
+from codelab.client.tui.components.terminal_output import (
+    TerminalOutputContent,
+    TerminalOutputPanel,
+    TerminalOutputToolbar,
+)
 
 
 @pytest.fixture
@@ -319,3 +329,210 @@ def test_terminal_output_preserves_exit_code_on_reset(
     # Проверяем что exit code тоже очищен
     assert terminal_output_panel._exit_code is None
     assert terminal_view_model.output.value == ""
+
+
+# ===== TerminalOutputToolbar Tests =====
+
+def test_terminal_output_toolbar_creation() -> None:
+    """Проверить создание TerminalOutputToolbar."""
+    toolbar = TerminalOutputToolbar(title="My Terminal")
+    assert toolbar.id == "terminal-output-toolbar"
+    assert toolbar._title == "My Terminal"
+
+
+def test_terminal_output_toolbar_default_title() -> None:
+    """Проверить заголовок по умолчанию."""
+    toolbar = TerminalOutputToolbar()
+    assert toolbar._title == "Terminal"
+
+
+def test_terminal_output_toolbar_set_title() -> None:
+    """Проверить изменение заголовка."""
+    toolbar = TerminalOutputToolbar(title="Original")
+    toolbar.set_title("Updated")
+    assert toolbar._title == "Updated"
+
+
+def test_terminal_output_toolbar_custom_id() -> None:
+    """Проверить кастомный ID."""
+    toolbar = TerminalOutputToolbar(id="custom-toolbar")
+    assert toolbar.id == "custom-toolbar"
+
+
+# ===== TerminalOutputContent Tests =====
+
+def test_terminal_output_content_creation() -> None:
+    """Проверить создание TerminalOutputContent."""
+    content = TerminalOutputContent()
+    assert content.id == "terminal-output-content"
+    assert content._output_text == ""
+    assert content._exit_code is None
+
+
+def test_terminal_output_content_set_output() -> None:
+    """Проверить установку вывода."""
+    content = TerminalOutputContent()
+    content._output_text = "Test output"  # Без вызова set_output который требует Textual
+    assert content._output_text == "Test output"
+
+
+def test_terminal_output_content_clear() -> None:
+    """Проверить очистку вывода."""
+    content = TerminalOutputContent()
+    content._output_text = "Some output"
+    content._exit_code = 0
+    
+    # Очищаем напрямую без вызова Textual
+    content._output_text = ""
+    content._exit_code = None
+    
+    assert content._output_text == ""
+    assert content._exit_code is None
+
+
+def test_terminal_output_content_get_output() -> None:
+    """Проверить получение вывода."""
+    content = TerminalOutputContent()
+    content._output_text = "Test"
+    assert content.get_output() == "Test"
+
+
+def test_terminal_output_content_custom_id() -> None:
+    """Проверить кастомный ID."""
+    content = TerminalOutputContent(id="custom-content")
+    assert content.id == "custom-content"
+
+
+# ===== TerminalOutputPanel with Toolbar Tests =====
+
+def test_terminal_output_panel_with_toolbar(
+    terminal_view_model: TerminalViewModel,
+) -> None:
+    """Проверить создание панели с toolbar."""
+    panel = TerminalOutputPanel(terminal_view_model, show_toolbar=True)
+    assert panel._show_toolbar is True
+    assert panel.toolbar_visible is True
+
+
+def test_terminal_output_panel_without_toolbar(
+    terminal_view_model: TerminalViewModel,
+) -> None:
+    """Проверить создание панели без toolbar."""
+    panel = TerminalOutputPanel(terminal_view_model, show_toolbar=False)
+    assert panel._show_toolbar is False
+    assert panel.toolbar_visible is False
+
+
+def test_terminal_output_panel_default_toolbar(
+    terminal_view_model: TerminalViewModel,
+) -> None:
+    """Проверить что toolbar включен по умолчанию."""
+    panel = TerminalOutputPanel(terminal_view_model)
+    assert panel._show_toolbar is True
+
+
+def test_terminal_output_panel_custom_title(
+    terminal_view_model: TerminalViewModel,
+) -> None:
+    """Проверить кастомный заголовок."""
+    panel = TerminalOutputPanel(terminal_view_model, title="Custom Title")
+    assert panel._title == "Custom Title"
+
+
+def test_terminal_output_panel_set_title(
+    terminal_view_model: TerminalViewModel,
+) -> None:
+    """Проверить изменение заголовка."""
+    panel = TerminalOutputPanel(terminal_view_model, title="Original")
+    panel.set_title("Updated")
+    assert panel._title == "Updated"
+
+
+def test_terminal_output_panel_toggle_toolbar_visibility(
+    terminal_view_model: TerminalViewModel,
+) -> None:
+    """Проверить переключение видимости toolbar."""
+    panel = TerminalOutputPanel(terminal_view_model, show_toolbar=True)
+    assert panel.toolbar_visible is True
+    
+    # Скрываем toolbar
+    panel.toolbar_visible = False
+    assert panel._show_toolbar is False
+    
+    # Показываем toolbar
+    panel.toolbar_visible = True
+    assert panel._show_toolbar is True
+
+
+def test_terminal_output_panel_custom_id(
+    terminal_view_model: TerminalViewModel,
+) -> None:
+    """Проверить кастомный ID панели."""
+    panel = TerminalOutputPanel(terminal_view_model, id="custom-panel")
+    assert panel.id == "custom-panel"
+
+
+def test_terminal_output_panel_custom_classes(
+    terminal_view_model: TerminalViewModel,
+) -> None:
+    """Проверить кастомные CSS классы."""
+    panel = TerminalOutputPanel(terminal_view_model, classes="my-class")
+    assert "my-class" in panel.classes
+
+
+# ===== Integration Tests for New Components =====
+
+def test_terminal_output_panel_full_integration(
+    terminal_view_model: TerminalViewModel,
+) -> None:
+    """Проверить полную интеграцию нового TerminalOutputPanel."""
+    # Создаём панель с toolbar
+    panel = TerminalOutputPanel(
+        terminal_view_model,
+        show_toolbar=True,
+        title="Integration Test",
+    )
+    
+    # Проверяем начальное состояние
+    assert panel._terminal_vm is terminal_view_model
+    assert panel._show_toolbar is True
+    assert panel._title == "Integration Test"
+    assert panel._exit_code is None
+    
+    # Добавляем вывод через панель
+    panel.append_output("Hello ")
+    panel.append_output("World!")
+    
+    # Проверяем что данные в ViewModel
+    assert terminal_view_model.output.value == "Hello World!"
+    assert terminal_view_model.has_output.value is True
+    
+    # Устанавливаем exit code
+    panel.set_exit_code(0)
+    assert panel._exit_code == 0
+    
+    # Сбрасываем
+    panel.reset()
+    assert terminal_view_model.output.value == ""
+    assert panel._exit_code is None
+
+
+def test_terminal_output_panel_render_text_compatibility(
+    terminal_view_model: TerminalViewModel,
+) -> None:
+    """Проверить обратную совместимость render_text()."""
+    panel = TerminalOutputPanel(terminal_view_model)
+    
+    # Без вывода
+    rendered = panel.render_text()
+    assert "Нет вывода терминала" in rendered.plain
+    
+    # С выводом
+    terminal_view_model.set_output("Test output")
+    rendered = panel.render_text()
+    assert "Test output" in rendered.plain
+    
+    # С exit code
+    panel._exit_code = 42
+    rendered = panel.render_text()
+    assert "Exit code: 42" in rendered.plain

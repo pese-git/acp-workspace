@@ -289,7 +289,8 @@ class ToolPanel(Vertical):
         terminal_view = previous.get("terminal_view")
         if terminal_view is None:
             # Создаём новую панель вывода терминала с ViewModel
-            terminal_view = TerminalOutputPanel(self._terminal_vm)
+            # show_toolbar=False, так как здесь используется только для render_text()
+            terminal_view = TerminalOutputPanel(self._terminal_vm, show_toolbar=False)
         if output_text:
             terminal_view.append_output(output_text)
         if exit_code is not None:

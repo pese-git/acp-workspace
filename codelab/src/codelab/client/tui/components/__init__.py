@@ -83,7 +83,11 @@ from .status_line import CompactStatusLine, StatusIndicator, StatusLine, StatusM
 from .streaming_text import StreamingText, ThinkingIndicator, TypewriterText
 from .tabs import Tab, TabBar, TabbedContainer, TabData, TabPanel
 from .terminal_log_modal import TerminalLogModal
-from .terminal_output import TerminalOutputPanel
+from .terminal_output import (
+    TerminalOutputContent,
+    TerminalOutputPanel,
+    TerminalOutputToolbar,
+)
 from .terminal_panel import TerminalOutput, TerminalPanel, TerminalSession, TerminalToolbar
 from .toast import Toast, ToastContainer, ToastData, ToastType
 from .tool_call_card import ToolCallCard, ToolCallStatus
@@ -119,7 +123,9 @@ __all__ = [
     # Panels
     "PlanPanel",
     "TerminalLogModal",
+    "TerminalOutputContent",
     "TerminalOutputPanel",
+    "TerminalOutputToolbar",
     "ToolPanel",
     # Фаза 2: Markdown компоненты
     "MarkdownViewer",
