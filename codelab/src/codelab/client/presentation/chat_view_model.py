@@ -344,6 +344,43 @@ class ChatViewModel(BaseViewModel):
                         tool_call_id=tool_call_id,
                         has_result=bool(result),
                     )
+            
+            # Обработка tool_call_update - обновление статуса существующего tool call
+            elif session_update_type == "tool_call_update":
+                tool_call_id = update.get("toolCallId")
+                tool_status = update.get("status")
+                tool_title = update.get("title")
+
+                if target_session_id is not None and tool_call_id:
+                    self.logger.info(
+                        "tool_call_status_update",
+                        session_id=target_session_id,
+                        tool_call_id=tool_call_id,
+                        new_status=tool_status,
+                    )
+                    
+                    # Обновляем статус существующего tool call в состоянии
+                    # ВАЖНО: создаем новые копии словарей, чтобы Observable
+                    # обнаружил изменение (сравнение по значению, а не ссылке)
+                    state = self._get_or_create_session_state(target_session_id)
+                    updated_tool_calls = []
+                    for tc in state.tool_calls:
+                        if tc.get("toolCallId") == tool_call_id:
+                            # Создаём новый словарь с обновлёнными полями
+                            updated_tc = {**tc}
+                            if tool_status:
+                                updated_tc["status"] = tool_status
+                            if tool_title:
+                                updated_tc["title"] = tool_title
+                            updated_tool_calls.append(updated_tc)
+                        else:
+                            updated_tool_calls.append(tc)
+                    state.tool_calls = updated_tool_calls
+                    self._session_states[target_session_id] = state
+
+                    # Синхронизируем с UI если это активная сессия
+                    if self._active_session_id == target_session_id:
+                        self.tool_calls.value = updated_tool_calls
 
             # Обработка plan - обновление плана агента через PlanViewModel
             elif session_update_type == "plan":

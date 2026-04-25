@@ -152,10 +152,17 @@ class ToolCallList(VerticalScroll):
         """
         # Обновляем каждый tool call
         for tc in tool_calls:
-            tc_id = getattr(tc, "id", None) or str(tc)[:20]
-            tc_name = getattr(tc, "name", "unknown")
-            raw_status = getattr(tc, "status", "pending")
-            tc_params = getattr(tc, "parameters", {})
+            # Поддержка как словарей (из ChatViewModel), так и объектов
+            if isinstance(tc, dict):
+                tc_id = tc.get("toolCallId") or str(tc)[:20]
+                tc_name = tc.get("title") or tc.get("name") or "unknown"
+                raw_status = tc.get("status") or "pending"
+                tc_params = tc.get("parameters") or tc.get("rawInput") or {}
+            else:
+                tc_id = getattr(tc, "id", None) or str(tc)[:20]
+                tc_name = getattr(tc, "name", "unknown")
+                raw_status = getattr(tc, "status", "pending")
+                tc_params = getattr(tc, "parameters", {})
             
             # Маппинг статусов протокола на внутренние статусы
             # Протокол: pending, in_progress, completed, failed

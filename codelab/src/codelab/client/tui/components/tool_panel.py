@@ -136,6 +136,35 @@ class ToolPanel(Vertical):
         Args:
             tool_calls: Новый список tool calls
         """
+        # Маппинг статусов протокола на внутренние статусы ToolCallCard
+        status_map = {
+            "in_progress": "running",
+            "completed": "success",
+            "failed": "error",
+        }
+        
+        # Синхронизируем с ToolCallList
+        try:
+            tool_call_list = self._tool_call_list
+            for tc in tool_calls:
+                # Поддержка как словарей (из ChatViewModel), так и объектов
+                if isinstance(tc, dict):
+                    tc_id = tc.get("toolCallId") or str(tc)[:20]
+                    tc_name = tc.get("title") or tc.get("name") or "unknown"
+                    raw_status = tc.get("status") or "pending"
+                else:
+                    tc_id = getattr(tc, "id", None) or str(tc)[:20]
+                    tc_name = getattr(tc, "name", "unknown")
+                    raw_status = getattr(tc, "status", "pending")
+                mapped_status = status_map.get(raw_status, raw_status)
+                
+                if tc_id not in tool_call_list._tool_calls:  # noqa: SLF001
+                    tool_call_list.add_tool_call(tc_id, tc_name, {}, mapped_status)
+                else:
+                    tool_call_list.update_status(tc_id, mapped_status)
+        except Exception:
+            pass  # ToolCallList ещё не смонтирован
+        
         # Обновляем отображение на основе новых tool calls
         if not tool_calls:
             try:
@@ -147,9 +176,13 @@ class ToolPanel(Vertical):
             # Формируем текст отображения из tool calls
             lines: list[str] = ["Инструменты:"]
             for tool_call in tool_calls[-8:]:  # Показываем последние 8
-                # tool_call может быть разными типами, обрабатываем безопасно
-                tool_id = getattr(tool_call, "id", str(tool_call)[:20])
-                status = getattr(tool_call, "status", "pending")
+                # tool_call может быть словарем или объектом
+                if isinstance(tool_call, dict):
+                    tool_id = tool_call.get("toolCallId") or str(tool_call)[:20]
+                    status = tool_call.get("status") or "pending"
+                else:
+                    tool_id = getattr(tool_call, "id", str(tool_call)[:20])
+                    status = getattr(tool_call, "status", "pending")
                 lines.append(f"- {tool_id} [{status}]")
             try:
                 self._tool_list.update("\n".join(lines))
@@ -255,6 +288,27 @@ class ToolPanel(Vertical):
             "terminal_id": terminal_id,
             "terminal_view": terminal_view,
         }
+        
+        # Синхронизируем с ToolCallList
+        # Маппинг статусов протокола на внутренние статусы ToolCallCard
+        status_map = {
+            "in_progress": "running",
+            "completed": "success",
+            "failed": "error",
+        }
+        mapped_status = status_map.get(status, status)
+        
+        try:
+            tool_call_list = self._tool_call_list
+            if tool_call_id not in tool_call_list._tool_calls:  # noqa: SLF001
+                # Новый tool call
+                tool_call_list.add_tool_call(tool_call_id, title, {}, mapped_status)
+            else:
+                # Обновляем статус существующего
+                tool_call_list.update_status(tool_call_id, mapped_status)
+        except Exception:
+            pass  # ToolCallList ещё не смонтирован
+        
         try:
             self._tool_list.update(self._render_text())
             self._update_progress_from_tool_calls_dict()

@@ -344,6 +344,53 @@ class TestToolCallList:
         assert tool_list.get_tool_call("call_2")["status"] == "running"
         assert tool_list.get_tool_call("call_3")["status"] == "success"
         assert tool_list.get_tool_call("call_4")["status"] == "error"
+    
+    def test_tool_call_list_handles_dict_tool_calls(self) -> None:
+        """ToolCallList корректно обрабатывает словари из ChatViewModel.
+        
+        ChatViewModel хранит tool_calls как список словарей с ключом 'toolCallId',
+        а не как объекты с атрибутом 'id'.
+        """
+        tool_list = ToolCallList()
+        
+        # Словари как в ChatViewModel (см. chat_view_model.py строки 316-328)
+        dict_tool_calls = [
+            {
+                "toolCallId": "tc_001",
+                "title": "read_file",
+                "kind": "filesystem",
+                "status": "pending",
+            },
+            {
+                "toolCallId": "tc_002",
+                "title": "write_file",
+                "kind": "filesystem",
+                "status": "in_progress",
+            },
+            {
+                "toolCallId": "tc_003",
+                "title": "execute_command",
+                "kind": "terminal",
+                "status": "completed",
+            },
+        ]
+        
+        # Вызываем обработчик со словарями
+        tool_list._on_tool_calls_changed(dict_tool_calls)
+        
+        # Проверяем что tool calls добавлены с правильными ID
+        assert "tc_001" in tool_list._tool_calls
+        assert "tc_002" in tool_list._tool_calls
+        assert "tc_003" in tool_list._tool_calls
+        
+        # Проверяем маппинг статусов для словарей
+        assert tool_list.get_tool_call("tc_001")["status"] == "pending"
+        assert tool_list.get_tool_call("tc_002")["status"] == "running"  # in_progress -> running
+        assert tool_list.get_tool_call("tc_003")["status"] == "success"  # completed -> success
+        
+        # Проверяем что title используется как name
+        assert tool_list.get_tool_call("tc_001")["name"] == "read_file"
+        assert tool_list.get_tool_call("tc_002")["name"] == "write_file"
 
 
 # === FileChangePreview тесты ===
