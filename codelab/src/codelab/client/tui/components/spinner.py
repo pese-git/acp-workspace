@@ -127,7 +127,7 @@ class Spinner(Widget):
             classes: CSS классы
         """
         super().__init__(name=name, id=id or "spinner", classes=classes)
-        self._size: SpinnerSize = size
+        self._spinner_size: SpinnerSize = size
         self._variant: SpinnerVariant = variant
         self._frame_index: int = 0
         self._animation_task: asyncio.Task | None = None
@@ -174,7 +174,7 @@ class Spinner(Widget):
             return
 
         frames = self.ANIMATIONS[self._variant]
-        speed_ms = self.SPEEDS[self._size]
+        speed_ms = self.SPEEDS[self._spinner_size]
 
         async def animate() -> None:
             while True:
@@ -282,7 +282,7 @@ class LoadingIndicator(Widget):
         """
         super().__init__(name=name, id=id or "loading-indicator", classes=classes)
         self._text: str = text
-        self._size: SpinnerSize = size
+        self._spinner_size: SpinnerSize = size
         self._variant: SpinnerVariant = variant
         self.visible = visible
 
@@ -290,7 +290,7 @@ class LoadingIndicator(Widget):
         """Создаёт спиннер с текстом."""
         yield Spinner(
             text=self._text,
-            size=self._size,
+            size=self._spinner_size,
             variant=self._variant,
             spinning=self.visible,
         )

@@ -490,6 +490,10 @@ class ACPClientApp(App[None]):
         # Добавляем сообщение пользователя в чат
         self._chat_vm.add_message("user", event.text, session_id=session_id)
 
+        # Устанавливаем состояние загрузки ДО запуска async worker'а
+        # чтобы LoadingIndicator показался сразу
+        self._chat_vm.is_streaming.value = True
+
         # Запускаем отправку промпта асинхронно
         self.run_worker(
             self._chat_vm.send_prompt_cmd.execute(session_id, event.text),

@@ -19,6 +19,7 @@ from textual.containers import Container, VerticalScroll
 from textual.widgets import Static
 
 from codelab.client.messages import PermissionOption, PermissionToolCall
+from codelab.client.tui.components.spinner import LoadingIndicator
 
 if TYPE_CHECKING:
     from codelab.client.presentation.chat_view_model import ChatViewModel
@@ -62,6 +63,7 @@ class ChatView(VerticalScroll):
         self._permission_vm = permission_vm
         self._mounted = False
         self._content_container: Container | None = None
+        self._loading_indicator: LoadingIndicator | None = None
         self._logger = structlog.get_logger("chat_view")
 
         # Инициализировать менеджер разрешений если ViewModel доступен
@@ -83,6 +85,13 @@ class ChatView(VerticalScroll):
         # Создаем контейнер для динамического добавления виджетов
         self._content_container = Container(id="chat_content")
         yield self._content_container
+        # Индикатор загрузки показывается когда агент обрабатывает запрос
+        self._loading_indicator = LoadingIndicator(
+            text="Агент думает...",
+            visible=False,
+            id="chat_loading_indicator",
+        )
+        yield self._loading_indicator
 
     def on_mount(self) -> None:
         """Вызывается когда компонент смонтирован в приложение."""
@@ -111,6 +120,9 @@ class ChatView(VerticalScroll):
         Args:
             is_streaming: True если идет streaming, False иначе
         """
+        # Обновляем видимость индикатора загрузки
+        if self._loading_indicator is not None:
+            self._loading_indicator.visible = is_streaming
         self._update_display()
 
     def _on_streaming_text_changed(self, text: str) -> None:
