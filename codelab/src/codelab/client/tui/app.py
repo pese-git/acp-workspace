@@ -42,6 +42,7 @@ from .components import (
     PlanPanel,
     PromptInput,
     Sidebar,
+    ToastContainer,
     ToolPanel,
 )
 from .config import TUIConfigStore, resolve_tui_connection
@@ -190,6 +191,8 @@ class ACPClientApp(App[None]):
         with Vertical(id="bottom"):
             yield PromptInput(self._chat_vm)
             yield FooterBar(self._ui_vm)
+        # ToastContainer должен быть поверх других элементов (в конце compose)
+        yield ToastContainer(id="toast-container")
 
     def on_ready(self) -> None:
         """Запускается когда приложение готово к работе."""
@@ -236,6 +239,9 @@ class ACPClientApp(App[None]):
             self._ui_vm.set_connection_status(ConnectionStatus.CONNECTED)
             self._ui_vm.set_loading(False)
 
+            # Показываем toast о успешном подключении
+            self.show_toast("Подключено к серверу", level="success")
+
             # Устанавливаем callback для показа permission modal в UI.
             # Это необходимо, чтобы при получении session/request_permission от сервера
             # TUI приложение показало модальное окно для выбора разрешения.
@@ -279,6 +285,31 @@ class ACPClientApp(App[None]):
             # Обновляем статус подключения в UI
             self._ui_vm.set_connection_status(ConnectionStatus.DISCONNECTED)
             self._ui_vm.set_loading(False)
+
+            # Показываем toast об ошибке подключения
+            self.show_toast(f"Ошибка подключения: {e}", level="error")
+
+    def show_toast(self, message: str, level: str = "info", timeout: float = 3.0) -> None:
+        """Показывает toast-уведомление.
+
+        Args:
+            message: Текст уведомления
+            level: Уровень уведомления (info, success, warning, error)
+            timeout: Время отображения в секундах
+        """
+        try:
+            toast_container = self.query_one("#toast-container", ToastContainer)
+            # Вызываем соответствующий метод в зависимости от уровня
+            if level == "success":
+                toast_container.success(message, duration=timeout)
+            elif level == "warning":
+                toast_container.warning(message, duration=timeout)
+            elif level == "error":
+                toast_container.error(message, duration=timeout)
+            else:
+                toast_container.info(message, duration=timeout)
+        except Exception as e:
+            self._app_logger.warning("failed_to_show_toast", error=str(e))
 
     def _on_sidebar_state_changed(self, _: object) -> None:
         """Синхронизировать видимость FileTree с активной вкладкой sidebar."""
@@ -464,6 +495,9 @@ class ACPClientApp(App[None]):
             self._chat_vm.send_prompt_cmd.execute(session_id, event.text),
             exclusive=False,
         )
+
+        # Показываем toast о отправке запроса
+        self.show_toast("Запрос отправлен", level="info")
 
     def _on_selected_session_changed(self, session_id: str | None) -> None:
         """Обновляет ChatView при смене активной сессии."""
