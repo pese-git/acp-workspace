@@ -36,6 +36,7 @@ from .action_bar import ActionBar
 from .action_button import ActionButton, ButtonVariant, IconButton
 from .chat_view import ChatView
 from .chat_view_permission_manager import ChatViewPermissionManager, PermissionWidgetType
+from .collapsible_panel import AccordionGroup
 from .command_palette import Command, CommandCategory, CommandItem, CommandPalette
 from .container import Card, ContainerVariant, StyledContainer
 from .context_menu import (
@@ -103,6 +104,7 @@ __all__ = [
     "Card",
     "CollapsiblePanel",
     "AccordionPanel",
+    "AccordionGroup",
     # Header/Footer
     "HeaderBar",
     "FooterBar",
