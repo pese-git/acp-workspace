@@ -22,6 +22,7 @@ from .handlers import (
     prompt,
     session,
 )
+from .pending_registry import PendingRequestRegistry
 from .session_factory import SessionFactory
 from .state import (
     ClientRuntimeCapabilities,
@@ -120,6 +121,10 @@ class ACPProtocol:
                 "type": "api_key",
             }
         ]
+
+        # Runtime-реестр futures для permission requests — не персистируется,
+        # не входит в SessionState, пересоздаётся при каждом запуске
+        self._pending_registry = PendingRequestRegistry()
 
     _config_specs: dict[str, dict[str, Any]] = {
         "mode": {
@@ -288,6 +293,23 @@ class ACPProtocol:
                     mcp_servers = params.get("mcpServers", [])
                     if mcp_servers and isinstance(mcp_servers, list):
                         await self._initialize_mcp_servers(session_obj, mcp_servers)
+                    
+                    # Обработка orphaned permission requests после перезапуска сервера.
+                    # Если сессия имеет активный turn с permission_request_id, но соответствующий
+                    # Future не зарегистрирован в реестре (сервер перезапускался), то turn
+                    # не может быть продолжен — сбрасываем его.
+                    if session_obj.active_turn and session_obj.active_turn.permission_request_id:
+                        perm_req_id = session_obj.active_turn.permission_request_id
+                        if not self._pending_registry.has(perm_req_id):
+                            logger.warning(
+                                "session_loaded_with_orphaned_permission_request",
+                                session_id=session_id,
+                                permission_request_id=perm_req_id,
+                            )
+                            # Сбросить активный turn — он не может быть продолжен
+                            session_obj.active_turn = None
+                            # Сохранить изменённое состояние
+                            await self._storage.save_session(session_obj)
                         
             return session.session_load(
                 message.id,
