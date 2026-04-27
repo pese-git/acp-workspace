@@ -501,7 +501,10 @@ server.serve()
             remote_addr=remote_addr,
         )
 
-        ws = web.WebSocketResponse()
+        ws = web.WebSocketResponse(
+            max_msg_size=self.config.websocket.max_msg_size,
+            heartbeat=self.config.websocket.heartbeat_interval,
+        )
         await ws.prepare(request)
 
         # Создаем callback для отправки RPC запросов клиенту
@@ -840,7 +843,14 @@ server.serve()
                     )
                     if method_name == "shutdown":
                         break
-                elif message.type in {WSMsgType.ERROR, WSMsgType.CLOSE, WSMsgType.CLOSING}:
+                elif message.type == WSMsgType.ERROR:
+                    conn_logger.warning(
+                        "ws_error",
+                        exception=str(ws.exception()) if ws.exception() else None,
+                        peer=request.remote,
+                    )
+                    break
+                elif message.type in {WSMsgType.CLOSE, WSMsgType.CLOSING}:
                     break
         finally:
             if prompt_request_tasks:

@@ -78,6 +78,22 @@ class AgentConfig(BaseModel):
     )
 
 
+class WebSocketConfig(BaseModel):
+    """Конфигурация WebSocket-соединения.
+
+    Атрибуты:
+        max_msg_size: Максимальный размер одного сообщения в байтах (по умолчанию 4 МБ)
+        heartbeat_interval: Интервал heartbeat-пинга в секундах (по умолчанию 30.0)
+    """
+
+    max_msg_size: int = Field(
+        default_factory=lambda: int(os.getenv("CODELAB_WS_MAX_MSG_SIZE", str(4 * 1024 * 1024))),
+    )
+    heartbeat_interval: float = Field(
+        default_factory=lambda: float(os.getenv("CODELAB_WS_HEARTBEAT_INTERVAL", "30.0")),
+    )
+
+
 class AppConfig(BaseModel):
     """Глобальная конфигурация ACP сервера.
 
@@ -96,6 +112,7 @@ class AppConfig(BaseModel):
 
     llm: LLMConfig = Field(default_factory=LLMConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
+    websocket: WebSocketConfig = Field(default_factory=WebSocketConfig)
 
     @classmethod
     def from_env(cls) -> AppConfig:
