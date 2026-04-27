@@ -8,23 +8,24 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from ...messages import JsonRpcId
+from ...storage import SessionStorage
 from ..state import SessionState
 
 if TYPE_CHECKING:
     from .global_policy_manager import GlobalPolicyManager
 
 
-def find_session_by_permission_request_id(
+async def find_session_by_permission_request_id(
     permission_request_id: JsonRpcId,
-    sessions: dict[str, SessionState],
+    storage: SessionStorage,
 ) -> SessionState | None:
     """Ищет сессию с активным turn, ожидающим ответ по permission-request.
 
     Пример использования:
-        session = find_session_by_permission_request_id("perm_1", sessions)
+        session = await find_session_by_permission_request_id("perm_1", storage)
     """
-
-    for session in sessions.values():
+    sessions, _ = await storage.list_sessions(limit=500)
+    for session in sessions:
         active_turn = session.active_turn
         if active_turn is None:
             continue
@@ -194,9 +195,9 @@ def build_permission_options() -> list[dict[str, Any]]:
     ]
 
 
-def consume_cancelled_permission_response(
+async def consume_cancelled_permission_response(
     request_id: JsonRpcId,
-    sessions: dict[str, SessionState],
+    storage: SessionStorage,
 ) -> bool:
     """Поглощает late-response на ранее отмененный permission-request.
 
@@ -204,21 +205,38 @@ def consume_cancelled_permission_response(
     удален; иначе `False`.
 
     Пример использования:
-        if consume_cancelled_permission_response("perm_1", sessions):
+        if await consume_cancelled_permission_response("perm_1", storage):
             ...
     """
-
-    for session in sessions.values():
+    sessions, _ = await storage.list_sessions(limit=500)
+    for session in sessions:
         if request_id not in session.cancelled_permission_requests:
             continue
         session.cancelled_permission_requests.remove(request_id)
+        await storage.save_session(session)
         return True
     return False
 
 
-def consume_cancelled_client_rpc_response(
+async def find_session_with_cancelled_permission(
     request_id: JsonRpcId,
-    sessions: dict[str, SessionState],
+    storage: SessionStorage,
+) -> SessionState | None:
+    """Ищет сессию с отменённым permission request в tombstones.
+
+    Пример использования:
+        session = await find_session_with_cancelled_permission("perm_1", storage)
+    """
+    sessions, _ = await storage.list_sessions(limit=500)
+    for session in sessions:
+        if request_id in session.cancelled_permission_requests:
+            return session
+    return None
+
+
+async def consume_cancelled_client_rpc_response(
+    request_id: JsonRpcId,
+    storage: SessionStorage,
 ) -> bool:
     """Поглощает late-response на ранее отмененный agent->client RPC.
 
@@ -226,13 +244,14 @@ def consume_cancelled_client_rpc_response(
     удален; иначе `False`.
 
     Пример использования:
-        if consume_cancelled_client_rpc_response("rpc_1", sessions):
+        if await consume_cancelled_client_rpc_response("rpc_1", storage):
             ...
     """
-
-    for session in sessions.values():
+    sessions, _ = await storage.list_sessions(limit=500)
+    for session in sessions:
         if request_id not in session.cancelled_client_rpc_requests:
             continue
         session.cancelled_client_rpc_requests.remove(request_id)
+        await storage.save_session(session)
         return True
     return False

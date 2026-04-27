@@ -13,6 +13,7 @@ import structlog
 
 from ...client_rpc.service import ClientRPCService
 from ...messages import ACPMessage, JsonRpcId
+from ...storage import SessionStorage
 from ...tools.base import ToolRegistry
 from ..state import (
     ActiveTurnState,
@@ -130,10 +131,9 @@ def create_prompt_orchestrator(
 async def session_prompt(
     request_id: JsonRpcId | None,
     params: dict[str, Any],
-    sessions: dict[str, SessionState],
+    storage: SessionStorage,
     config_specs: dict[str, dict[str, Any]],
     agent_orchestrator: AgentOrchestrator | None = None,
-    storage: Any | None = None,
     tool_registry: ToolRegistry | None = None,
     client_rpc_service: ClientRPCService | None = None,
     global_manager: GlobalPolicyManager | None = None,
@@ -154,10 +154,9 @@ async def session_prompt(
     Args:
         request_id: ID запроса
         params: Параметры запроса (sessionId, prompt, ...)
-        sessions: Словарь активных сессий
+        storage: SessionStorage для загрузки и сохранения состояния
         config_specs: Спецификации конфигурационных опций (не используется в orchestrator)
         agent_orchestrator: Оркестратор агента для обработки через LLM (опционально)
-        storage: SessionStorage для сохранения состояния (опционально)
         tool_registry: Реестр инструментов для выполнения (опционально)
         client_rpc_service: Сервис ClientRPC для выполнения инструментов (опционально)
 
@@ -166,7 +165,7 @@ async def session_prompt(
 
     Пример использования:
         outcome = await session_prompt(
-            "req_1", {"sessionId": "sess_1", "prompt": []}, sessions, specs
+            "req_1", {"sessionId": "sess_1", "prompt": []}, storage, specs
         )
     """
 
@@ -183,7 +182,7 @@ async def session_prompt(
             )
         )
 
-    session = sessions.get(session_id)
+    session = await storage.load_session(session_id)
     if session is None:
         return ProtocolOutcome(
             response=ACPMessage.error_response(
@@ -227,7 +226,7 @@ async def session_prompt(
                 request_id=request_id,
                 params=params,
                 session=session,
-                sessions=sessions,
+                storage=storage,
                 agent_orchestrator=agent_orchestrator,
             )
             logger.debug(
@@ -237,18 +236,17 @@ async def session_prompt(
             )
 
             # Сохраняем сессию в storage после обработки оркестратором
-            if storage is not None:
-                try:
-                    await storage.save_session(session)
-                    logger.debug(
-                        "session_saved_after_orchestrator_processing",
-                        session_id=session_id,
-                    )
-                except Exception as e:
-                    logger.error(
-                        "failed_to_save_session_after_orchestrator_processing",
-                        error=str(e),
-                    )
+            try:
+                await storage.save_session(session)
+                logger.debug(
+                    "session_saved_after_orchestrator_processing",
+                    session_id=session_id,
+                )
+            except Exception as e:
+                logger.error(
+                    "failed_to_save_session_after_orchestrator_processing",
+                    error=str(e),
+                )
 
             return outcome
         except Exception as e:
@@ -559,12 +557,11 @@ async def session_prompt(
             session.active_turn.phase = "waiting_tool_completion"
 
         # Сохраняем сессию в storage для персистентности истории даже при deferred completion
-        if storage is not None:
-            try:
-                await storage.save_session(session)
-                logger.debug("session_saved_after_prompt_deferred", session_id=session_id)
-            except Exception as e:
-                logger.error("failed_to_save_session_after_prompt_deferred", error=str(e))
+        try:
+            await storage.save_session(session)
+            logger.debug("session_saved_after_prompt_deferred", session_id=session_id)
+        except Exception as e:
+            logger.error("failed_to_save_session_after_prompt_deferred", error=str(e))
 
         return ProtocolOutcome(response=None, notifications=notifications)
 
@@ -575,20 +572,19 @@ async def session_prompt(
     session.active_turn = None
 
     # Сохраняем сессию в storage для персистентности истории
-    if storage is not None:
-        try:
-            await storage.save_session(session)
-            logger.debug("session_saved_after_prompt", session_id=session_id)
-        except Exception as e:
-            logger.error("failed_to_save_session_after_prompt", error=str(e))
+    try:
+        await storage.save_session(session)
+        logger.debug("session_saved_after_prompt", session_id=session_id)
+    except Exception as e:
+        logger.error("failed_to_save_session_after_prompt", error=str(e))
 
     return outcome
 
 
-def session_cancel(
+async def session_cancel(
     request_id: JsonRpcId | None,
     params: dict[str, Any],
-    sessions: dict[str, SessionState],
+    storage: SessionStorage,
 ) -> ProtocolOutcome:
     """Отменяет текущий turn сессии через PromptOrchestrator.
 
@@ -603,20 +599,19 @@ def session_cancel(
     Args:
         request_id: ID запроса (может быть None для notifications)
         params: Параметры запроса (должны содержать sessionId)
-        sessions: Словарь активных сессий
+        storage: SessionStorage для загрузки и сохранения сессии
 
     Returns:
         ProtocolOutcome с notifications об отмене
 
     Пример использования:
-        outcome = session_cancel(None, {"sessionId": "sess_1"}, sessions)
+        outcome = await session_cancel(None, {"sessionId": "sess_1"}, storage)
     """
 
     session_id = params.get("sessionId")
 
-    # Проверить, что sessionId передан и сессия существует
-    if not isinstance(session_id, str) or session_id not in sessions:
-        # Если sessionId невалиден или сессия не найдена, вернуть пустой результат
+    # Проверить, что sessionId передан
+    if not isinstance(session_id, str):
         if request_id is None:
             return ProtocolOutcome(response=None, notifications=[])
         return ProtocolOutcome(
@@ -624,7 +619,16 @@ def session_cancel(
             notifications=[],
         )
 
-    session = sessions[session_id]
+    session = await storage.load_session(session_id)
+    if session is None:
+        # Сессия не найдена — возвращаем пустой результат
+        if request_id is None:
+            return ProtocolOutcome(response=None, notifications=[])
+        return ProtocolOutcome(
+            response=ACPMessage.response(request_id, None),
+            notifications=[],
+        )
+
     active_turn_before_cancel = session.active_turn
     deferred_prompt_request_id: JsonRpcId | None = None
     if active_turn_before_cancel is not None:
@@ -637,7 +641,7 @@ def session_cancel(
             request_id=request_id,
             params=params,
             session=session,
-            sessions=sessions,
+            sessions={session_id: session},
         )
         logger.debug(
             "cancel handled via orchestrator",
@@ -658,6 +662,9 @@ def session_cancel(
         cancel_response = outcome.response
         if request_id is not None and cancel_response is None:
             cancel_response = ACPMessage.response(request_id, None)
+
+        # Сохраняем изменённое состояние сессии
+        await storage.save_session(session)
 
         return ProtocolOutcome(
             response=cancel_response,
@@ -684,8 +691,7 @@ def session_cancel(
 
 
 def complete_active_turn(
-    session_id: str,
-    sessions: dict[str, SessionState],
+    session: SessionState,
     *,
     stop_reason: str = "end_turn",
 ) -> ACPMessage | None:
@@ -694,12 +700,8 @@ def complete_active_turn(
     Используется транспортом WS для отложенного ответа на `session/prompt`.
 
     Пример использования:
-        response = complete_active_turn("sess_1", sessions, stop_reason="end_turn")
+        response = complete_active_turn(session, stop_reason="end_turn")
     """
-
-    session = sessions.get(session_id)
-    if session is None:
-        return None
     return finalize_active_turn(
         session=session,
         stop_reason=normalize_stop_reason(stop_reason),
@@ -707,20 +709,17 @@ def complete_active_turn(
 
 
 def should_auto_complete_active_turn(
-    session_id: str,
-    sessions: dict[str, SessionState],
+    session: SessionState,
 ) -> bool:
     """Возвращает `True`, если active turn можно безопасно автозавершить.
 
     Если turn ожидает permission-response, автозавершение запрещено.
 
     Пример использования:
-        if should_auto_complete_active_turn("sess_1", sessions):
+        if should_auto_complete_active_turn(session):
             ...
     """
-
-    session = sessions.get(session_id)
-    if session is None or session.active_turn is None:
+    if session.active_turn is None:
         return False
     return session.active_turn.phase == "waiting_tool_completion"
 
@@ -1569,17 +1568,17 @@ def finalize_active_turn(session: SessionState, *, stop_reason: str) -> ACPMessa
     )
 
 
-def find_session_by_pending_client_request_id(
+async def find_session_by_pending_client_request_id(
     request_id: JsonRpcId,
-    sessions: dict[str, SessionState],
+    storage: SessionStorage,
 ) -> SessionState | None:
     """Ищет сессию по id ожидаемого agent->client запроса.
 
     Пример использования:
-        session = find_session_by_pending_client_request_id("req_1", sessions)
+        session = await find_session_by_pending_client_request_id("req_1", storage)
     """
-
-    for session in sessions.values():
+    sessions, _ = await storage.list_sessions(limit=500)
+    for session in sessions:
         active_turn = session.active_turn
         if active_turn is None or active_turn.pending_client_request is None:
             continue
@@ -1594,7 +1593,6 @@ def resolve_pending_client_rpc_response_impl(
     request_id: JsonRpcId,
     result: Any,
     error: dict[str, Any] | None,
-    sessions: dict[str, SessionState],
 ) -> ProtocolOutcome | None:
     """Реализация обработки response на ожидаемый agent->client fs/* request.
 
@@ -1604,7 +1602,6 @@ def resolve_pending_client_rpc_response_impl(
             request_id="req_1",
             result={"content": "ok"},
             error=None,
-            sessions=sessions,
         )
     """
 
@@ -2046,7 +2043,6 @@ def resolve_permission_response_impl(
     session: SessionState,
     permission_request_id: JsonRpcId,
     result: Any,
-    sessions: dict[str, SessionState],
 ) -> ProtocolOutcome | None:
     """Реализация применения решения по permission-request к активному prompt-turn.
 
@@ -2055,7 +2051,6 @@ def resolve_permission_response_impl(
             session=session,
             permission_request_id="perm_1",
             result={"outcome": {"outcome": "selected", "optionId": "allow_once"}},
-            sessions=sessions,
         )
     """
 

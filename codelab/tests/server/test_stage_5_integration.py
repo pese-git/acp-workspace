@@ -18,6 +18,7 @@ from codelab.server.protocol.state import (
     ProtocolOutcome,
     SessionState,
 )
+from codelab.server.storage import InMemoryStorage
 
 
 class TestSessionPromptValidationStage5:
@@ -136,7 +137,7 @@ class TestSessionCancelStage5:
             session_id="sess_1",
             cwd="/tmp",
             mcp_servers=[],
-            config_values={"mode": "ask"},
+            config_values={},
             permission_policy={},
             tool_calls={},
             history=[],
@@ -148,38 +149,48 @@ class TestSessionCancelStage5:
         )
         return {"sess_1": session}
 
-    def test_session_cancel_with_active_turn(self, sessions: dict[str, SessionState]) -> None:
+    @pytest.fixture
+    def storage(self, sessions: dict[str, SessionState]) -> InMemoryStorage:
+        """Создает storage с тестовой сессией."""
+        from codelab.server.storage import InMemoryStorage
+        storage = InMemoryStorage()
+        for session in sessions.values():
+            import asyncio
+            asyncio.get_event_loop().run_until_complete(storage.save_session(session))
+        return storage
+
+    async def test_session_cancel_with_active_turn(self, storage: InMemoryStorage) -> None:
         """Отменяет активный turn через PromptOrchestrator."""
         # Arrange
         request_id: JsonRpcId | None = "cancel_1"
         params = {"sessionId": "sess_1"}
 
         # Act
-        outcome = session_cancel(request_id, params, sessions)
+        outcome = await session_cancel(request_id, params, storage)
 
         # Assert
         assert outcome is not None
         assert isinstance(outcome, ProtocolOutcome)
         # Проверяем, что turn был завершен
-        session = sessions["sess_1"]
+        session = await storage.load_session("sess_1")
         assert session.active_turn is None
 
-    def test_session_cancel_as_notification(self, sessions: dict[str, SessionState]) -> None:
+    async def test_session_cancel_as_notification(self, storage: InMemoryStorage) -> None:
         """Обрабатывает cancel как notification (без request_id)."""
         # Arrange
         request_id: JsonRpcId | None = None
         params = {"sessionId": "sess_1"}
 
         # Act
-        outcome = session_cancel(request_id, params, sessions)
+        outcome = await session_cancel(request_id, params, storage)
 
         # Assert
         assert outcome is not None
         assert outcome.response is None  # Notifications не имеют response
-        session = sessions["sess_1"]
+        session = await storage.load_session("sess_1")
         assert session.active_turn is None
 
-    def test_session_cancel_no_active_turn(self) -> None:
+    async def test_session_cancel_no_active_turn(self) -> None:
         """Обрабатывает cancel при отсутствии активного turn."""
         # Arrange
         session = SessionState(
@@ -193,12 +204,14 @@ class TestSessionCancelStage5:
             latest_plan=[],
             active_turn=None,
         )
-        sessions = {"sess_1": session}
+        from codelab.server.storage import InMemoryStorage
+        storage = InMemoryStorage()
+        await storage.save_session(session)
         request_id: JsonRpcId | None = "cancel_1"
         params = {"sessionId": "sess_1"}
 
         # Act
-        outcome = session_cancel(request_id, params, sessions)
+        outcome = await session_cancel(request_id, params, storage)
 
         # Assert
         assert outcome is not None
@@ -207,15 +220,16 @@ class TestSessionCancelStage5:
         # We just verify the structure is correct
         assert outcome.notifications == [] or outcome.notifications is not None
 
-    def test_session_cancel_invalid_session_id(self) -> None:
+    async def test_session_cancel_invalid_session_id(self) -> None:
         """Обрабатывает cancel с невалидным sessionId."""
         # Arrange
-        sessions: dict[str, SessionState] = {}
+        from codelab.server.storage import InMemoryStorage
+        storage = InMemoryStorage()
         request_id: JsonRpcId | None = "cancel_1"
         params = {"sessionId": "nonexistent"}
 
         # Act
-        outcome = session_cancel(request_id, params, sessions)
+        outcome = await session_cancel(request_id, params, storage)
 
         # Assert
         assert outcome is not None
@@ -223,7 +237,7 @@ class TestSessionCancelStage5:
         # Should return empty or error response
         assert outcome.response is not None
 
-    def test_session_cancel_no_session_id(self) -> None:
+    async def test_session_cancel_no_session_id(self) -> None:
         """Обрабатывает cancel без sessionId в params."""
         # Arrange
         sessions: dict[str, SessionState] = {}
@@ -231,7 +245,7 @@ class TestSessionCancelStage5:
         params: dict[str, Any] = {}  # Missing sessionId
 
         # Act
-        outcome = session_cancel(request_id, params, sessions)
+        outcome = await session_cancel(request_id, params, sessions)
 
         # Assert
         assert outcome is not None
@@ -281,7 +295,7 @@ class TestSessionPromptIntegrationStage5:
             }
         }
 
-    def test_session_prompt_invalid_session_id_type(
+    async def test_session_prompt_invalid_session_id_type(
         self, config_specs: dict[str, dict[str, Any]]
     ) -> None:
         """Возвращает error при неправильном типе sessionId."""
@@ -296,7 +310,7 @@ class TestSessionPromptIntegrationStage5:
         session_id = params.get("sessionId")
         assert not isinstance(session_id, str)
 
-    def test_session_prompt_missing_session_id(
+    async def test_session_prompt_missing_session_id(
         self, config_specs: dict[str, dict[str, Any]]
     ) -> None:
         """Возвращает error при отсутствии sessionId."""
@@ -313,7 +327,7 @@ class TestSessionPromptIntegrationStage5:
         assert session_id is None
         assert not isinstance(session_id, str)
 
-    def test_session_prompt_invalid_prompt_type(
+    async def test_session_prompt_invalid_prompt_type(
         self, config_specs: dict[str, dict[str, Any]]
     ) -> None:
         """Возвращает error при неправильном типе prompt."""
@@ -329,7 +343,7 @@ class TestSessionPromptIntegrationStage5:
         # Assert
         assert not isinstance(prompt, list)
 
-    def test_session_prompt_session_not_found(
+    async def test_session_prompt_session_not_found(
         self, config_specs: dict[str, dict[str, Any]]
     ) -> None:
         """Возвращает error при отсутствии сессии."""
@@ -346,7 +360,7 @@ class TestSessionPromptIntegrationStage5:
         # Assert
         assert session is None
 
-    def test_session_prompt_empty_prompt_valid(self) -> None:
+    async def test_session_prompt_empty_prompt_valid(self) -> None:
         """Пустой prompt должен быть валидным."""
         # Arrange
         prompt: list[Any] = []
@@ -452,7 +466,8 @@ class TestSessionPromptWithOrchestratorIntegration:
             mcp_servers=[],
             config_values={"mode": "ask"},
         )
-        sessions = {"sess_1": session}
+        storage = InMemoryStorage()
+        await storage.save_session(session)
         config_specs = {
             "mode": {
                 "description": "Mode",
@@ -469,7 +484,7 @@ class TestSessionPromptWithOrchestratorIntegration:
 
         # Act
         outcome = await session_prompt(
-            "req_1", params, sessions, config_specs, agent_orchestrator=None
+            "req_1", params, storage, config_specs, agent_orchestrator=None
         )
 
         # Assert
@@ -489,7 +504,8 @@ class TestSessionPromptWithOrchestratorIntegration:
             mcp_servers=[],
             config_values={"mode": "ask"},
         )
-        sessions = {"sess_1": session}
+        storage = InMemoryStorage()
+        await storage.save_session(session)
         config_specs = {
             "mode": {
                 "description": "Mode",
@@ -506,7 +522,7 @@ class TestSessionPromptWithOrchestratorIntegration:
 
         # Act
         outcome = await session_prompt(
-            "req_1", params, sessions, config_specs, agent_orchestrator=None
+            "req_1", params, storage, config_specs, agent_orchestrator=None
         )
 
         # Assert - проверяем, что были созданы notifications
@@ -528,7 +544,8 @@ class TestSessionPromptWithOrchestratorIntegration:
             cwd="/tmp",
             mcp_servers=[],
         )
-        sessions = {"sess_1": session}
+        storage = InMemoryStorage()
+        await storage.save_session(session)
         config_specs = {}
         params = {
             "sessionId": "sess_1",
@@ -537,7 +554,7 @@ class TestSessionPromptWithOrchestratorIntegration:
 
         # Act
         outcome = await session_prompt(
-            "req_1", params, sessions, config_specs, agent_orchestrator=None
+            "req_1", params, storage, config_specs, agent_orchestrator=None
         )
 
         # Assert
@@ -551,12 +568,7 @@ class TestSessionPromptWithOrchestratorIntegration:
         # Arrange
         from codelab.server.protocol.handlers.prompt import session_prompt
 
-        session = SessionState(
-            session_id="sess_1",
-            cwd="/tmp",
-            mcp_servers=[],
-        )
-        sessions = {"sess_1": session}
+        storage = InMemoryStorage()
         config_specs = {}
         params = {
             "sessionId": "nonexistent",
@@ -565,7 +577,7 @@ class TestSessionPromptWithOrchestratorIntegration:
 
         # Act
         outcome = await session_prompt(
-            "req_1", params, sessions, config_specs, agent_orchestrator=None
+            "req_1", params, storage, config_specs, agent_orchestrator=None
         )
 
         # Assert
@@ -586,7 +598,8 @@ class TestSessionPromptWithOrchestratorIntegration:
             config_values={"mode": "ask"},
             title=None,
         )
-        sessions = {"sess_1": session}
+        storage = InMemoryStorage()
+        await storage.save_session(session)
         config_specs = {
             "mode": {
                 "description": "Mode",
@@ -603,7 +616,7 @@ class TestSessionPromptWithOrchestratorIntegration:
 
         # Act
         outcome = await session_prompt(
-            "req_1", params, sessions, config_specs, agent_orchestrator=None
+            "req_1", params, storage, config_specs, agent_orchestrator=None
         )
 
         # Assert
