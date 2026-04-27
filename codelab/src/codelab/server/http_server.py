@@ -12,6 +12,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import ipaddress
+import os
+import re
 import subprocess
 import sys
 import time
@@ -120,59 +123,76 @@ class ACPHttpServer:
             enable_web=enable_web,
         )
 
+    def _validate_host(self, host: str) -> str:
+        """Проверяет, что host — корректный IP или hostname.
+
+        Args:
+            host: Строка хоста для валидации
+
+        Returns:
+            Валидированный хост
+
+        Raises:
+            ValueError: Если хост некорректный
+        """
+        # Попытаться распарсить как IP
+        try:
+            ipaddress.ip_address(host)
+            return host
+        except ValueError:
+            pass
+        # Проверить как hostname (только буквы, цифры, дефисы, точки)
+        if re.match(r'^[a-zA-Z0-9]([a-zA-Z0-9\-\.]{0,253}[a-zA-Z0-9])?$', host):
+            return host
+        raise ValueError(f"Invalid host: {host!r}")
+
     def _start_web_ui_subprocess(self) -> bool:
         """Запускает textual-serve как subprocess для локального Web UI.
-        
-        textual-serve запускает локальный веб-сервер на указанном порту.
-        Web UI доступен по адресу http://host:web_ui_port/
-        
+
+        Параметры передаются через переменные окружения — никакой интерполяции в код.
+
         Returns:
             True если subprocess успешно запущен, False иначе.
         """
         from .web_app import is_web_ui_available
-        
+
         if not is_web_ui_available():
-            logger.debug("web ui subprocess not started - textual-serve not available")
+            logger.debug("web_ui_not_started_textual_serve_unavailable")
             return False
-        
+
         try:
-            # Порт для Web UI = основной порт + 1000 (избегаем заблокированные порты типа 6666-6669)
+            # Валидируем хост перед передачей в subprocess
+            validated_host = self._validate_host(str(self.host))
             web_ui_port = self.port + 1000
-            
-            # Python скрипт для запуска textual-serve Server
-            serve_script = f'''
-from textual_serve.server import Server
-server = Server(
-    command="{sys.executable} -m codelab.client.tui --host {self.host} --port {self.port}",
-    host="{self.host}",
-    port={web_ui_port},
-    title="CodeLab TUI",
-)
-server.serve()
-'''
-            
-            # Запускаем subprocess
+
+            # Параметры передаются через env, не через f-string в код
+            child_env = {
+                **os.environ,
+                "CODELAB_WS_HOST": validated_host,
+                "CODELAB_WS_PORT": str(self.port),
+                "CODELAB_WEB_UI_HOST": validated_host,
+                "CODELAB_WEB_UI_PORT": str(web_ui_port),
+            }
+
             self._web_ui_process = subprocess.Popen(
-                [sys.executable, "-c", serve_script],
+                [sys.executable, "-m", "codelab.client.tui.serve_entry"],
+                env=child_env,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
             )
-            
-            self._web_ui_url = f"http://{self.host}:{web_ui_port}/"
-            
+
+            self._web_ui_url = f"http://{validated_host}:{web_ui_port}/"
+
             logger.info(
-                "web ui subprocess started",
+                "web_ui_subprocess_started",
                 pid=self._web_ui_process.pid,
                 url=self._web_ui_url,
             )
             return True
-            
+
         except Exception as e:
-            logger.warning(
-                "failed to start web ui subprocess",
-                error=str(e),
-            )
+            logger.warning("failed_to_start_web_ui_subprocess", error=str(e))
             return False
     
     def _stop_web_ui_subprocess(self) -> None:
