@@ -23,7 +23,6 @@
 | [1.3 F-string инъекция в subprocess](phase-1-security/1.3-subprocess-fstring-injection.md) | Генерация Python-кода через f-string | 2 ч |
 | [1.4 Запрос разрешения в FileSystemHandler](phase-1-security/1.4-permission-request-file-handler.md) | Запись файлов без подтверждения пользователя | 4 ч |
 | [1.5 asyncio.Future вне SessionState](phase-1-security/1.5-asyncio-future-out-of-session-state.md) | Несериализуемый объект в персистируемой структуре | 5 ч |
-| [1.6 Shared ACPProtocol в TCP-сервере](phase-1-security/1.6-legacy-tcp-server-shared-protocol.md) | Race condition между клиентами | 2 ч |
 | [1.7 Лимит размера WebSocket сообщений](phase-1-security/1.7-websocket-message-size-limit.md) | Нет защиты от oversized сообщений | 1 ч |
 
 ---
@@ -64,9 +63,9 @@
 | Фаза | Задач | Оценка |
 |---|---|---|
 | Фаза 0 | 2 | ~3 ч |
-| Фаза 1 | 7 | ~2 недели |
+| Фаза 1 | 6 | ~2 недели |
 | Фаза 2 | 8 | ~4 недели |
 | Фаза 3 | 9 | ~2 недели |
-| **Всего** | **26** | **~8 недель** (1 разработчик) / **~5 недель** (2 разработчика) |
+| **Всего** | **25** | **~8 недель** (1 разработчик) / **~5 недель** (2 разработчика) |
 
 Полное ревью: [CODE_REVIEW.md](../CODE_REVIEW.md)
