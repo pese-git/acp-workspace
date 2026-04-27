@@ -495,7 +495,7 @@ class ACPTransportService(TransportService):
         on_fs_read: Callable[[str], str] | None = None,
         on_fs_write: Callable[[str, str], str | None] | None = None,
         on_terminal_create: Callable[[str], str] | None = None,
-        on_terminal_output: Callable[[str], str] | None = None,
+        on_terminal_output: Callable[[str], dict[str, Any]] | None = None,
         on_terminal_wait: Callable[[str], int | tuple[int | None, str | None]] | None = None,
         on_terminal_release: Callable[[str], None] | None = None,
         on_terminal_kill: Callable[[str], bool] | None = None,
@@ -866,7 +866,7 @@ class ACPTransportService(TransportService):
         on_fs_read: Callable[[str], str] | None,
         on_fs_write: Callable[[str, str], str | None] | None,
         on_terminal_create: Callable[[str], str] | None,
-        on_terminal_output: Callable[[str], str] | None,
+        on_terminal_output: Callable[[str], dict[str, Any]] | None,
         on_terminal_wait: Callable[[str], int | tuple[int | None, str | None]] | None,
         on_terminal_release: Callable[[str], None] | None,
         on_terminal_kill: Callable[[str], bool] | None,
@@ -1006,12 +1006,18 @@ class ACPTransportService(TransportService):
                 rpc_method=rpc_method,
                 result_keys=["terminalId"] if terminal_id else [],
             )
-            await self.send(
-                ACPMessage.response(
-                    notification.id,
-                    {"terminalId": terminal_id} if terminal_id else {},
-                ).to_dict()
-            )
+            if terminal_id is None:
+                await self.send(
+                    ACPMessage.error_response(
+                        notification.id,
+                        code=-32000,
+                        message="terminal/create callback not configured",
+                    ).to_dict()
+                )
+            else:
+                await self.send(
+                    ACPMessage.response(notification.id, {"terminalId": terminal_id}).to_dict()
+                )
             self._logger.debug(
                 "tool_lifecycle_response_sent",
                 rpc_id=notification.id,
@@ -1028,7 +1034,7 @@ class ACPTransportService(TransportService):
                 terminal_id=terminal_id,
                 has_callback=on_terminal_output is not None,
             )
-            output = (
+            output_data: dict[str, Any] | None = (
                 on_terminal_output(terminal_id)
                 if on_terminal_output is not None and isinstance(terminal_id, str)
                 else None
@@ -1037,17 +1043,30 @@ class ACPTransportService(TransportService):
                 "tool_lifecycle_callback_done",
                 rpc_id=notification.id,
                 rpc_method=rpc_method,
-                output_size=len(output) if isinstance(output, str) else 0,
+                output_size=len(output_data.get("output", "")) if output_data else 0,
             )
-            self._logger.debug(
-                "tool_lifecycle_response_sending",
-                rpc_id=notification.id,
-                rpc_method=rpc_method,
-                result_keys=["output"] if output else [],
-            )
-            await self.send(
-                ACPMessage.response(notification.id, {"output": output} if output else {}).to_dict()
-            )
+            if output_data is None:
+                self._logger.debug(
+                    "tool_lifecycle_response_sending",
+                    rpc_id=notification.id,
+                    rpc_method=rpc_method,
+                    result_keys=[],
+                )
+                await self.send(
+                    ACPMessage.error_response(
+                        notification.id,
+                        code=-32000,
+                        message="terminal/output callback not configured",
+                    ).to_dict()
+                )
+            else:
+                self._logger.debug(
+                    "tool_lifecycle_response_sending",
+                    rpc_id=notification.id,
+                    rpc_method=rpc_method,
+                    result_keys=list(output_data.keys()),
+                )
+                await self.send(ACPMessage.response(notification.id, output_data).to_dict())
             self._logger.debug(
                 "tool_lifecycle_response_sent",
                 rpc_id=notification.id,
