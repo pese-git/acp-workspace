@@ -48,6 +48,9 @@ if TYPE_CHECKING:
 # Используем structlog для структурированного логирования
 logger = structlog.get_logger()
 
+# Максимальная длина текста одного промпт-блока (символов)
+MAX_PROMPT_TEXT_LENGTH = 100_000
+
 
 def create_prompt_orchestrator(
     tool_registry: ToolRegistry | None = None,
@@ -749,6 +752,16 @@ def validate_prompt_content(
                     request_id,
                     code=-32602,
                     message="Invalid params: text content requires text string",
+                )
+            text_length = len(block["text"])
+            if text_length > MAX_PROMPT_TEXT_LENGTH:
+                return ACPMessage.error_response(
+                    request_id,
+                    code=-32602,
+                    message=(
+                        f"Invalid params: prompt text too long: {text_length} chars "
+                        f"(max {MAX_PROMPT_TEXT_LENGTH})"
+                    ),
                 )
             continue
         if block_type == "resource_link":
