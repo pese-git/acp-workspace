@@ -144,11 +144,6 @@ class FileSystemHandler:
             content_size=len(content),
         )
 
-        # TODO: Запросить разрешение у пользователя (Фаза 5)
-        # permission = await self._request_permission(session_id, path)
-        # if not permission:
-        #     raise PermissionError(f"Write permission denied for {path}")
-
         try:
             success = await self.executor.write_text_file(path, content)
             
