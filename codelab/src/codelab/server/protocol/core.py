@@ -356,7 +356,7 @@ class ACPProtocol:
 
         if method == "session/request_permission_response":
             if message.id is None:
-                return ProtocolOutcome(ACPMessage.error_response(
+                return ProtocolOutcome(response=ACPMessage.error_response(
                     None, code=-32600, message="Invalid Request: id is required"
                 ))
             return await self._handle_permission_response(
