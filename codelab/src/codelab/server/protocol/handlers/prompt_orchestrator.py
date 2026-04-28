@@ -1,7 +1,7 @@
 """Главный оркестратор обработки prompt-turn.
 
 Интегрирует все компоненты Этапа 2 и Этапа 3 для оркестрации
-обработки prompt-turn в системе ACP.
+обработки prompt-turn в системе ACP через Pipeline Pattern.
 Включает регистрацию и выполнение инструментов через tool registry.
 """
 
@@ -20,6 +20,14 @@ from ..content.validator import ContentValidator
 from ..state import LLMLoopResult, ProtocolOutcome, SessionState, ToolResult
 from .client_rpc_handler import ClientRPCHandler
 from .permission_manager import PermissionManager
+from .pipeline import (
+    PlanBuildingStage,
+    PromptContext,
+    PromptPipeline,
+    SlashCommandStage,
+    TurnLifecycleStage,
+    ValidationStage,
+)
 from .plan_builder import PlanBuilder
 from .replay_manager import ReplayManager
 from .slash_commands import CommandRegistry, SlashCommandRouter
@@ -41,7 +49,7 @@ logger = structlog.get_logger()
 
 
 class PromptOrchestrator:
-    """Главный оркестратор обработки prompt-turn.
+    """Главный оркестратор обработки prompt-turn через Pipeline.
 
     Интегрирует все компоненты для оркестрации:
     - StateManager: управление состоянием сессии
@@ -50,6 +58,13 @@ class PromptOrchestrator:
     - ToolCallHandler (Этап 2): управление tool calls
     - PermissionManager (Этап 2): управление разрешениями
     - ClientRPCHandler (Этап 2): управление client RPC запросами
+
+    Использует Pipeline Pattern для разделения ответственности:
+    - ValidationStage: валидация входных данных
+    - SlashCommandStage: обработка slash-команд
+    - PlanBuildingStage: построение планов
+    - TurnLifecycleStage: управление жизненным циклом turn
+    - LLMLoopStage: основной цикл LLM
     """
 
     def __init__(
@@ -156,6 +171,15 @@ class PromptOrchestrator:
             "Slash commands initialized",
             commands=self._command_registry.registered_commands,
         )
+
+        # Создание pipeline обработки prompt-turn
+        self._pipeline = PromptPipeline(stages=[
+            ValidationStage(state_manager),
+            SlashCommandStage(self._slash_router),
+            PlanBuildingStage(plan_builder),
+            TurnLifecycleStage(turn_lifecycle_manager, action="open"),
+            TurnLifecycleStage(turn_lifecycle_manager, action="close"),
+        ])
 
     def set_global_policy_manager(
         self, manager: GlobalPolicyManager | None
@@ -1756,6 +1780,112 @@ class PromptOrchestrator:
             notifications=notifications,
             stop_reason="end_turn",
         )
+
+    async def handle_prompt_via_pipeline(
+        self,
+        request_id: JsonRpcId | None,
+        params: dict[str, Any],
+        session: SessionState,
+        sessions: dict[str, SessionState],
+        agent_orchestrator: AgentOrchestrator,
+    ) -> ProtocolOutcome:
+        """Обрабатывает session/prompt request через Pipeline.
+
+        Новый метод обработки промпта использующий Pipeline Pattern.
+        Каждая стадия pipeline отвечает за свою часть работы:
+        1. ValidationStage — валидация входных данных
+        2. SlashCommandStage — обработка slash-команд
+        3. PlanBuildingStage — построение планов
+        4. TurnLifecycleStage (open) — открытие turn
+        5. TurnLifecycleStage (close) — закрытие turn
+
+        Args:
+            request_id: ID входящего request
+            params: Параметры (должны содержать prompt array)
+            session: Состояние сессии
+            sessions: Словарь всех сессий
+            agent_orchestrator: LLM-агент для обработки
+
+        Returns:
+            ProtocolOutcome с notifications и response
+        """
+        session_id = session.session_id
+        prompt = params.get("prompt", [])
+
+        # Извлечение текста из prompt blocks
+        text_preview = _extract_text_preview(prompt)
+        prompt_text = _extract_full_text(prompt)
+
+        # Обновление состояния сессии (подготовка контекста)
+        self.state_manager.update_session_title(session, text_preview)
+        self.state_manager.add_user_message(session, prompt)
+
+        # Сохранить каждый user_message_chunk в events_history для полного replay
+        for block in prompt:
+            self.state_manager.add_event(
+                session,
+                {
+                    "type": "session_update",
+                    "update": {"sessionUpdate": "user_message_chunk", "content": block},
+                },
+            )
+
+        self.state_manager.update_session_timestamp(session)
+
+        # Создать контекст для pipeline
+        context = PromptContext(
+            session_id=session_id,
+            session=session,
+            request_id=request_id,
+            params=params,
+            raw_text=prompt_text,
+        )
+
+        # Добавить ACK notification в контекст
+        context.notifications.append(_build_ack_notification(session_id, text_preview))
+
+        # Запустить pipeline
+        result = await self._pipeline.run(context)
+
+        # Построить ответ
+        if result.error_response is not None:
+            return ProtocolOutcome(
+                response=result.error_response,
+                notifications=result.notifications,
+            )
+
+        # Отправить session info update
+        summary = self.state_manager.get_session_summary(session)
+        result.notifications.append(
+            _build_session_info_notification(session_id, summary)
+        )
+
+        # Добавляем session_info событие в events_history
+        self.state_manager.add_event(
+            session,
+            {
+                "type": "session_update",
+                "update": {
+                    "sessionUpdate": "session_info",
+                    "title": summary.get("title"),
+                    "updated_at": summary.get("updated_at"),
+                },
+            },
+        )
+
+        logger.debug(
+            "prompt handling completed via pipeline",
+            session_id=session_id,
+            stop_reason=result.stop_reason,
+            notifications_count=len(result.notifications),
+        )
+
+        response = (
+            ACPMessage.response(request_id, {"stopReason": result.stop_reason})
+            if request_id is not None
+            else None
+        )
+        return ProtocolOutcome(response=response, notifications=result.notifications)
 
 
 def _extract_text_preview(prompt: list[dict[str, Any]]) -> str:
