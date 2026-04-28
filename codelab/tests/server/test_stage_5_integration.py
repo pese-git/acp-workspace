@@ -6,6 +6,7 @@
 from typing import Any
 
 import pytest
+import pytest_asyncio
 
 from codelab.server.messages import ACPMessage, JsonRpcId
 from codelab.server.protocol.handlers.prompt import (
@@ -149,16 +150,16 @@ class TestSessionCancelStage5:
         )
         return {"sess_1": session}
 
-    @pytest.fixture
-    def storage(self, sessions: dict[str, SessionState]) -> InMemoryStorage:
+    @pytest_asyncio.fixture
+    async def storage(self, sessions: dict[str, SessionState]) -> InMemoryStorage:
         """Создает storage с тестовой сессией."""
         from codelab.server.storage import InMemoryStorage
         storage = InMemoryStorage()
         for session in sessions.values():
-            import asyncio
-            asyncio.get_event_loop().run_until_complete(storage.save_session(session))
+            await storage.save_session(session)
         return storage
 
+    @pytest.mark.asyncio
     async def test_session_cancel_with_active_turn(self, storage: InMemoryStorage) -> None:
         """Отменяет активный turn через PromptOrchestrator."""
         # Arrange
@@ -175,6 +176,7 @@ class TestSessionCancelStage5:
         session = await storage.load_session("sess_1")
         assert session.active_turn is None
 
+    @pytest.mark.asyncio
     async def test_session_cancel_as_notification(self, storage: InMemoryStorage) -> None:
         """Обрабатывает cancel как notification (без request_id)."""
         # Arrange
