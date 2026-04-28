@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from ..client_rpc.service import ClientRPCService
     from ..tools.base import ToolRegistry
     from .handlers.global_policy_manager import GlobalPolicyManager
+    from .handlers.prompt_orchestrator import PromptOrchestrator
 
 
 logger = structlog.get_logger()
@@ -61,6 +62,7 @@ class ACPProtocol:
         agent_orchestrator: AgentOrchestrator | None = None,
         client_rpc_service: ClientRPCService | None = None,
         tool_registry: ToolRegistry | None = None,
+        prompt_orchestrator: PromptOrchestrator | None = None,
     ) -> None:
         """Инициализирует протокол и хранилище сессий.
 
@@ -71,6 +73,7 @@ class ACPProtocol:
             agent_orchestrator: Оркестратор LLM-агента для обработки prompts (опционально).
             client_rpc_service: Сервис ClientRPC для выполнения инструментов (опционально).
             tool_registry: Реестр инструментов для регистрации и выполнения tools (опционально).
+            prompt_orchestrator: Оркестратор обработки prompt-turn (опционально, создаётся лениво).
 
         Пример использования:
             protocol = ACPProtocol()
@@ -103,6 +106,10 @@ class ACPProtocol:
         # GlobalPolicyManager для fallback chain в permission checks
         self._global_policy_manager: GlobalPolicyManager | None = None
 
+        # PromptOrchestrator для обработки prompt-turns (stateless, per-connection)
+        # Создаётся лениво при первом обращении или инжектируется извне (для тестов)
+        self._prompt_orchestrator: PromptOrchestrator | None = prompt_orchestrator
+
         # Последние capabilities, согласованные через initialize.
         # Для in-memory demo-сервера это достаточно; по мере роста можно
         # расширить до connection-scoped хранилища.
@@ -125,6 +132,28 @@ class ACPProtocol:
         # Runtime-реестр futures для permission requests — не персистируется,
         # не входит в SessionState, пересоздаётся при каждом запуске
         self._pending_registry = PendingRequestRegistry()
+
+    def _get_prompt_orchestrator(self) -> PromptOrchestrator | None:
+        """Получить или создать PromptOrchestrator.
+
+        PromptOrchestrator — stateless агрегатор зависимостей.
+        Создаётся один раз на экземпляр ACPProtocol (per-connection scope).
+
+        Returns:
+            PromptOrchestrator или None, если tool_registry не настроен.
+        """
+        if self._prompt_orchestrator is not None:
+            return self._prompt_orchestrator
+
+        if self._tool_registry is None:
+            return None  # Агент не настроен
+
+        self._prompt_orchestrator = prompt.create_prompt_orchestrator(
+            tool_registry=self._tool_registry,
+            client_rpc_service=self._client_rpc_service,
+            global_policy_manager=self._global_policy_manager,
+        )
+        return self._prompt_orchestrator
 
     _config_specs: dict[str, dict[str, Any]] = {
         "mode": {
@@ -606,6 +635,8 @@ class ACPProtocol:
         """Инициализировать GlobalPolicyManager для fallback на global policies.
 
         Graceful degradation: если инициализация не удалась, продолжаем без global policies.
+        После инициализации сбрасывает кэш PromptOrchestrator для пересоздания
+        с актуальным GlobalPolicyManager.
 
         Пример использования:
             await protocol.initialize_global_policy_manager()
@@ -615,6 +646,9 @@ class ACPProtocol:
 
             self._global_policy_manager = await GlobalPolicyManager.get_instance()
             await self._global_policy_manager.initialize()
+
+            # Сбросить кэш оркестратора, чтобы он пересоздался с новым policy manager
+            self._prompt_orchestrator = None
 
             logger.info("GlobalPolicyManager initialized successfully")
         except Exception as e:
@@ -759,7 +793,7 @@ class ACPProtocol:
         """Выполняет pending tool после permission approval и продолжает LLM loop.
         
         Вызывается из http_server.py после того как permission был одобрен.
-        Создаёт PromptOrchestrator и делегирует ему выполнение.
+        Переиспользует кэшированный PromptOrchestrator (per-connection scope).
         Согласно ACP протоколу (05-Prompt Turn.md, Step 6), после выполнения
         инструмента результат передаётся LLM для продолжения диалога.
         
@@ -788,12 +822,15 @@ class ACPProtocol:
             )
             return LLMLoopResult(notifications=[], stop_reason="end_turn")
         
-        # Создать PromptOrchestrator с зависимостями
-        orchestrator = prompt.create_prompt_orchestrator(
-            tool_registry=self._tool_registry,
-            client_rpc_service=self._client_rpc_service,
-            global_policy_manager=self._global_policy_manager,
-        )
+        # Переиспользовать кэшированный PromptOrchestrator
+        orchestrator = self._get_prompt_orchestrator()
+        if orchestrator is None:
+            logger.error(
+                "orchestrator not configured for pending tool execution",
+                session_id=session_id,
+                tool_call_id=tool_call_id,
+            )
+            return LLMLoopResult(notifications=[], stop_reason="end_turn")
         
         return await orchestrator.execute_pending_tool(
             session=session,

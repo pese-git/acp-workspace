@@ -1,10 +1,12 @@
 import asyncio
+from unittest.mock import MagicMock
 
 import pytest
 
 from codelab.server.client_rpc import ClientRPCService
 from codelab.server.messages import ACPMessage
 from codelab.server.protocol import ACPProtocol
+from codelab.server.protocol.handlers.prompt_orchestrator import PromptOrchestrator
 from codelab.server.storage import JsonFileStorage
 
 
@@ -2906,3 +2908,63 @@ async def test_session_load_reads_persisted_session_after_restart(tmp_path) -> N
     assert loaded.response.error is None
     assert isinstance(loaded.response.result, dict)
     assert "configOptions" in loaded.response.result
+
+
+# --- Тесты жизненного цикла PromptOrchestrator (2.7) ---
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_created_once() -> None:
+    """PromptOrchestrator должен создаваться единожды при первом обращении."""
+    from codelab.server.tools.registry import SimpleToolRegistry
+
+    tool_registry = SimpleToolRegistry()
+    protocol = ACPProtocol(tool_registry=tool_registry)
+
+    orch1 = protocol._get_prompt_orchestrator()
+    orch2 = protocol._get_prompt_orchestrator()
+
+    assert orch1 is not None
+    assert orch2 is not None
+    assert orch1 is orch2  # один и тот же объект
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_can_be_injected() -> None:
+    """Внешний PromptOrchestrator должен использоваться вместо создания нового."""
+    mock_orchestrator = MagicMock(spec=PromptOrchestrator)
+    protocol = ACPProtocol(prompt_orchestrator=mock_orchestrator)
+
+    result = protocol._get_prompt_orchestrator()
+    assert result is mock_orchestrator
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_returns_none_without_tool_registry() -> None:
+    """Без tool_registry оркестратор должен возвращать None."""
+    protocol = ACPProtocol()
+
+    result = protocol._get_prompt_orchestrator()
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_reset_after_policy_manager_init() -> None:
+    """После инициализации GlobalPolicyManager оркестратор должен пересоздаться."""
+    from codelab.server.tools.registry import SimpleToolRegistry
+
+    tool_registry = SimpleToolRegistry()
+    protocol = ACPProtocol(tool_registry=tool_registry)
+
+    orch_before = protocol._get_prompt_orchestrator()
+    assert orch_before is not None
+
+    # Инициализация GlobalPolicyManager (может упасть, но это нормально для тестов)
+    # Главное — проверить, что кэш сбрасывается
+    await protocol.initialize_global_policy_manager()
+
+    orch_after = protocol._get_prompt_orchestrator()
+
+    # Оркестратор пересоздан с новым policy manager
+    # (может быть None если GlobalPolicyManager не инициализировался)
+    assert orch_before is not orch_after
