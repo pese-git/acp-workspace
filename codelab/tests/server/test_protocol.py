@@ -2906,3 +2906,212 @@ async def test_session_load_reads_persisted_session_after_restart(tmp_path) -> N
     assert loaded.response.error is None
     assert isinstance(loaded.response.result, dict)
     assert "configOptions" in loaded.response.result
+
+
+# ---------------------------------------------------------------------------
+# Тесты реестра обработчиков (Handler Registry)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_unknown_method_returns_method_not_found():
+    """Незарегистрированный метод возвращает -32601 Method Not Found."""
+    protocol = ACPProtocol()
+    outcome = await protocol.handle(ACPMessage.request("unknown/method", {}))
+    assert outcome.response is not None
+    assert outcome.response.error is not None
+    assert outcome.response.error.code == -32601
+
+
+@pytest.mark.asyncio
+async def test_all_standard_methods_are_registered():
+    """Все стандартные ACP методы зарегистрированы в реестре."""
+    protocol = ACPProtocol()
+    required_methods = [
+        "initialize",
+        "authenticate",
+        "session/new",
+        "session/load",
+        "session/list",
+        "session/prompt",
+        "session/cancel",
+        "session/request_permission_response",
+        "session/set_config_option",
+        "session/set_mode",
+        "ping",
+        "echo",
+        "shutdown",
+    ]
+    for method in required_methods:
+        assert method in protocol._handlers, f"Method not registered: {method}"
+
+
+@pytest.mark.asyncio
+async def test_notification_returns_empty_outcome():
+    """Уведомления с неизвестным методом возвращают пустой outcome."""
+    protocol = ACPProtocol()
+    msg = ACPMessage.notification("unknown/notify", {})
+    outcome = await protocol.handle(msg)
+    assert outcome.response is None
+    assert outcome.notifications == []
+
+
+@pytest.mark.asyncio
+async def test_middleware_is_called_for_registered_method():
+    """Middleware вызывается для зарегистрированных методов."""
+    call_log: list[str] = []
+
+    async def logging_middleware(message, next_handler):
+        call_log.append(f"before:{message.method}")
+        result = await next_handler(message)
+        call_log.append(f"after:{message.method}")
+        return result
+
+    protocol = ACPProtocol(middleware=[logging_middleware])
+    outcome = await protocol.handle(ACPMessage.request("ping", {}))
+
+    assert outcome.response is not None
+    assert outcome.response.error is None
+    assert call_log == ["before:ping", "after:ping"]
+
+
+@pytest.mark.asyncio
+async def test_middleware_is_not_called_for_unknown_method():
+    """Middleware НЕ вызывается для неизвестных методов."""
+    call_log: list[str] = []
+
+    async def logging_middleware(message, next_handler):
+        call_log.append(f"middleware:{message.method}")
+        return await next_handler(message)
+
+    protocol = ACPProtocol(middleware=[logging_middleware])
+    await protocol.handle(ACPMessage.request("unknown/method", {}))
+
+    assert call_log == []
+
+
+@pytest.mark.asyncio
+async def test_middleware_is_not_called_for_notifications():
+    """Middleware НЕ вызывается для уведомлений."""
+    call_log: list[str] = []
+
+    async def logging_middleware(message, next_handler):
+        call_log.append(f"middleware:{message.method}")
+        return await next_handler(message)
+
+    protocol = ACPProtocol(middleware=[logging_middleware])
+    await protocol.handle(ACPMessage.notification("some/notify", {}))
+
+    assert call_log == []
+
+
+@pytest.mark.asyncio
+async def test_multiple_middleware_applied_in_order():
+    """Несколько middleware применяются в порядке onion pattern."""
+    call_log: list[str] = []
+
+    async def mw_outer(message, next_handler):
+        call_log.append("outer:before")
+        result = await next_handler(message)
+        call_log.append("outer:after")
+        return result
+
+    async def mw_inner(message, next_handler):
+        call_log.append("inner:before")
+        result = await next_handler(message)
+        call_log.append("inner:after")
+        return result
+
+    protocol = ACPProtocol(middleware=[mw_outer, mw_inner])
+    await protocol.handle(ACPMessage.request("ping", {}))
+
+    # Onion pattern: outer -> inner -> handler -> inner -> outer
+    assert call_log == [
+        "outer:before",
+        "inner:before",
+        "inner:after",
+        "outer:after",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_middleware_can_modify_response():
+    """Middleware может модифицировать результат."""
+
+    async def error_middleware(message, next_handler):
+        result = await next_handler(message)
+        # Добавляем дополнительную notification
+        from codelab.server.messages import ACPMessage
+
+        extra = ACPMessage.notification("middleware/traced", {"method": message.method})
+        result.notifications.append(extra)
+        return result
+
+    protocol = ACPProtocol(middleware=[error_middleware])
+    outcome = await protocol.handle(ACPMessage.request("ping", {}))
+
+    assert outcome.response is not None
+    assert len(outcome.notifications) == 1
+    assert outcome.notifications[0].method == "middleware/traced"
+
+
+@pytest.mark.asyncio
+async def test_handler_registry_dispatches_to_correct_handler():
+    """Реестр корректно диспетчеризует к нужному обработчику."""
+    protocol = ACPProtocol()
+
+    # initialize
+    init_outcome = await protocol.handle(
+        ACPMessage.request("initialize", {"protocolVersion": 1, "clientCapabilities": {}})
+    )
+    assert init_outcome.response is not None
+    assert init_outcome.response.error is None
+
+    # ping
+    ping_outcome = await protocol.handle(ACPMessage.request("ping", {}))
+    assert ping_outcome.response is not None
+
+    # echo
+    echo_outcome = await protocol.handle(ACPMessage.request("echo", {"data": "test"}))
+    assert echo_outcome.response is not None
+
+    # shutdown
+    shutdown_outcome = await protocol.handle(ACPMessage.request("shutdown", {}))
+    assert shutdown_outcome.response is not None
+
+
+@pytest.mark.asyncio
+async def test_session_new_uses_shared_mcp_setup():
+    """session/new использует единый метод _setup_mcp_if_needed."""
+    protocol = ACPProtocol()
+    outcome = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
+    assert outcome.response is not None
+    assert outcome.response.error is None
+    assert isinstance(outcome.response.result, dict)
+    assert "sessionId" in outcome.response.result
+
+
+@pytest.mark.asyncio
+async def test_session_load_uses_shared_mcp_setup():
+    """session/load использует единый метод _setup_mcp_if_needed."""
+    protocol = ACPProtocol()
+
+    # Создаём сессию
+    created = await protocol.handle(
+        ACPMessage.request("session/new", {"cwd": "/tmp", "mcpServers": []})
+    )
+    assert created.response is not None
+    session_id = created.response.result["sessionId"]
+
+    # Загружаем сессию
+    loaded = await protocol.handle(
+        ACPMessage.request(
+            "session/load",
+            {"sessionId": session_id, "cwd": "/tmp", "mcpServers": []},
+        )
+    )
+    assert loaded.response is not None
+    assert loaded.response.error is None
+
