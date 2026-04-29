@@ -31,10 +31,21 @@ class GlobalPolicyManager:
     """
 
     _instance: GlobalPolicyManager | None = None
-    _lock = asyncio.Lock()
+    _lock: asyncio.Lock | None = None  # создаётся лениво в текущем event loop
 
     # Допустимые решения (синхронизировано с GlobalPolicyStorage)
     VALID_DECISIONS = ("allow_always", "reject_always")
+
+    @classmethod
+    def _get_lock(cls) -> asyncio.Lock:
+        """Получить или создать Lock в текущем event loop.
+
+        Ленивая инициализация гарантирует что Lock привязан
+        к активному event loop, а не к loop на момент импорта модуля.
+        """
+        if cls._lock is None:
+            cls._lock = asyncio.Lock()
+        return cls._lock
 
     @classmethod
     async def get_instance(
@@ -56,7 +67,7 @@ class GlobalPolicyManager:
         if cls._instance is not None:
             return cls._instance
 
-        async with cls._lock:
+        async with cls._get_lock():
             # Double-check pattern для thread-safety
             if cls._instance is not None:
                 return cls._instance
@@ -187,10 +198,13 @@ class GlobalPolicyManager:
         logger.debug("Cache invalidated, reloaded from storage")
 
     @classmethod
-    def reset_instance(cls) -> None:
-        """Сбросить singleton instance. Используется в тестах.
+    def reset_for_testing(cls) -> None:
+        """Сбросить singleton состояние. Использовать ТОЛЬКО в тестах.
 
-        Позволяет создать новый экземпляр в тестовых сценариях.
+        Сбрасывает и instance и lock, чтобы в новом тесте
+        lock создался в новом event loop.
         """
         cls._instance = None
-        logger.debug("GlobalPolicyManager singleton reset")
+        cls._lock = None
+        logger.debug("GlobalPolicyManager reset for testing")
+
