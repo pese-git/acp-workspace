@@ -623,7 +623,7 @@ class ACPHttpServer:
                 method_name == "session/prompt"
                 and session_id is not None
                 and outcome.response is None
-                and protocol.should_auto_complete_active_turn(session_id)
+                and await protocol.should_auto_complete_active_turn(session_id)
             ):
                 task = deferred_prompt_tasks.pop(session_id, None)
                 if task is not None:
@@ -687,7 +687,7 @@ class ACPHttpServer:
                             
                             # Завершить turn с stop_reason из LLM loop
                             stop_reason = llm_result.stop_reason or "end_turn"
-                            turn_completion = protocol.complete_active_turn(
+                            turn_completion = await protocol.complete_active_turn(
                                 pending.session_id, stop_reason=stop_reason
                             )
                             if turn_completion is not None and not ws.closed:
@@ -828,7 +828,7 @@ class ACPHttpServer:
                                 "response received, routing to handle_client_response",
                                 request_id=request_id,
                             )
-                            outcome = protocol.handle_client_response(acp_request)
+                            outcome = await protocol.handle_client_response(acp_request)
                         else:
                             outcome = await protocol.handle(acp_request)
 
@@ -959,7 +959,7 @@ class ACPHttpServer:
 
             # Выполняем завершение turn с timeout
             try:
-                response = protocol.complete_active_turn(session_id, stop_reason="end_turn")
+                response = await protocol.complete_active_turn(session_id, stop_reason="end_turn")
             except TimeoutError:
                 conn_logger.warning(
                     "deferred prompt completion timeout",

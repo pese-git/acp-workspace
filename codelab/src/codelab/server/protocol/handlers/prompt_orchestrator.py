@@ -13,6 +13,7 @@ import structlog
 
 from ...client_rpc.service import ClientRPCService
 from ...messages import ACPMessage, JsonRpcId
+from ...storage import SessionStorage
 from ...tools.base import ToolRegistry
 from ..content.extractor import ContentExtractor
 from ..content.formatter import ContentFormatter
@@ -217,7 +218,7 @@ class PromptOrchestrator:
         request_id: JsonRpcId | None,
         params: dict[str, Any],
         session: SessionState,
-        sessions: dict[str, SessionState],
+        storage: SessionStorage,
         agent_orchestrator: AgentOrchestrator,
     ) -> ProtocolOutcome:
         """Обрабатывает session/prompt request.
@@ -234,7 +235,7 @@ class PromptOrchestrator:
             request_id: ID входящего request
             params: Параметры (должны содержать prompt array)
             session: Состояние сессии
-            sessions: Словарь всех сессий
+            storage: Хранилище сессий
             agent_orchestrator: LLM-агент для обработки
 
         Returns:
@@ -383,7 +384,7 @@ class PromptOrchestrator:
         request_id: JsonRpcId | None,
         params: dict[str, Any],
         session: SessionState,
-        sessions: dict[str, SessionState],
+        sessions: dict[str, SessionState] | None = None,
     ) -> ProtocolOutcome:
         """Обрабатывает session/cancel request.
 
@@ -399,7 +400,7 @@ class PromptOrchestrator:
             request_id: ID cancel request
             params: Параметры (sessionId)
             session: Состояние сессии (может быть найдена по sessionId)
-            sessions: Словарь всех сессий
+            sessions: Deprecated, не используется
 
         Returns:
             ProtocolOutcome с notifications об отмене
