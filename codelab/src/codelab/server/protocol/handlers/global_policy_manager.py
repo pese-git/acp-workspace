@@ -63,18 +63,7 @@ class GlobalPolicyManager:
 
         Returns:
             GlobalPolicyManager: Singleton instance.
-
-        Raises:
-            RuntimeError: Если вызван вне running event loop.
         """
-        # Убедиться что мы находимся внутри running event loop
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError as e:
-            raise RuntimeError(
-                "GlobalPolicyManager.get_instance() must be called from within an async context"
-            ) from e
-
         if cls._instance is not None:
             return cls._instance
 
@@ -219,10 +208,3 @@ class GlobalPolicyManager:
         cls._lock = None
         logger.debug("GlobalPolicyManager reset for testing")
 
-    @classmethod
-    def reset_instance(cls) -> None:
-        """Сбросить singleton instance. Используется в тестах.
-
-        Устарел: используйте reset_for_testing() вместо этого.
-        """
-        cls.reset_for_testing()

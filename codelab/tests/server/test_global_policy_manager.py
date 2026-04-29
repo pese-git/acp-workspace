@@ -13,13 +13,6 @@ from codelab.server.protocol.handlers.global_policy_manager import GlobalPolicyM
 from codelab.server.storage.global_policy_storage import GlobalPolicyStorage
 
 
-@pytest.fixture(autouse=True)
-def reset_singleton() -> None:
-    """Сбросить singleton перед каждым тестом."""
-    GlobalPolicyManager.reset_for_testing()
-    yield
-    GlobalPolicyManager.reset_for_testing()
-
 
 @pytest.fixture
 def mock_storage() -> AsyncMock:
@@ -57,9 +50,9 @@ class TestSingletonPattern:
 
     @pytest.mark.asyncio
     async def test_reset_instance(self, mock_storage: AsyncMock) -> None:
-        """Проверить что reset_instance очищает singleton."""
+        """Проверить что reset_for_testing очищает singleton."""
         instance1 = await GlobalPolicyManager.get_instance()
-        GlobalPolicyManager.reset_instance()
+        GlobalPolicyManager.reset_for_testing()
         instance2 = await GlobalPolicyManager.get_instance()
         assert instance1 is not instance2
 
