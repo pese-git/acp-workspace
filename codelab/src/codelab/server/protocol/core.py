@@ -109,8 +109,6 @@ class ACPProtocol:
 
             storage = InMemoryStorage()
         self._storage = storage
-        # Внутренний кэш сессий для совместимости с handlers
-        self._sessions: dict[str, SessionState] = {}
 
         # Оркестратор LLM-агента для обработки prompt-turns через агента
         self._agent_orchestrator = agent_orchestrator
@@ -236,7 +234,7 @@ class ACPProtocol:
                 "response received, routing to handle_client_response",
                 request_id=message.id,
             )
-            return self.handle_client_response(message)
+            return await self.handle_client_response(message)
 
         method = message.method
         handler = self._handlers.get(method)
@@ -268,7 +266,7 @@ class ACPProtocol:
 
         return await wrapped(message)
 
-    def complete_active_turn(
+    async def complete_active_turn(
         self, session_id: str, *, stop_reason: str = "end_turn"
     ) -> ACPMessage | None:
         """Завершает активный prompt-turn и возвращает финальный response.
@@ -276,41 +274,44 @@ class ACPProtocol:
         Используется транспортом WS для отложенного ответа на `session/prompt`.
 
         Пример использования:
-            response = protocol.complete_active_turn("sess_1", stop_reason="end_turn")
+            response = await protocol.complete_active_turn("sess_1", stop_reason="end_turn")
         """
-
+        session = await self._storage.load_session(session_id)
+        if session is None:
+            return None
         return prompt.complete_active_turn(
-            session_id,
-            self._sessions,
+            session,
             stop_reason=stop_reason,
         )
 
-    def should_auto_complete_active_turn(self, session_id: str) -> bool:
+    async def should_auto_complete_active_turn(self, session_id: str) -> bool:
         """Возвращает `True`, если active turn можно безопасно автозавершить.
 
         Если turn ожидает permission-response, автозавершение запрещено.
 
         Пример использования:
-            if protocol.should_auto_complete_active_turn("sess_1"):
+            if await protocol.should_auto_complete_active_turn("sess_1"):
                 ...
         """
+        session = await self._storage.load_session(session_id)
+        if session is None or session.active_turn is None:
+            return False
+        return prompt.should_auto_complete_active_turn(session)
 
-        return prompt.should_auto_complete_active_turn(session_id, self._sessions)
-
-    def handle_client_response(self, message: ACPMessage) -> ProtocolOutcome:
+    async def handle_client_response(self, message: ACPMessage) -> ProtocolOutcome:
         """Обрабатывает входящий response от клиента для server-originated requests.
 
         Сейчас используется для `session/request_permission`, отправленного ранее
         в рамках active prompt-turn.
 
         Пример использования:
-            outcome = protocol.handle_client_response(client_response)
+            outcome = await protocol.handle_client_response(client_response)
         """
 
         if message.id is None:
             return ProtocolOutcome()
 
-        resolved_client_rpc = self._resolve_pending_client_rpc_response(
+        resolved_client_rpc = await self._resolve_pending_client_rpc_response(
             request_id=message.id,
             result=message.result,
             error=message.error.model_dump(exclude_none=True)
@@ -333,21 +334,21 @@ class ACPProtocol:
             self._client_rpc_service.handle_response(message.to_dict())
             return ProtocolOutcome()
 
-        if permissions.consume_cancelled_client_rpc_response(message.id, self._sessions):
+        if await permissions.consume_cancelled_client_rpc_response(message.id, self._storage):
             # Late response на отмененный agent->client RPC считаем no-op.
             return ProtocolOutcome()
 
-        if permissions.consume_cancelled_permission_response(message.id, self._sessions):
+        if await permissions.consume_cancelled_permission_response(message.id, self._storage):
             # Late response на уже отмененный permission-request считаем
             # корректно обработанным no-op, чтобы избежать race-эффектов.
             return ProtocolOutcome()
 
-        resolved = self._resolve_permission_response(message.id, message.result)
+        resolved = await self._resolve_permission_response(message.id, message.result)
         if resolved is None:
             return ProtocolOutcome()
         return resolved
 
-    def _resolve_pending_client_rpc_response(
+    async def _resolve_pending_client_rpc_response(
         self,
         *,
         request_id: JsonRpcId,
@@ -357,14 +358,14 @@ class ACPProtocol:
         """Обрабатывает response на ожидаемый agent->client fs/* request.
 
         Пример использования:
-            outcome = protocol._resolve_pending_client_rpc_response(
+            outcome = await protocol._resolve_pending_client_rpc_response(
                 request_id="req_1",
                 result={"content": "ok"},
                 error=None,
             )
         """
 
-        session = prompt.find_session_by_pending_client_request_id(request_id, self._sessions)
+        session = await prompt.find_session_by_pending_client_request_id(request_id, self._storage)
         if session is None:
             return None
 
@@ -373,10 +374,9 @@ class ACPProtocol:
             request_id=request_id,
             result=result,
             error=error,
-            sessions=self._sessions,
         )
 
-    def _resolve_permission_response(
+    async def _resolve_permission_response(
         self,
         permission_request_id: JsonRpcId,
         result: Any,
@@ -384,14 +384,14 @@ class ACPProtocol:
         """Применяет решение по permission-request к активному prompt-turn.
 
         Пример использования:
-            outcome = protocol._resolve_permission_response(
+            outcome = await protocol._resolve_permission_response(
                 "perm_1",
                 {"outcome": {"outcome": "selected", "optionId": "allow_once"}},
             )
         """
 
-        session = permissions.find_session_by_permission_request_id(
-            permission_request_id, self._sessions
+        session = await permissions.find_session_by_permission_request_id(
+            permission_request_id, self._storage
         )
         if session is None:
             return None
@@ -400,43 +400,15 @@ class ACPProtocol:
             session=session,
             permission_request_id=permission_request_id,
             result=result,
-            sessions=self._sessions,
         )
 
     async def _get_session_for_runtime(self, session_id: str) -> SessionState | None:
-        """Возвращает сессию из кэша или подгружает её из storage по id.
+        """Возвращает сессию из storage по id.
 
         Пример использования:
             session = await protocol._get_session_for_runtime("sess_1")
         """
-
-        cached_session = self._sessions.get(session_id)
-        if cached_session is not None:
-            return cached_session
-
-        loaded_session = await self._storage.load_session(session_id)
-        if loaded_session is not None:
-            self._sessions[session_id] = loaded_session
-        return loaded_session
-
-    async def _hydrate_session_cache_from_storage(self) -> None:
-        """Подгружает все страницы сессий из storage в in-memory кэш.
-
-        Пример использования:
-            await protocol._hydrate_session_cache_from_storage()
-        """
-
-        cursor: str | None = None
-        while True:
-            page, next_cursor = await self._storage.list_sessions(
-                cursor=cursor,
-                limit=self._session_list_page_size,
-            )
-            for session_state in page:
-                self._sessions[session_state.session_id] = session_state
-            if next_cursor is None:
-                break
-            cursor = next_cursor
+        return await self._storage.load_session(session_id)
 
     async def cancel_active_turns_on_disconnect(self) -> int:
         """Отменяет все активные turn в рамках текущего протокольного инстанса.
@@ -448,24 +420,29 @@ class ACPProtocol:
         Returns:
             Количество сессий, в которых активный turn был отменен.
         """
-
         cancelled_count = 0
-        for session_id, session_state in list(self._sessions.items()):
-            if session_state.active_turn is None:
-                continue
+        cursor = None
+        while True:
+            sessions, cursor = await self._storage.list_sessions(cursor=cursor, limit=100)
+            for session_state in sessions:
+                if session_state.active_turn is None:
+                    continue
 
-            prompt.session_cancel(
-                request_id=None,
-                params={"sessionId": session_id},
-                sessions=self._sessions,
-            )
-            cancelled_count += 1
+                await prompt.session_cancel(
+                    request_id=None,
+                    params={"sessionId": session_state.session_id},
+                    storage=self._storage,
+                )
+                cancelled_count += 1
 
-            try:
-                await self._storage.save_session(self._sessions[session_id])
-            except Exception:
-                # Ошибка персистентности не должна блокировать cleanup при disconnect.
-                continue
+                try:
+                    await self._storage.save_session(session_state)
+                except Exception:
+                    # Ошибка персистентности не должна блокировать cleanup при disconnect.
+                    continue
+
+            if cursor is None:
+                break
 
         return cancelled_count
 
@@ -566,7 +543,6 @@ class ACPProtocol:
                 await self._setup_mcp_if_needed(session_state, params)
 
                 await self._storage.save_session(session_state)
-                self._sessions[session_id] = session_state
 
         return ProtocolOutcome(response=response_msg)
 
@@ -594,28 +570,26 @@ class ACPProtocol:
                         session_obj.active_turn = None
                         await self._storage.save_session(session_obj)
 
-        return session.session_load(
+        return await session.session_load(
             message.id,
             params,
             self._require_auth,
             self._authenticated,
             self._config_specs,
             self._auth_methods,
-            self._sessions,
+            self._storage,
         )
 
     async def _handle_session_list(self, message: ACPMessage) -> ProtocolOutcome:
         """Обрабатывает метод session/list."""
         params = message.params or {}
-        await self._hydrate_session_cache_from_storage()
-        return ProtocolOutcome(
-            response=session.session_list(
-                message.id,
-                params,
-                self._sessions,
-                self._session_list_page_size,
-            )
+        response = await session.session_list(
+            message.id,
+            params,
+            self._storage,
+            self._session_list_page_size,
         )
+        return ProtocolOutcome(response=response)
 
     async def _handle_session_prompt(self, message: ACPMessage) -> ProtocolOutcome:
         """Обрабатывает метод session/prompt."""
@@ -623,10 +597,9 @@ class ACPProtocol:
         return await prompt.session_prompt(
             message.id,
             params,
-            self._sessions,
+            self._storage,
             self._config_specs,
             agent_orchestrator=self._agent_orchestrator,
-            storage=self._storage,
             tool_registry=self._tool_registry,
             client_rpc_service=self._client_rpc_service,
             global_manager=self._global_policy_manager,
@@ -635,10 +608,10 @@ class ACPProtocol:
     async def _handle_session_cancel(self, message: ACPMessage) -> ProtocolOutcome:
         """Обрабатывает метод session/cancel."""
         params = message.params or {}
-        return prompt.session_cancel(
+        return await prompt.session_cancel(
             message.id,
             params,
-            self._sessions,
+            self._storage,
         )
 
     async def _handle_permission_response_method(self, message: ACPMessage) -> ProtocolOutcome:
@@ -651,26 +624,25 @@ class ACPProtocol:
         return await self._handle_permission_response(
             message.id,
             params,
-            self._sessions,
         )
 
     async def _handle_set_config_option(self, message: ACPMessage) -> ProtocolOutcome:
         """Обрабатывает метод session/set_config_option."""
         params = message.params or {}
-        return config.session_set_config_option(
+        return await config.session_set_config_option(
             message.id,
             params,
-            self._sessions,
+            self._storage,
             self._config_specs,
         )
 
     async def _handle_set_mode(self, message: ACPMessage) -> ProtocolOutcome:
         """Обрабатывает метод session/set_mode."""
         params = message.params or {}
-        return config.session_set_mode(
+        return await config.session_set_mode(
             message.id,
             params,
-            self._sessions,
+            self._storage,
             self._config_specs,
         )
 
@@ -708,7 +680,6 @@ class ACPProtocol:
         self,
         request_id: JsonRpcId,
         params: dict[str, Any],
-        sessions: dict[str, SessionState],
     ) -> ProtocolOutcome:
         """Обрабатывает response на session/request_permission от клиента.
         
@@ -722,35 +693,32 @@ class ACPProtocol:
         Args:
             request_id: ID permission request
             params: Параметры (sessionId, result с outcome и optionId)
-            sessions: Словарь активных сессий
         
         Returns:
             ProtocolOutcome с response и notifications
         """
-        # Найти сессию по permission request ID
-        session = None
-        session_id = ""
-        for sid, session_candidate in sessions.items():
-            if (
-                session_candidate.active_turn
-                and session_candidate.active_turn.permission_request_id == request_id
-            ):
-                session = session_candidate
-                session_id = sid
-                break
+        session_id = params.get("sessionId", "")
+        
+        # Найти сессию по permission request ID через storage
+        session = await permissions.find_session_by_permission_request_id(
+            request_id, self._storage
+        )
 
         if session is None:
             # Проверить, был ли request отменен (late response handling)
-            for sid, session_candidate in sessions.items():
-                if request_id in session_candidate.cancelled_permission_requests:
-                    logger.debug(
-                        "ignoring late response on cancelled permission request",
-                        request_id=request_id,
-                        session_id=sid,
-                    )
-                    # Удалить из tombstone
-                    session_candidate.cancelled_permission_requests.discard(request_id)
-                    return ProtocolOutcome(response=ACPMessage.response(request_id, {}))
+            cancelled_session = await permissions.find_session_with_cancelled_permission(
+                request_id, self._storage
+            )
+            if cancelled_session is not None:
+                logger.debug(
+                    "ignoring late response on cancelled permission request",
+                    request_id=request_id,
+                    session_id=cancelled_session.session_id,
+                )
+                # Удалить из tombstone
+                cancelled_session.cancelled_permission_requests.discard(request_id)
+                await self._storage.save_session(cancelled_session)
+                return ProtocolOutcome(response=ACPMessage.response(request_id, {}))
 
             # Неизвестный request
             logger.warning(
@@ -849,7 +817,7 @@ class ACPProtocol:
         Returns:
             LLMLoopResult с notifications, stop_reason и pending_permission флагом
         """
-        session = self._sessions.get(session_id)
+        session = await self._storage.load_session(session_id)
         if session is None:
             logger.error(
                 "session not found for pending tool execution",

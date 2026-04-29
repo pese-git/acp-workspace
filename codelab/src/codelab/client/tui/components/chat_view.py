@@ -219,8 +219,9 @@ class ChatView(VerticalScroll):
             return
 
         # Используем timestamp для streaming виджета
+        from rich.markup import escape as markup_escape
         streaming_widget = Static(
-            f"[bold green]⟳ {text}[/bold green]",
+            f"[bold green]⟳ {markup_escape(text)}[/bold green]",
             id=f"stream_{time.time_ns()}",
             classes="message",
         )
@@ -236,8 +237,9 @@ class ChatView(VerticalScroll):
             return
 
         # Используем timestamp для tool call виджета
+        from rich.markup import escape as markup_escape
         tool_widget = Static(
-            f"[italic]Tool: {tool_call}[/italic]",
+            f"[italic]Tool: {markup_escape(str(tool_call))}[/italic]",
             id=f"tool_{time.time_ns()}",
             classes="message",
         )
