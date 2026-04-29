@@ -6,7 +6,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Protocol
 
 import structlog
 
@@ -38,6 +39,24 @@ if TYPE_CHECKING:
     from .handlers.global_policy_manager import GlobalPolicyManager
 
 
+# Тип обработчика метода: async-функция, принимающая сообщение и возвращающая outcome
+MethodHandler = Callable[[ACPMessage], Awaitable[ProtocolOutcome]]
+
+
+class MiddlewareFn(Protocol):
+    """Протокол middleware для сквозной логики (логирование, метрики, auth-check).
+
+    Middleware применяется в порядке onion pattern: первое в списке — внешнее,
+    последнее — ближе к обработчику.
+    """
+
+    async def __call__(
+        self,
+        message: ACPMessage,
+        next_handler: MethodHandler,
+    ) -> ProtocolOutcome: ...
+
+
 logger = structlog.get_logger()
 
 
@@ -61,6 +80,7 @@ class ACPProtocol:
         agent_orchestrator: AgentOrchestrator | None = None,
         client_rpc_service: ClientRPCService | None = None,
         tool_registry: ToolRegistry | None = None,
+        middleware: list[MiddlewareFn] | None = None,
     ) -> None:
         """Инициализирует протокол и хранилище сессий.
 
@@ -71,6 +91,7 @@ class ACPProtocol:
             agent_orchestrator: Оркестратор LLM-агента для обработки prompts (опционально).
             client_rpc_service: Сервис ClientRPC для выполнения инструментов (опционально).
             tool_registry: Реестр инструментов для регистрации и выполнения tools (опционально).
+            middleware: Список middleware функций для сквозной логики (опционально).
 
         Пример использования:
             protocol = ACPProtocol()
@@ -123,6 +144,26 @@ class ACPProtocol:
         # Runtime-реестр futures для permission requests — не персистируется,
         # не входит в SessionState, пересоздаётся при каждом запуске
         self._pending_registry = PendingRequestRegistry()
+
+        # Реестр обработчиков методов — заменяет цепочку if method == "..."
+        self._handlers: dict[str, MethodHandler] = {
+            "initialize": self._handle_initialize,
+            "authenticate": self._handle_authenticate,
+            "session/new": self._handle_session_new,
+            "session/load": self._handle_session_load,
+            "session/list": self._handle_session_list,
+            "session/prompt": self._handle_session_prompt,
+            "session/cancel": self._handle_session_cancel,
+            "session/request_permission_response": self._handle_permission_response_method,
+            "session/set_config_option": self._handle_set_config_option,
+            "session/set_mode": self._handle_set_mode,
+            "ping": self._handle_ping,
+            "echo": self._handle_echo,
+            "shutdown": self._handle_shutdown,
+        }
+
+        # Middleware для сквозной логики (логирование, метрики, auth-check)
+        self._middleware: list[MiddlewareFn] = middleware or []
 
     _config_specs: dict[str, dict[str, Any]] = {
         "mode": {
@@ -179,17 +220,15 @@ class ACPProtocol:
     _session_list_page_size = 50
 
     async def handle(self, message: ACPMessage) -> ProtocolOutcome:
-        """Обрабатывает входящее сообщение и маршрутизирует его по ACP-методу.
+        """Маршрутизирует входящее сообщение по методу через реестр обработчиков.
 
         Метод является основной точкой входа для HTTP/WS транспорта.
 
         Пример использования:
             outcome = protocol.handle(ACPMessage.request("session/list", {}))
         """
-
-        # ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Если method=None, это response (JSON-RPC 2.0)
+        # Если method=None, это response (JSON-RPC 2.0)
         # Маршрутизируем на handle_client_response() вместо отклонения.
-        # Permission response имеет method=None и id=request_id, и должна быть обработана.
         if message.method is None:
             logger.debug(
                 "response received, routing to handle_client_response",
@@ -198,198 +237,34 @@ class ACPProtocol:
             return await self.handle_client_response(message)
 
         method = message.method
-        params = message.params or {}
+        handler = self._handlers.get(method)
 
-        # Явный диспетчер методов упрощает проверку протокольных веток.
-        if method == "initialize":
-            response = auth.initialize(
-                message.id,
-                params,
-                self._supported_protocol_versions,
-                self._require_auth,
-                self._auth_methods,
-            )
-            # Сохраняем согласованные runtime-возможности клиента для feature-gate.
-            client_capabilities = params.get("clientCapabilities")
-            if isinstance(client_capabilities, dict):
-                self._runtime_capabilities = auth.parse_client_runtime_capabilities(
-                    client_capabilities
+        if handler is None:
+            # Уведомления — игнорируем без ошибки
+            if message.is_notification:
+                return ProtocolOutcome()
+            return ProtocolOutcome(
+                response=ACPMessage.error_response(
+                    message.id, code=-32601, message=f"Method not found: {method}"
                 )
-            
-            # Инициализируем GlobalPolicyManager для fallback chain
-            if self._global_policy_manager is None:
-                # Вопрос: как инициализировать асинхронный менеджер в синхронном контексте?
-                # Решение: не инициализируем здесь, а передаем None (graceful degradation)
-                # GlobalPolicyManager требует async инициализации и singleton pattern
-                logger.debug("GlobalPolicyManager will be initialized on demand")
-            
-            return ProtocolOutcome(response=response)
-
-        if method == "authenticate":
-            response, authenticated = auth.authenticate(
-                message.id,
-                params,
-                self._require_auth,
-                self._auth_api_key,
-                self._auth_methods,
-            )
-            self._authenticated = authenticated
-            return ProtocolOutcome(response=response)
-
-        if method == "session/new":
-            # Используем обработчик из handlers для валидации и создания ответа
-            response_msg = session.session_new(
-                message.id,
-                params,
-                self._require_auth,
-                self._authenticated,
-                self._config_specs,
-                self._auth_methods,
-                self._runtime_capabilities,
             )
 
-            # Если создание прошло успешно, сохраняем в storage и кэш
-            if response_msg.result is not None:
-                session_id = response_msg.result.get("sessionId")
-                if isinstance(session_id, str):
-                    # Создаем сессию через фабрику для сохранения
-                    config_values = {
-                        config_id: str(spec["default"])
-                        for config_id, spec in self._config_specs.items()
-                    }
-                    session_state = SessionFactory.create_session(
-                        cwd=params.get("cwd", ""),
-                        mcp_servers=params.get("mcpServers", []),
-                        config_values=config_values,
-                        available_commands=session.build_default_commands(),
-                        runtime_capabilities=self._runtime_capabilities,
-                        session_id=session_id,
-                    )
-                    
-                    # Инициализация MCP серверов если они указаны в параметрах
-                    mcp_servers = params.get("mcpServers", [])
-                    if mcp_servers and isinstance(mcp_servers, list):
-                        await self._initialize_mcp_servers(session_state, mcp_servers)
-                    
-                    await self._storage.save_session(session_state)
+        # Применить middleware в обратном порядке (onion pattern)
+        wrapped: MethodHandler = handler
+        for mw in reversed(self._middleware):
+            # Создаём замыкание для корректного захвата переменных
+            next_handler = wrapped
 
-            return ProtocolOutcome(response=response_msg)
+            async def wrapped_with_middleware(
+                msg: ACPMessage,
+                _mw=mw,
+                _next=next_handler,
+            ) -> ProtocolOutcome:
+                return await _mw(msg, _next)
 
-        if method == "session/load":
-            # Обновляем runtime capabilities при загрузке сессии
-            session_id = params.get("sessionId")
-            if isinstance(session_id, str):
-                session_obj = await self._get_session_for_runtime(session_id)
-                if session_obj is not None:
-                    session_obj.runtime_capabilities = self._runtime_capabilities
-                    
-                    # Инициализация MCP серверов если они указаны при загрузке сессии
-                    # Согласно спецификации ACP (03-Session Setup.md), mcpServers
-                    # передаются при session/load для переподключения к MCP серверам
-                    mcp_servers = params.get("mcpServers", [])
-                    if mcp_servers and isinstance(mcp_servers, list):
-                        await self._initialize_mcp_servers(session_obj, mcp_servers)
-                    
-                    # Обработка orphaned permission requests после перезапуска сервера.
-                    # Если сессия имеет активный turn с permission_request_id, но соответствующий
-                    # Future не зарегистрирован в реестре (сервер перезапускался), то turn
-                    # не может быть продолжен — сбрасываем его.
-                    if session_obj.active_turn and session_obj.active_turn.permission_request_id:
-                        perm_req_id = session_obj.active_turn.permission_request_id
-                        if not self._pending_registry.has(perm_req_id):
-                            logger.warning(
-                                "session_loaded_with_orphaned_permission_request",
-                                session_id=session_id,
-                                permission_request_id=perm_req_id,
-                            )
-                            # Сбросить активный turn — он не может быть продолжен
-                            session_obj.active_turn = None
-                            # Сохранить изменённое состояние
-                            await self._storage.save_session(session_obj)
-                        
-            return await session.session_load(
-                message.id,
-                params,
-                self._require_auth,
-                self._authenticated,
-                self._config_specs,
-                self._auth_methods,
-                self._storage,
-            )
+            wrapped = wrapped_with_middleware
 
-        if method == "session/list":
-            response = await session.session_list(
-                message.id,
-                params,
-                self._storage,
-                self._session_list_page_size,
-            )
-            return ProtocolOutcome(response=response)
-
-        if method == "session/prompt":
-            return await prompt.session_prompt(
-                message.id,
-                params,
-                self._storage,
-                self._config_specs,
-                agent_orchestrator=self._agent_orchestrator,
-                tool_registry=self._tool_registry,
-                client_rpc_service=self._client_rpc_service,
-                global_manager=self._global_policy_manager,
-            )
-
-        if method == "session/cancel":
-            return await prompt.session_cancel(
-                message.id,
-                params,
-                self._storage,
-            )
-
-        if method == "session/request_permission_response":
-            if message.id is None:
-                return ProtocolOutcome(response=ACPMessage.error_response(
-                    None, code=-32600, message="Invalid Request: id is required"
-                ))
-            return await self._handle_permission_response(
-                message.id,
-                params,
-            )
-
-        if method == "session/set_config_option":
-            return await config.session_set_config_option(
-                message.id,
-                params,
-                self._storage,
-                self._config_specs,
-            )
-
-        if method == "session/set_mode":
-            return await config.session_set_mode(
-                message.id,
-                params,
-                self._storage,
-                self._config_specs,
-            )
-
-        if method == "ping":
-            return ProtocolOutcome(response=legacy.ping(message.id))
-
-        if method == "echo":
-            return ProtocolOutcome(response=legacy.echo(message.id, params))
-
-        if method == "shutdown":
-            return ProtocolOutcome(response=legacy.shutdown(message.id))
-
-        if message.is_notification:
-            return ProtocolOutcome()
-
-        return ProtocolOutcome(
-            response=ACPMessage.error_response(
-                message.id,
-                code=-32601,
-                message=f"Method not found: {method}",
-            )
-        )
+        return await wrapped(message)
 
     async def complete_active_turn(
         self, session_id: str, *, stop_reason: str = "end_turn"
@@ -593,6 +468,213 @@ class ACPProtocol:
                 exc_info=True,
             )
             self._global_policy_manager = None
+
+    # -----------------------------------------------------------------------
+    # Обработчики методов протокола (реестр _handlers)
+    # -----------------------------------------------------------------------
+
+    async def _handle_initialize(self, message: ACPMessage) -> ProtocolOutcome:
+        """Обрабатывает метод initialize."""
+        params = message.params or {}
+        response = auth.initialize(
+            message.id,
+            params,
+            self._supported_protocol_versions,
+            self._require_auth,
+            self._auth_methods,
+        )
+        # Сохраняем согласованные runtime-возможности клиента для feature-gate.
+        client_capabilities = params.get("clientCapabilities")
+        if isinstance(client_capabilities, dict):
+            self._runtime_capabilities = auth.parse_client_runtime_capabilities(
+                client_capabilities
+            )
+
+        # Инициализируем GlobalPolicyManager для fallback chain
+        if self._global_policy_manager is None:
+            logger.debug("GlobalPolicyManager will be initialized on demand")
+
+        return ProtocolOutcome(response=response)
+
+    async def _handle_authenticate(self, message: ACPMessage) -> ProtocolOutcome:
+        """Обрабатывает метод authenticate."""
+        params = message.params or {}
+        response, authenticated = auth.authenticate(
+            message.id,
+            params,
+            self._require_auth,
+            self._auth_api_key,
+            self._auth_methods,
+        )
+        self._authenticated = authenticated
+        return ProtocolOutcome(response=response)
+
+    async def _handle_session_new(self, message: ACPMessage) -> ProtocolOutcome:
+        """Обрабатывает метод session/new."""
+        params = message.params or {}
+        response_msg = session.session_new(
+            message.id,
+            params,
+            self._require_auth,
+            self._authenticated,
+            self._config_specs,
+            self._auth_methods,
+            self._runtime_capabilities,
+        )
+
+        # Если создание прошло успешно, сохраняем в storage и кэш
+        if response_msg.result is not None:
+            session_id = response_msg.result.get("sessionId")
+            if isinstance(session_id, str):
+                config_values = {
+                    config_id: str(spec["default"])
+                    for config_id, spec in self._config_specs.items()
+                }
+                session_state = SessionFactory.create_session(
+                    cwd=params.get("cwd", ""),
+                    mcp_servers=params.get("mcpServers", []),
+                    config_values=config_values,
+                    available_commands=session.build_default_commands(),
+                    runtime_capabilities=self._runtime_capabilities,
+                    session_id=session_id,
+                )
+
+                # Единая точка инициализации MCP серверов
+                await self._setup_mcp_if_needed(session_state, params)
+
+                await self._storage.save_session(session_state)
+
+        return ProtocolOutcome(response=response_msg)
+
+    async def _handle_session_load(self, message: ACPMessage) -> ProtocolOutcome:
+        """Обрабатывает метод session/load."""
+        params = message.params or {}
+        session_id = params.get("sessionId")
+        if isinstance(session_id, str):
+            session_obj = await self._get_session_for_runtime(session_id)
+            if session_obj is not None:
+                session_obj.runtime_capabilities = self._runtime_capabilities
+
+                # Единая точка инициализации MCP серверов
+                await self._setup_mcp_if_needed(session_obj, params)
+
+                # Обработка orphaned permission requests после перезапуска сервера.
+                if session_obj.active_turn and session_obj.active_turn.permission_request_id:
+                    perm_req_id = session_obj.active_turn.permission_request_id
+                    if not self._pending_registry.has(perm_req_id):
+                        logger.warning(
+                            "session_loaded_with_orphaned_permission_request",
+                            session_id=session_id,
+                            permission_request_id=perm_req_id,
+                        )
+                        session_obj.active_turn = None
+                        await self._storage.save_session(session_obj)
+
+        return await session.session_load(
+            message.id,
+            params,
+            self._require_auth,
+            self._authenticated,
+            self._config_specs,
+            self._auth_methods,
+            self._storage,
+        )
+
+    async def _handle_session_list(self, message: ACPMessage) -> ProtocolOutcome:
+        """Обрабатывает метод session/list."""
+        params = message.params or {}
+        response = await session.session_list(
+            message.id,
+            params,
+            self._storage,
+            self._session_list_page_size,
+        )
+        return ProtocolOutcome(response=response)
+
+    async def _handle_session_prompt(self, message: ACPMessage) -> ProtocolOutcome:
+        """Обрабатывает метод session/prompt."""
+        params = message.params or {}
+        return await prompt.session_prompt(
+            message.id,
+            params,
+            self._storage,
+            self._config_specs,
+            agent_orchestrator=self._agent_orchestrator,
+            tool_registry=self._tool_registry,
+            client_rpc_service=self._client_rpc_service,
+            global_manager=self._global_policy_manager,
+        )
+
+    async def _handle_session_cancel(self, message: ACPMessage) -> ProtocolOutcome:
+        """Обрабатывает метод session/cancel."""
+        params = message.params or {}
+        return await prompt.session_cancel(
+            message.id,
+            params,
+            self._storage,
+        )
+
+    async def _handle_permission_response_method(self, message: ACPMessage) -> ProtocolOutcome:
+        """Обрабатывает метод session/request_permission_response."""
+        if message.id is None:
+            return ProtocolOutcome(ACPMessage.error_response(
+                None, code=-32600, message="Invalid Request: id is required"
+            ))
+        params = message.params or {}
+        return await self._handle_permission_response(
+            message.id,
+            params,
+        )
+
+    async def _handle_set_config_option(self, message: ACPMessage) -> ProtocolOutcome:
+        """Обрабатывает метод session/set_config_option."""
+        params = message.params or {}
+        return await config.session_set_config_option(
+            message.id,
+            params,
+            self._storage,
+            self._config_specs,
+        )
+
+    async def _handle_set_mode(self, message: ACPMessage) -> ProtocolOutcome:
+        """Обрабатывает метод session/set_mode."""
+        params = message.params or {}
+        return await config.session_set_mode(
+            message.id,
+            params,
+            self._storage,
+            self._config_specs,
+        )
+
+    async def _handle_ping(self, message: ACPMessage) -> ProtocolOutcome:
+        """Обрабатывает метод ping."""
+        return ProtocolOutcome(response=legacy.ping(message.id))
+
+    async def _handle_echo(self, message: ACPMessage) -> ProtocolOutcome:
+        """Обрабатывает метод echo."""
+        params = message.params or {}
+        return ProtocolOutcome(response=legacy.echo(message.id, params))
+
+    async def _handle_shutdown(self, message: ACPMessage) -> ProtocolOutcome:
+        """Обрабатывает метод shutdown."""
+        return ProtocolOutcome(response=legacy.shutdown(message.id))
+
+    # -----------------------------------------------------------------------
+    # Вспомогательные методы
+    # -----------------------------------------------------------------------
+
+    async def _setup_mcp_if_needed(
+        self,
+        session_state: SessionState,
+        params: dict[str, Any],
+    ) -> None:
+        """Единая точка инициализации MCP серверов — не дублируется.
+
+        Вызывается из session/new и session/load.
+        """
+        mcp_servers = params.get("mcpServers", [])
+        if mcp_servers and isinstance(mcp_servers, list):
+            await self._initialize_mcp_servers(session_state, mcp_servers)
 
     async def _handle_permission_response(
         self,
