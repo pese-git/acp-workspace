@@ -8,6 +8,7 @@ import structlog
 
 from ...client_rpc.service import ClientRPCService
 from ...messages import ACPMessage, JsonRpcId
+from ...storage import SessionStorage
 from ...tools.base import ToolRegistry
 from ..state import LLMLoopResult, ProtocolOutcome, SessionState
 from .client_rpc_handler import ClientRPCHandler
@@ -131,10 +132,29 @@ class PromptOrchestrator:
         request_id: JsonRpcId | None,
         params: dict[str, Any],
         session: SessionState,
-        sessions: dict[str, SessionState],
+        storage: SessionStorage,
         agent_orchestrator: AgentOrchestrator,
     ) -> ProtocolOutcome:
-        """Обрабатывает session/prompt через Pipeline."""
+        """Обрабатывает session/prompt request.
+
+        Оркестрирует весь цикл обработки промпта:
+        1. Инициализация active turn
+        2. Извлечение текста из prompt blocks
+        3. Обработка через LLM-агента
+        4. Построение и отправка notifications
+        5. Управление tool calls, permissions, client RPC
+        6. Финализация turn
+
+        Args:
+            request_id: ID входящего request
+            params: Параметры (должны содержать prompt array)
+            session: Состояние сессии
+            storage: Хранилище сессий
+            agent_orchestrator: LLM-агент для обработки
+
+        Returns:
+            ProtocolOutcome с notifications и response
+        """
         session_id = session.session_id
         prompt = params.get("prompt", [])
 
@@ -208,9 +228,27 @@ class PromptOrchestrator:
         request_id: JsonRpcId | None,
         params: dict[str, Any],
         session: SessionState,
-        sessions: dict[str, SessionState],
+        sessions: dict[str, SessionState] | None = None,
     ) -> ProtocolOutcome:
-        """Обрабатывает session/cancel."""
+        """Обрабатывает session/cancel request.
+
+        Логика:
+        1. Найти сессию если нужна по ID
+        2. Если есть active turn, установить cancel_requested флаг
+        3. Отменить все активные tool calls
+        4. Отметить cancelled permission requests
+        5. Отметить cancelled client RPC requests
+        6. Завершить turn с stop_reason='cancel'
+
+        Args:
+            request_id: ID cancel request
+            params: Параметры (sessionId)
+            session: Состояние сессии (может быть найдена по sessionId)
+            sessions: Deprecated, не используется
+
+        Returns:
+            ProtocolOutcome с notifications об отмене
+        """
         session_id = params.get("sessionId", session.session_id)
         notifications: list[ACPMessage] = []
 

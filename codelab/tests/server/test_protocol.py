@@ -72,7 +72,9 @@ async def test_handle_client_response_routes_pending_client_rpc_service_response
     request_id = sent_requests[0]["id"]
     assert isinstance(request_id, str)
 
-    outcome = protocol.handle_client_response(ACPMessage.response(request_id, {"content": "ok"}))
+    outcome = await protocol.handle_client_response(
+        ACPMessage.response(request_id, {"content": "ok"})
+    )
 
     assert outcome.response is None
     assert outcome.notifications == []
@@ -526,7 +528,7 @@ async def test_prompt_with_meta_pending_tool_keeps_turn_open() -> None:
         for notification in outcome.notifications
     )
 
-    completed_response = protocol.complete_active_turn(session_id)
+    completed_response = await protocol.complete_active_turn(session_id)
     assert completed_response is not None
     assert completed_response.result == {"stopReason": "end_turn"}
 
@@ -660,7 +662,7 @@ async def test_runtime_capabilities_are_session_scoped_after_reinitialize() -> N
             if notification.method == "session/request_permission" and notification.id is not None
         ]
         assert len(permission_requests) == 1
-        permission_result = protocol.handle_client_response(
+        permission_result = await protocol.handle_client_response(
             ACPMessage.response(
                 permission_requests[0].id,
                 {
@@ -1084,7 +1086,7 @@ async def test_fs_read_response_completes_turn_with_completed_tool_update() -> N
     )
     assert fs_request.id is not None
 
-    resolved = protocol.handle_client_response(
+    resolved = await protocol.handle_client_response(
         ACPMessage.response(fs_request.id, {"content": "file-body"})
     )
     assert len(resolved.followup_responses) == 1
@@ -1143,7 +1145,7 @@ async def test_fs_write_response_contains_diff_tool_content() -> None:
     )
     assert fs_request.id is not None
 
-    resolved = protocol.handle_client_response(
+    resolved = await protocol.handle_client_response(
         ACPMessage.response(
             fs_request.id,
             {
@@ -1245,7 +1247,7 @@ async def test_fs_read_client_error_marks_tool_as_failed() -> None:
     )
     assert fs_request.id is not None
 
-    resolved = protocol.handle_client_response(
+    resolved = await protocol.handle_client_response(
         ACPMessage.error_response(
             fs_request.id,
             code=-32000,
@@ -1300,7 +1302,7 @@ async def test_fs_read_invalid_success_payload_marks_tool_as_failed() -> None:
     )
     assert fs_request.id is not None
 
-    resolved = protocol.handle_client_response(ACPMessage.response(fs_request.id, {}))
+    resolved = await protocol.handle_client_response(ACPMessage.response(fs_request.id, {}))
     assert len(resolved.followup_responses) == 1
     assert resolved.followup_responses[0].result == {"stopReason": "end_turn"}
     assert any(
@@ -1357,7 +1359,7 @@ async def test_fs_write_non_object_payload_marks_tool_as_failed() -> None:
     )
     assert fs_request.id is not None
 
-    resolved = protocol.handle_client_response(ACPMessage.response(fs_request.id, "ok"))
+    resolved = await protocol.handle_client_response(ACPMessage.response(fs_request.id, "ok"))
     assert len(resolved.followup_responses) == 1
     assert resolved.followup_responses[0].result == {"stopReason": "end_turn"}
     assert any(
@@ -1446,7 +1448,7 @@ async def test_terminal_rpc_chain_completes_prompt_turn() -> None:
     )
     assert create_request.id is not None
 
-    output_step = protocol.handle_client_response(
+    output_step = await protocol.handle_client_response(
         ACPMessage.response(create_request.id, {"terminalId": "term_1"})
     )
     output_request = next(
@@ -1456,7 +1458,7 @@ async def test_terminal_rpc_chain_completes_prompt_turn() -> None:
     )
     assert output_request.id is not None
 
-    wait_step = protocol.handle_client_response(
+    wait_step = await protocol.handle_client_response(
         ACPMessage.response(output_request.id, {"output": "hello"})
     )
     wait_request = next(
@@ -1466,7 +1468,7 @@ async def test_terminal_rpc_chain_completes_prompt_turn() -> None:
     )
     assert wait_request.id is not None
 
-    release_step = protocol.handle_client_response(
+    release_step = await protocol.handle_client_response(
         ACPMessage.response(wait_request.id, {"exitCode": 0})
     )
     release_request = next(
@@ -1476,7 +1478,9 @@ async def test_terminal_rpc_chain_completes_prompt_turn() -> None:
     )
     assert release_request.id is not None
 
-    done = protocol.handle_client_response(ACPMessage.response(release_request.id, {"ok": True}))
+    done = await protocol.handle_client_response(
+        ACPMessage.response(release_request.id, {"ok": True})
+    )
     assert len(done.followup_responses) == 1
     assert done.followup_responses[0].result == {"stopReason": "end_turn"}
     assert any(
@@ -1528,7 +1532,7 @@ async def test_terminal_output_exit_status_skips_wait_for_exit() -> None:
     )
     assert create_request.id is not None
 
-    output_step = protocol.handle_client_response(
+    output_step = await protocol.handle_client_response(
         ACPMessage.response(create_request.id, {"terminalId": "term_1"})
     )
     output_request = next(
@@ -1538,7 +1542,7 @@ async def test_terminal_output_exit_status_skips_wait_for_exit() -> None:
     )
     assert output_request.id is not None
 
-    release_step = protocol.handle_client_response(
+    release_step = await protocol.handle_client_response(
         ACPMessage.response(
             output_request.id,
             {
@@ -1562,7 +1566,7 @@ async def test_terminal_output_exit_status_skips_wait_for_exit() -> None:
         if notification.method == "terminal/release"
     )
     assert release_request.id is not None
-    done = protocol.handle_client_response(ACPMessage.response(release_request.id, {}))
+    done = await protocol.handle_client_response(ACPMessage.response(release_request.id, {}))
     assert len(done.followup_responses) == 1
     assert done.followup_responses[0].result == {"stopReason": "end_turn"}
     assert any(
@@ -1613,7 +1617,7 @@ async def test_terminal_output_invalid_payload_marks_tool_as_failed() -> None:
     )
     assert create_request.id is not None
 
-    output_step = protocol.handle_client_response(
+    output_step = await protocol.handle_client_response(
         ACPMessage.response(create_request.id, {"terminalId": "term_1"})
     )
     output_request = next(
@@ -1623,7 +1627,7 @@ async def test_terminal_output_invalid_payload_marks_tool_as_failed() -> None:
     )
     assert output_request.id is not None
 
-    resolved = protocol.handle_client_response(ACPMessage.response(output_request.id, {}))
+    resolved = await protocol.handle_client_response(ACPMessage.response(output_request.id, {}))
     assert len(resolved.followup_responses) == 1
     assert resolved.followup_responses[0].result == {"stopReason": "end_turn"}
     assert any(
@@ -1675,7 +1679,7 @@ async def test_terminal_output_with_non_object_exit_status_marks_tool_as_failed(
     )
     assert create_request.id is not None
 
-    output_step = protocol.handle_client_response(
+    output_step = await protocol.handle_client_response(
         ACPMessage.response(create_request.id, {"terminalId": "term_1"})
     )
     output_request = next(
@@ -1685,7 +1689,7 @@ async def test_terminal_output_with_non_object_exit_status_marks_tool_as_failed(
     )
     assert output_request.id is not None
 
-    resolved = protocol.handle_client_response(
+    resolved = await protocol.handle_client_response(
         ACPMessage.response(
             output_request.id,
             {
@@ -1745,7 +1749,7 @@ async def test_cancel_during_terminal_flow_emits_kill_and_release_requests() -> 
     )
     assert create_request.id is not None
 
-    _ = protocol.handle_client_response(
+    _ = await protocol.handle_client_response(
         ACPMessage.response(create_request.id, {"terminalId": "term_1"})
     )
 
@@ -1847,7 +1851,7 @@ async def test_deferred_prompt_can_be_completed_without_cancel() -> None:
     )
     assert prompt_outcome.response is None
 
-    completed_response = protocol.complete_active_turn(session_id, stop_reason="end_turn")
+    completed_response = await protocol.complete_active_turn(session_id, stop_reason="end_turn")
     assert completed_response is not None
     assert completed_response.result == {"stopReason": "end_turn"}
 
@@ -1933,7 +1937,7 @@ async def test_permission_selected_completes_prompt_turn() -> None:
         isinstance(option, dict) and option.get("kind") == "allow_always" for option in options
     )
 
-    resolved = protocol.handle_client_response(
+    resolved = await protocol.handle_client_response(
         ACPMessage.response(
             permission_request.id,
             {
@@ -1955,7 +1959,7 @@ async def test_permission_selected_completes_prompt_turn() -> None:
     )
 
     # Завершаем turn
-    turn_completion = protocol.complete_active_turn(session_id, stop_reason="end_turn")
+    turn_completion = await protocol.complete_active_turn(session_id, stop_reason="end_turn")
     assert turn_completion is not None
     assert turn_completion.result == {"stopReason": "end_turn"}
 
@@ -1990,7 +1994,7 @@ async def test_permission_cancelled_finishes_turn_with_cancelled() -> None:
     )
     assert permission_request.id is not None
 
-    resolved = protocol.handle_client_response(
+    resolved = await protocol.handle_client_response(
         ACPMessage.response(
             permission_request.id,
             {"outcome": {"outcome": "cancelled"}},
@@ -2030,7 +2034,7 @@ async def test_permission_reject_option_finishes_turn_with_cancelled() -> None:
     )
     assert permission_request.id is not None
 
-    resolved = protocol.handle_client_response(
+    resolved = await protocol.handle_client_response(
         ACPMessage.response(
             permission_request.id,
             {"outcome": {"outcome": "selected", "optionId": "reject_once"}},
@@ -2070,7 +2074,7 @@ async def test_permission_selected_with_unknown_option_is_rejected() -> None:
     )
     assert permission_request.id is not None
 
-    resolved = protocol.handle_client_response(
+    resolved = await protocol.handle_client_response(
         ACPMessage.response(
             permission_request.id,
             {
@@ -2131,7 +2135,7 @@ async def test_permission_selected_without_option_id_is_rejected() -> None:
     )
     assert permission_request.id is not None
 
-    resolved = protocol.handle_client_response(
+    resolved = await protocol.handle_client_response(
         ACPMessage.response(
             permission_request.id,
             {
@@ -2181,7 +2185,7 @@ async def test_late_permission_response_after_cancel_is_ignored() -> None:
     assert len(cancel_outcome.followup_responses) == 1
     assert cancel_outcome.followup_responses[0].result == {"stopReason": "cancelled"}
 
-    late_permission = protocol.handle_client_response(
+    late_permission = await protocol.handle_client_response(
         ACPMessage.response(
             permission_request.id,
             {
@@ -2255,7 +2259,7 @@ async def test_late_fs_response_after_cancel_is_ignored() -> None:
     assert len(cancel_outcome.followup_responses) == 1
     assert cancel_outcome.followup_responses[0].result == {"stopReason": "cancelled"}
 
-    late_fs_response = protocol.handle_client_response(
+    late_fs_response = await protocol.handle_client_response(
         ACPMessage.response(fs_request.id, {"content": "late payload"})
     )
     assert late_fs_response.notifications == []
@@ -2321,7 +2325,7 @@ async def test_late_terminal_create_response_after_cancel_is_ignored() -> None:
     assert len(cancel_outcome.followup_responses) == 1
     assert cancel_outcome.followup_responses[0].result == {"stopReason": "cancelled"}
 
-    late_create_response = protocol.handle_client_response(
+    late_create_response = await protocol.handle_client_response(
         ACPMessage.response(create_request.id, {"terminalId": "term_late"})
     )
     assert late_create_response.notifications == []
@@ -2375,7 +2379,7 @@ async def test_disconnect_auto_cancel_turn_with_pending_permission() -> None:
     cancelled_count = await protocol.cancel_active_turns_on_disconnect()
     assert cancelled_count == 1
 
-    late_permission = protocol.handle_client_response(
+    late_permission = await protocol.handle_client_response(
         ACPMessage.response(
             permission_request.id,
             {
@@ -2431,7 +2435,7 @@ async def test_permission_allow_always_applies_to_next_tool_call() -> None:
     )
     assert permission_request.id is not None
 
-    first_resolution = protocol.handle_client_response(
+    first_resolution = await protocol.handle_client_response(
         ACPMessage.response(
             permission_request.id,
             {
@@ -2453,7 +2457,7 @@ async def test_permission_allow_always_applies_to_next_tool_call() -> None:
     )
 
     # Завершаем turn
-    turn_completion = protocol.complete_active_turn(session_id, stop_reason="end_turn")
+    turn_completion = await protocol.complete_active_turn(session_id, stop_reason="end_turn")
     assert turn_completion is not None
     assert turn_completion.result == {"stopReason": "end_turn"}
 
@@ -2504,7 +2508,7 @@ async def test_permission_reject_always_applies_to_next_tool_call() -> None:
     )
     assert permission_request.id is not None
 
-    first_resolution = protocol.handle_client_response(
+    first_resolution = await protocol.handle_client_response(
         ACPMessage.response(
             permission_request.id,
             {
@@ -2567,7 +2571,7 @@ async def test_permission_policy_is_scoped_by_tool_kind() -> None:
     assert permission_request.params is not None
     assert permission_request.params["toolCall"]["kind"] == "execute"
 
-    resolved = protocol.handle_client_response(
+    resolved = await protocol.handle_client_response(
         ACPMessage.response(
             permission_request.id,
             {
@@ -2586,7 +2590,7 @@ async def test_permission_policy_is_scoped_by_tool_kind() -> None:
         session_id=resolved.pending_tool_execution.session_id,
         tool_call_id=resolved.pending_tool_execution.tool_call_id,
     )
-    turn_completion = protocol.complete_active_turn(session_id, stop_reason="end_turn")
+    turn_completion = await protocol.complete_active_turn(session_id, stop_reason="end_turn")
     assert turn_completion is not None
     assert turn_completion.result == {"stopReason": "end_turn"}
 
