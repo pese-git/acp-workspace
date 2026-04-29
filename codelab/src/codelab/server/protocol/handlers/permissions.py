@@ -24,14 +24,17 @@ async def find_session_by_permission_request_id(
     Пример использования:
         session = await find_session_by_permission_request_id("perm_1", storage)
     """
-    sessions, _ = await storage.list_sessions(limit=500)
-    for session in sessions:
-        active_turn = session.active_turn
-        if active_turn is None:
-            continue
-        if active_turn.permission_request_id == permission_request_id:
-            return session
-    return None
+    cursor = None
+    while True:
+        page, cursor = await storage.list_sessions(cursor=cursor, limit=100)
+        for session in page:
+            active_turn = session.active_turn
+            if active_turn is None:
+                continue
+            if active_turn.permission_request_id == permission_request_id:
+                return session
+        if cursor is None:
+            return None
 
 
 def extract_permission_outcome(result: Any) -> str | None:
@@ -208,14 +211,17 @@ async def consume_cancelled_permission_response(
         if await consume_cancelled_permission_response("perm_1", storage):
             ...
     """
-    sessions, _ = await storage.list_sessions(limit=500)
-    for session in sessions:
-        if request_id not in session.cancelled_permission_requests:
-            continue
-        session.cancelled_permission_requests.remove(request_id)
-        await storage.save_session(session)
-        return True
-    return False
+    cursor = None
+    while True:
+        page, cursor = await storage.list_sessions(cursor=cursor, limit=100)
+        for session in page:
+            if request_id not in session.cancelled_permission_requests:
+                continue
+            session.cancelled_permission_requests.remove(request_id)
+            await storage.save_session(session)
+            return True
+        if cursor is None:
+            return False
 
 
 async def find_session_with_cancelled_permission(
@@ -227,11 +233,14 @@ async def find_session_with_cancelled_permission(
     Пример использования:
         session = await find_session_with_cancelled_permission("perm_1", storage)
     """
-    sessions, _ = await storage.list_sessions(limit=500)
-    for session in sessions:
-        if request_id in session.cancelled_permission_requests:
-            return session
-    return None
+    cursor = None
+    while True:
+        page, cursor = await storage.list_sessions(cursor=cursor, limit=100)
+        for session in page:
+            if request_id in session.cancelled_permission_requests:
+                return session
+        if cursor is None:
+            return None
 
 
 async def consume_cancelled_client_rpc_response(
@@ -247,11 +256,14 @@ async def consume_cancelled_client_rpc_response(
         if await consume_cancelled_client_rpc_response("rpc_1", storage):
             ...
     """
-    sessions, _ = await storage.list_sessions(limit=500)
-    for session in sessions:
-        if request_id not in session.cancelled_client_rpc_requests:
-            continue
-        session.cancelled_client_rpc_requests.remove(request_id)
-        await storage.save_session(session)
-        return True
-    return False
+    cursor = None
+    while True:
+        page, cursor = await storage.list_sessions(cursor=cursor, limit=100)
+        for session in page:
+            if request_id not in session.cancelled_client_rpc_requests:
+                continue
+            session.cancelled_client_rpc_requests.remove(request_id)
+            await storage.save_session(session)
+            return True
+        if cursor is None:
+            return False

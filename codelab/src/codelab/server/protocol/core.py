@@ -546,23 +546,28 @@ class ACPProtocol:
             Количество сессий, в которых активный turn был отменен.
         """
         cancelled_count = 0
-        sessions, _ = await self._storage.list_sessions(limit=1000)
-        for session_state in sessions:
-            if session_state.active_turn is None:
-                continue
+        cursor = None
+        while True:
+            sessions, cursor = await self._storage.list_sessions(cursor=cursor, limit=100)
+            for session_state in sessions:
+                if session_state.active_turn is None:
+                    continue
 
-            await prompt.session_cancel(
-                request_id=None,
-                params={"sessionId": session_state.session_id},
-                storage=self._storage,
-            )
-            cancelled_count += 1
+                await prompt.session_cancel(
+                    request_id=None,
+                    params={"sessionId": session_state.session_id},
+                    storage=self._storage,
+                )
+                cancelled_count += 1
 
-            try:
-                await self._storage.save_session(session_state)
-            except Exception:
-                # Ошибка персистентности не должна блокировать cleanup при disconnect.
-                continue
+                try:
+                    await self._storage.save_session(session_state)
+                except Exception:
+                    # Ошибка персистентности не должна блокировать cleanup при disconnect.
+                    continue
+
+            if cursor is None:
+                break
 
         return cancelled_count
 

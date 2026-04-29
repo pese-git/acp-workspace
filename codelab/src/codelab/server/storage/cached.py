@@ -53,6 +53,7 @@ class CachedSessionStorage(SessionStorage):
         session_id = session.session_id
         if session_id in self._cache:
             self._cache.move_to_end(session_id)
+            self._cache[session_id] = session
         else:
             if len(self._cache) >= self._max_size:
                 evicted_id, _ = self._cache.popitem(last=False)
