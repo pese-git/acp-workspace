@@ -385,12 +385,10 @@ class TestPlanBuildingStage:
     """Тесты для PlanBuildingStage."""
 
     @pytest.mark.asyncio
-    async def test_plan_building_adds_notifications(self):
-        plan_builder = MagicMock()
-        plan_notification = ACPMessage.notification("session/update", {"plan": "test"})
-        plan_builder.build = AsyncMock(return_value=[plan_notification])
+    async def test_plan_building_passes_context_through(self):
+        from codelab.server.protocol.handlers.plan_builder import PlanBuilder
 
-        stage = PlanBuildingStage(plan_builder)
+        stage = PlanBuildingStage(PlanBuilder())
 
         session = SessionState(session_id="s1", cwd="/", mcp_servers=[])
         context = PromptContext(
@@ -403,9 +401,10 @@ class TestPlanBuildingStage:
 
         result = await stage.process(context)
 
-        assert len(result.notifications) == 1
-        assert result.notifications[0] == plan_notification
-        plan_builder.build.assert_awaited_once_with(session, "do something")
+        # Стадия зарезервирована — контекст проходит без изменений
+        assert result is context
+        assert result.notifications == []
+        assert result.should_stop is False
 
 
 class TestTurnLifecycleStage:

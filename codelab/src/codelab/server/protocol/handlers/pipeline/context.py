@@ -25,6 +25,7 @@ class PromptContext:
     stop_reason: str = "end_turn"
     should_stop: bool = False       # True — прервать pipeline досрочно
     error_response: ACPMessage | None = None
+    pending_permission: bool = False  # True — turn отложен, ожидает разрешения
 
     # Метаданные для передачи между стадиями
     meta: dict[str, Any] = field(default_factory=dict)

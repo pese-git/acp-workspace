@@ -15,10 +15,6 @@ class PlanBuildingStage(PromptStage):
         self._plan_builder = plan_builder
 
     async def process(self, context: PromptContext) -> PromptContext:
-        # План строится на основе промпта и сессии
-        # В текущей реализации план может быть пустым
-        plan_notifications = await self._plan_builder.build(
-            context.session, context.raw_text
-        )
-        context.notifications.extend(plan_notifications)
+        # Инициализация плана происходит позже — в LLMLoopStage из ответа агента.
+        # Стадия зарезервирована для будущей pre-plan логики (например, из директив).
         return context

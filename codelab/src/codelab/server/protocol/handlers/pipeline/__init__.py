@@ -4,6 +4,7 @@ from .base import PromptStage
 from .context import PromptContext
 from .runner import PromptPipeline
 from .stages import (
+    LLMLoopStage,
     PlanBuildingStage,
     SlashCommandStage,
     TurnLifecycleStage,
@@ -11,6 +12,7 @@ from .stages import (
 )
 
 __all__ = [
+    "LLMLoopStage",
     "PlanBuildingStage",
     "PromptContext",
     "PromptPipeline",
