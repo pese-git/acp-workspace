@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from ..client_rpc.service import ClientRPCService
     from ..tools.base import ToolRegistry
     from .handlers.global_policy_manager import GlobalPolicyManager
+    from .handlers.prompt_orchestrator import PromptOrchestrator
 
 
 # Тип обработчика метода: async-функция, принимающая сообщение и возвращающая outcome
@@ -80,6 +81,7 @@ class ACPProtocol:
         agent_orchestrator: AgentOrchestrator | None = None,
         client_rpc_service: ClientRPCService | None = None,
         tool_registry: ToolRegistry | None = None,
+        prompt_orchestrator: PromptOrchestrator | None = None,
         middleware: list[MiddlewareFn] | None = None,
     ) -> None:
         """Инициализирует протокол и хранилище сессий.
@@ -91,6 +93,7 @@ class ACPProtocol:
             agent_orchestrator: Оркестратор LLM-агента для обработки prompts (опционально).
             client_rpc_service: Сервис ClientRPC для выполнения инструментов (опционально).
             tool_registry: Реестр инструментов для регистрации и выполнения tools (опционально).
+            prompt_orchestrator: Оркестратор prompt-turn (опционально, создаётся лениво).
             middleware: Список middleware функций для сквозной логики (опционально).
 
         Пример использования:
@@ -118,6 +121,9 @@ class ACPProtocol:
 
         # Реестр инструментов для регистрации и выполнения tools
         self._tool_registry = tool_registry
+
+        # PromptOrchestrator создаётся один раз, если не передан извне
+        self._prompt_orchestrator: PromptOrchestrator | None = prompt_orchestrator
 
         # GlobalPolicyManager для fallback chain в permission checks
         self._global_policy_manager: GlobalPolicyManager | None = None
@@ -446,6 +452,28 @@ class ACPProtocol:
 
         return cancelled_count
 
+    async def _get_prompt_orchestrator(self) -> PromptOrchestrator | None:
+        """Получить или создать PromptOrchestrator.
+
+        Если передан явно в конструктор — использует его.
+        Если нет — создаёт лениво при первом обращении.
+
+        Returns:
+            PromptOrchestrator или None, если tool_registry не настроен.
+        """
+        if self._prompt_orchestrator is not None:
+            return self._prompt_orchestrator
+
+        if self._tool_registry is None:
+            return None
+
+        self._prompt_orchestrator = prompt.create_prompt_orchestrator(
+            tool_registry=self._tool_registry,
+            client_rpc_service=self._client_rpc_service,
+            global_policy_manager=self._global_policy_manager,
+        )
+        return self._prompt_orchestrator
+
     async def initialize_global_policy_manager(self) -> None:
         """Инициализировать GlobalPolicyManager для fallback на global policies.
 
@@ -459,6 +487,9 @@ class ACPProtocol:
 
             self._global_policy_manager = await GlobalPolicyManager.get_instance()
             await self._global_policy_manager.initialize()
+
+            # Сбросить кэш, чтобы оркестратор пересоздался с новым policy manager
+            self._prompt_orchestrator = None
 
             logger.info("GlobalPolicyManager initialized successfully")
         except Exception as e:
@@ -834,14 +865,17 @@ class ACPProtocol:
                 tool_call_id=tool_call_id,
             )
             return LLMLoopResult(notifications=[], stop_reason="end_turn")
-        
-        # Создать PromptOrchestrator с зависимостями
-        orchestrator = prompt.create_prompt_orchestrator(
-            tool_registry=self._tool_registry,
-            client_rpc_service=self._client_rpc_service,
-            global_policy_manager=self._global_policy_manager,
-        )
-        
+
+        # Получить или создать PromptOrchestrator (переиспользуется)
+        orchestrator = await self._get_prompt_orchestrator()
+        if orchestrator is None:
+            logger.error(
+                "orchestrator not configured for pending tool execution",
+                session_id=session_id,
+                tool_call_id=tool_call_id,
+            )
+            return LLMLoopResult(notifications=[], stop_reason="end_turn")
+
         return await orchestrator.execute_pending_tool(
             session=session,
             session_id=session_id,
