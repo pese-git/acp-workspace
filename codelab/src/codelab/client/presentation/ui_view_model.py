@@ -95,7 +95,8 @@ class UIViewModel(BaseViewModel):
         try:
             from codelab.client.domain.events import ErrorOccurredEvent
 
-            self.on_event(ErrorOccurredEvent, self._handle_error_event)
+            if self.event_bus is not None:
+                self.on_event(ErrorOccurredEvent, self._handle_error_event)
         except ImportError:
             self.logger.debug("DomainEvents not available, skipping event subscriptions")
 

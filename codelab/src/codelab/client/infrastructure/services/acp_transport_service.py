@@ -19,11 +19,16 @@ import asyncio
 import contextlib
 import json
 from collections.abc import AsyncIterator, Callable
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import structlog
 
 from codelab.client.domain import TransportService
+from codelab.client.infrastructure.events.bus import EventBus
+from codelab.client.infrastructure.events.permission_events import (
+    PermissionCallbackRegistry,
+    PermissionResponseReadyEvent,
+)
 from codelab.client.infrastructure.message_parser import MessageParser
 from codelab.client.infrastructure.services.background_receive_loop import (
     BackgroundReceiveLoop,
@@ -32,9 +37,6 @@ from codelab.client.infrastructure.services.message_router import MessageRouter
 from codelab.client.infrastructure.services.routing_queues import RoutingQueues
 from codelab.client.infrastructure.transport import WebSocketTransport
 from codelab.client.messages import ACPMessage, RequestPermissionRequest
-
-if TYPE_CHECKING:
-    from codelab.client.application.permission_handler import PermissionHandler
 
 
 class ACPTransportService(TransportService):
@@ -55,7 +57,8 @@ class ACPTransportService(TransportService):
         host: str,
         port: int,
         parser: MessageParser | None = None,
-        permission_handler: PermissionHandler | None = None,
+        event_bus: EventBus | None = None,
+        permission_callback_registry: PermissionCallbackRegistry | None = None,
     ) -> None:
         """Инициализирует сервис.
 
@@ -63,23 +66,16 @@ class ACPTransportService(TransportService):
             host: Адрес ACP сервера
             port: Порт ACP сервера
             parser: MessageParser для парсинга ответов (опционально)
-            permission_handler: PermissionHandler для обработки permission requests (опционально)
+            event_bus: EventBus для публикации permission событий (опционально)
+            permission_callback_registry: Реестр callback для UI modal (опционально)
         """
         self.host = host
         self.port = port
         self.parser = parser or MessageParser()
-        self._permission_handler = permission_handler
-        # Callback для отображения permission modal в UI
-        # Будет установлен через set_permission_callback из TUI App
-        # Сигнатура: (request_id, tool_call, options, on_choice) -> None
-        # Типизация:
-        # Callable[[request_id, tool_call, options, on_choice], None] | None
-        self._permission_callback: (
-            Callable[
-                [str | int, Any, list[Any], Callable[[str | int, str], None]], None
-            ]
-            | None
-        ) = None
+        self._event_bus = event_bus
+        self._permission_callback_registry = (
+            permission_callback_registry or PermissionCallbackRegistry()
+        )
         # Инициализируем транспорт для соединения
         self._transport: WebSocketTransport | None = None
         # Сохраняем server capabilities после инициализации
@@ -98,6 +94,13 @@ class ACPTransportService(TransportService):
         self._callbacks_request_lock = asyncio.Lock()
 
         self._logger = structlog.get_logger("acp_transport_service")
+
+        # Подписываемся на permission response события
+        if self._event_bus is not None:
+            self._event_bus.subscribe(
+                PermissionResponseReadyEvent,
+                self.handle_permission_response,
+            )
 
     async def __aenter__(self) -> ACPTransportService:
         """Входит в контекст manager для управления жизненным циклом.
@@ -468,12 +471,12 @@ class ACPTransportService(TransportService):
 
         Аргументы:
             callback: Функция с сигнатурой (request_id, tool_call, options, on_choice).
-                     - request_id: ID permission request
-                     - tool_call: Информация о tool call
-                     - options: Доступные опции разрешения
-                     - on_choice: Callback функция (option_id) -> None для обработки выбора
+                      - request_id: ID permission request
+                      - tool_call: Информация о tool call
+                      - options: Доступные опции разрешения
+                      - on_choice: Callback функция (option_id) -> None для обработки выбора
         """
-        self._permission_callback = callback
+        self._permission_callback_registry.set_permission_callback(callback)
         self._logger.info(
             "permission_callback_set",
             callback_name=getattr(callback, "__name__", "unknown"),
@@ -793,14 +796,16 @@ class ACPTransportService(TransportService):
 
         Интегрирует permission request с полным lifecycle:
         1. Парсинг request
-        2. Обработка через PermissionHandler
-        3. Формирование и отправка response
+        2. Получение PermissionHandler из реестра
+        3. Вызов handle_request (блокирует до ответа пользователя)
+        4. Response отправляется через PermissionHandler
 
         Args:
             message: JSON-RPC сообщение с permission request
         """
-        if self._permission_handler is None:
-            self._logger.debug("permission_handler_not_configured_skipping")
+        permission_handler = self._permission_callback_registry.get_permission_handler()
+        if permission_handler is None:
+            self._logger.debug("permission_handler_not_in_registry_skipping")
             return
 
         try:
@@ -812,20 +817,19 @@ class ACPTransportService(TransportService):
                 request_id=request.id,
                 session_id=request.params.sessionId,
                 tool_call_id=request.params.toolCall.toolCallId,
-                has_ui_callback=self._permission_callback is not None,
+                has_ui_callback=self._permission_callback_registry.permission_callback is not None,
             )
 
-            # Обработка через handler с callback если он установлен
-            # Если callback=None, PermissionHandler вернет CancelledPermissionOutcome
-            outcome = await self._permission_handler.handle_request(
+            # Вызываем handle_request — блокирует до ответа пользователя
+            # Response отправляется внутри handle_request через EventBus
+            await permission_handler.handle_request(
                 request=request,
-                callback=self._permission_callback,
+                callback=self._permission_callback_registry.permission_callback,
             )
 
             self._logger.info(
                 "permission_request_handled_successfully",
                 request_id=request.id,
-                outcome=outcome.outcome,
             )
 
         except Exception as e:
@@ -1205,6 +1209,41 @@ class ACPTransportService(TransportService):
             rpc_id=notification.id,
             rpc_method=rpc_method,
         )
+
+    def get_permission_callback_registry(self) -> PermissionCallbackRegistry:
+        """Получить реестр callback для permission handling.
+
+        Returns:
+            PermissionCallbackRegistry instance
+        """
+        return self._permission_callback_registry
+
+    async def handle_permission_response(self, event: PermissionResponseReadyEvent) -> None:
+        """Обработать событие PermissionResponseReadyEvent.
+
+        Отправляет permission response на сервер.
+        Вызывается из EventBus когда PermissionHandler завершает обработку.
+
+        Args:
+            event: Событие с готовым response
+        """
+        try:
+            self._logger.info(
+                "sending_permission_response_from_event",
+                request_id=event.request_id,
+            )
+            await self.send(event.response_message)
+            self._logger.info(
+                "permission_response_sent_successfully",
+                request_id=event.request_id,
+            )
+        except Exception as e:
+            self._logger.error(
+                "permission_response_send_failed",
+                request_id=event.request_id,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
 
     def cleanup(self) -> None:
         """Очищает ресурсы синхронно (вызывается DI контейнером).

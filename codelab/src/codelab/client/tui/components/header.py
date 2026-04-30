@@ -45,15 +45,15 @@ class HeaderBar(Static):
 
     def __init__(
         self,
-        ui_vm: UIViewModel,
+        ui_vm: UIViewModel | None = None,
         *,
         session_title: str = "",
         show_breadcrumbs: bool = True,
     ) -> None:
-        """Инициализирует HeaderBar с обязательным UIViewModel.
+        """Инициализирует HeaderBar.
 
         Args:
-            ui_vm: UIViewModel для управления состоянием header'a
+            ui_vm: UIViewModel для управления состоянием header'a (опционально)
             session_title: Название текущей сессии
             show_breadcrumbs: Показывать ли breadcrumbs
         """
@@ -62,9 +62,10 @@ class HeaderBar(Static):
         self._session_title = session_title
         self._show_breadcrumbs = show_breadcrumbs
 
-        # Подписываемся на изменения в UIViewModel
-        self.ui_vm.connection_status.subscribe(self._on_connection_status_changed)
-        self.ui_vm.is_loading.subscribe(self._on_loading_changed)
+        # Подписываемся на изменения в UIViewModel если доступен
+        if self.ui_vm is not None:
+            self.ui_vm.connection_status.subscribe(self._on_connection_status_changed)
+            self.ui_vm.is_loading.subscribe(self._on_loading_changed)
 
         # Инициализируем UI с текущим состоянием
         self._update_display()

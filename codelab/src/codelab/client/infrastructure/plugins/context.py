@@ -1,7 +1,7 @@
 """Plugin Context - контекст выполнения для плагинов.
 
 PluginContext предоставляет плагинам доступ к основным компонентам системы:
-DI контейнеру, EventBus, HandlerRegistry и логгеру.
+DI контейнеру (dishka), EventBus, HandlerRegistry и логгеру.
 """
 
 from __future__ import annotations
@@ -10,7 +10,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from codelab.client.infrastructure.di_container import DIContainer
+    from dishka import AsyncContainer
+
     from codelab.client.infrastructure.events.bus import EventBus
     from codelab.client.infrastructure.handler_registry import HandlerRegistry
 
@@ -23,15 +24,15 @@ class PluginContext:
     необходимым для инициализации и работы плагина.
 
     Attributes:
-        di_container: DIContainer для разрешения зависимостей
+        di_container: dishka AsyncContainer для разрешения зависимостей
         event_bus: EventBus для подписки на события
         handler_registry: HandlerRegistry для регистрации handlers
-        logger: structlog logger для логирования
+        logger: structlog Logger для логирования
 
     Пример:
         async def initialize(self, context: PluginContext) -> None:
             # Получить сервис из DI контейнера
-            service = context.di_container.resolve(MyService)
+            service = await context.di_container.get(MyService)
 
             # Подписаться на событие
             context.event_bus.subscribe(SessionCreatedEvent, self._on_session_created)
@@ -41,7 +42,7 @@ class PluginContext:
     """
 
     # Контейнер зависимостей для разрешения сервисов и других компонентов
-    di_container: DIContainer
+    di_container: AsyncContainer
 
     # Шина событий для подписки и публикации доменных событий
     event_bus: EventBus

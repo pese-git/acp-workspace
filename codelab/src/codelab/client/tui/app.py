@@ -1,7 +1,7 @@
 """Главное Textual приложение ACP-Client TUI с Clean Architecture.
 
 Приложение использует новую архитектуру:
-- DIBootstrapper для инициализации контейнера зависимостей
+- dishka DI контейнер для инициализации зависимостей
 - ViewModels для управления состоянием UI
 - Use Cases для бизнес-логики
 - Event Bus для слабо связанной коммуникации между компонентами
@@ -15,9 +15,12 @@ from collections.abc import Callable
 from pathlib import Path
 
 import structlog
+from dishka import AsyncContainer, make_async_container
 from textual.app import App, ComposeResult
 
-from codelab.client.infrastructure.di_bootstrapper import DIBootstrapper
+from codelab.client.application.session_coordinator import SessionCoordinator
+from codelab.client.infrastructure.app_provider import AppProvider
+from codelab.client.infrastructure.services.acp_transport_service import ACPTransportService
 from codelab.client.messages import PermissionOption, PermissionToolCall
 from codelab.client.presentation.chat_view_model import ChatViewModel
 from codelab.client.presentation.file_viewer_view_model import FileViewerViewModel
@@ -55,7 +58,7 @@ from .themes import ThemeManager, ThemeType
 class ACPClientApp(App[None]):
     """Главное TUI приложение с Clean Architecture.
 
-    Все компоненты инициализируются через DIBootstrapper.
+    Все компоненты инициализируются через dishka DI контейнер.
     State management осуществляется через ViewModels.
     """
 
@@ -132,34 +135,46 @@ class ACPClientApp(App[None]):
         # перемешивать `session/update` между конкурентными запросами.
         self._session_history_load_lock = asyncio.Lock()
 
-        # Инициализируем DIContainer
-        try:
-            self._container = DIBootstrapper.build(
-                host=host,
-                port=port,
-                cwd=cwd,
-                history_dir=history_dir,
-                logger=self._app_logger,
-            )
-            self._app_logger.info("di_container_built_successfully", cwd=cwd)
-        except Exception as e:
-            self._app_logger.error(
-                "failed_to_build_di_container",
-                error=str(e),
-            )
-            raise RuntimeError(f"Failed to initialize DI container: {e}") from e
+        # Инициализируем dishka контейнер
+        self._container: AsyncContainer | None = None
+        self._provider = AppProvider(
+            host=host,
+            port=port,
+            cwd=cwd,
+            history_dir=history_dir,
+        )
+        self._app_logger.info("app_provider_created", cwd=cwd)
+
+        # ViewModels будут разрешены в on_mount
+        self._ui_vm: UIViewModel | None = None
+        self._session_vm: SessionViewModel | None = None
+        self._chat_vm: ChatViewModel | None = None
+        self._plan_vm: PlanViewModel | None = None
+        self._filesystem_vm: FileSystemViewModel | None = None
+        self._terminal_log_vm: TerminalLogViewModel | None = None
+        self._file_viewer_vm: FileViewerViewModel | None = None
+        self._permission_vm: PermissionViewModel | None = None
+        self._terminal_vm: TerminalViewModel | None = None
+
+    async def on_mount(self) -> None:
+        """Инициализирует приложение при монтировании."""
+        self._app_logger.info("app_mounting")
+
+        # Создаём dishka контейнер
+        self._container = make_async_container(self._provider)
+        self._app_logger.info("dishka_container_created")
 
         # Разрешаем все ViewModels
         try:
-            self._ui_vm = self._container.resolve(UIViewModel)
-            self._session_vm = self._container.resolve(SessionViewModel)
-            self._chat_vm = self._container.resolve(ChatViewModel)
-            self._plan_vm = self._container.resolve(PlanViewModel)
-            self._filesystem_vm = self._container.resolve(FileSystemViewModel)
-            self._terminal_log_vm = self._container.resolve(TerminalLogViewModel)
-            self._file_viewer_vm = self._container.resolve(FileViewerViewModel)
-            self._permission_vm = self._container.resolve(PermissionViewModel)
-            self._terminal_vm = self._container.resolve(TerminalViewModel)
+            self._ui_vm = await self._container.get(UIViewModel)
+            self._session_vm = await self._container.get(SessionViewModel)
+            self._chat_vm = await self._container.get(ChatViewModel)
+            self._plan_vm = await self._container.get(PlanViewModel)
+            self._filesystem_vm = await self._container.get(FileSystemViewModel)
+            self._terminal_log_vm = await self._container.get(TerminalLogViewModel)
+            self._file_viewer_vm = await self._container.get(FileViewerViewModel)
+            self._permission_vm = await self._container.get(PermissionViewModel)
+            self._terminal_vm = await self._container.get(TerminalViewModel)
 
             self._app_logger.info("all_view_models_resolved")
 
@@ -170,12 +185,37 @@ class ACPClientApp(App[None]):
             # Синхронизируем layout левой колонки с глобальным UI состоянием.
             self._ui_vm.sidebar_tab.subscribe(self._on_sidebar_state_changed)
             self._ui_vm.files_expanded.subscribe(self._on_sidebar_state_changed)
+
+            # Обновляем layout с реальными ViewModels
+            self._update_layout_with_view_models()
         except Exception as e:
             self._app_logger.error(
                 "failed_to_resolve_view_models",
                 error=str(e),
             )
             raise RuntimeError(f"Failed to initialize ViewModels: {e}") from e
+
+        self._app_logger.info("app_mounted")
+
+    def _update_layout_with_view_models(self) -> None:
+        """Обновляет layout после инициализации ViewModels."""
+        if self._ui_vm is None or self._main_layout is None:
+            return
+
+        # Обновляем HeaderBar и FooterBar
+        try:
+            header = self.query_one(HeaderBar)
+            header.ui_vm = self._ui_vm
+        except Exception:
+            pass
+
+        try:
+            footer = self.query_one(FooterBar)
+            footer.ui_vm = self._ui_vm
+        except Exception:
+            pass
+
+        self._main_layout.ui_vm = self._ui_vm
 
     def compose(self) -> ComposeResult:
         """Собирает базовый layout приложения в стиле OpenCode.
@@ -191,13 +231,12 @@ class ACPClientApp(App[None]):
         - FooterBar (статус-бар внизу)
         - ToastContainer (overlay)
         """
-        yield HeaderBar(self._ui_vm)
-        # MainLayout с dock-region внутри main-column (OpenCode-style)
-        self._main_layout = MainLayout(ui_vm=self._ui_vm, id="body")
+        # ViewModels будут подставлены в on_mount() после разрешения из dishka.
+        # Компоненты принимают None и обновляются через _update_layout_with_view_models().
+        yield HeaderBar()
+        yield FooterBar()
+        self._main_layout = MainLayout(id="body")
         yield self._main_layout
-        # FooterBar как отдельный элемент внизу экрана
-        yield FooterBar(self._ui_vm)
-        # ToastContainer должен быть поверх других элементов (в конце compose)
         yield ToastContainer(id="toast-container")
 
     def on_ready(self) -> None:
@@ -238,6 +277,15 @@ class ACPClientApp(App[None]):
             self._app_logger.error("main_layout_not_initialized")
             return
         
+        # ViewModels должны быть инициализированы в on_mount
+        assert self._ui_vm is not None
+        assert self._session_vm is not None
+        assert self._chat_vm is not None
+        assert self._plan_vm is not None
+        assert self._filesystem_vm is not None
+        assert self._permission_vm is not None
+        assert self._terminal_vm is not None
+        
         # Монтируем компоненты в sidebar
         sidebar_column = self._main_layout.sidebar_column
         if sidebar_column is not None:
@@ -277,11 +325,8 @@ class ACPClientApp(App[None]):
         self._ui_vm.set_connection_status(ConnectionStatus.CONNECTING)
         self._ui_vm.set_loading(True, "connecting to server")
         try:
-            from codelab.client.application.session_coordinator import SessionCoordinator
-
-            # Получаем SessionCoordinator из DI контейнера
-            self._app_logger.debug("resolving_session_coordinator")
-            coordinator = self._container.resolve(SessionCoordinator)
+            # Получаем SessionCoordinator из dishka контейнера
+            coordinator = await self._container.get(SessionCoordinator)
 
             # Инициализируем подключение
             self._app_logger.info("initializing_server_connection")
@@ -304,11 +349,7 @@ class ACPClientApp(App[None]):
             # Это необходимо, чтобы при получении session/request_permission от сервера
             # TUI приложение показало модальное окно для выбора разрешения.
             try:
-                from codelab.client.infrastructure.services.acp_transport_service import (
-                    ACPTransportService,
-                )
-
-                transport = self._container.resolve(ACPTransportService)
+                transport = await self._container.get(ACPTransportService)
                 transport.set_permission_callback(self.show_permission_modal)
                 self._app_logger.info("permission_callback_registered_in_transport")
             except Exception as e:
@@ -612,9 +653,7 @@ class ACPClientApp(App[None]):
 
         async with self._session_history_load_lock:
             try:
-                from codelab.client.application.session_coordinator import SessionCoordinator
-
-                coordinator = self._container.resolve(SessionCoordinator)
+                coordinator = await self._container.get(SessionCoordinator)
                 loaded = await coordinator.load_session(
                     session_id,
                     self._host,
@@ -800,24 +839,13 @@ class ACPClientApp(App[None]):
         """Очистка ресурсов при завершении приложения."""
         self._app_logger.info("app_unmounting")
 
-        # Закрываем WebSocket соединение
-        try:
-            from codelab.client.infrastructure.services.acp_transport_service import (
-                ACPTransportService,
-            )
-
-            transport_service = self._container.resolve(ACPTransportService)
-            await transport_service.disconnect()
-            self._app_logger.info("websocket_disconnected")
-        except Exception as e:
-            self._app_logger.error("websocket_disconnect_failed", error=str(e))
-
-        # Dispose DI контейнера
-        try:
-            self._container.dispose()
-            self._app_logger.info("di_container_disposed")
-        except Exception as e:
-            self._app_logger.error("di_container_dispose_failed", error=str(e))
+        # Закрываем dishka контейнер (автоматически закроет все async ресурсы)
+        if self._container is not None:
+            try:
+                await self._container.close()
+                self._app_logger.info("dishka_container_closed")
+            except Exception as e:
+                self._app_logger.error("dishka_container_close_failed", error=str(e))
 
         self._app_logger.info("app_unmounted")
 

@@ -64,15 +64,15 @@ class FooterBar(Static):
 
     def __init__(
         self,
-        ui_vm: UIViewModel,
+        ui_vm: UIViewModel | None = None,
         *,
         show_tokens: bool = True,
         show_hotkeys: bool = True,
     ) -> None:
-        """Инициализирует FooterBar с обязательным UIViewModel.
+        """Инициализирует FooterBar.
 
         Args:
-            ui_vm: UIViewModel для управления состояниями
+            ui_vm: UIViewModel для управления состояниями (опционально)
             show_tokens: Показывать ли токены/стоимость
             show_hotkeys: Показывать ли подсказки по горячим клавишам
         """
@@ -84,13 +84,14 @@ class FooterBar(Static):
         self._tokens_used: int = 0
         self._cost: float = 0.0
 
-        # Подписываемся на изменения в UIViewModel
-        self.ui_vm.connection_status.subscribe(self._on_connection_status_changed)
-        self.ui_vm.is_loading.subscribe(self._on_loading_changed)
-        self.ui_vm.loading_message.subscribe(self._on_loading_message_changed)
-        self.ui_vm.error_message.subscribe(self._on_error_message_changed)
-        self.ui_vm.info_message.subscribe(self._on_info_message_changed)
-        self.ui_vm.warning_message.subscribe(self._on_warning_message_changed)
+        # Подписываемся на изменения в UIViewModel если доступен
+        if self.ui_vm is not None:
+            self.ui_vm.connection_status.subscribe(self._on_connection_status_changed)
+            self.ui_vm.is_loading.subscribe(self._on_loading_changed)
+            self.ui_vm.loading_message.subscribe(self._on_loading_message_changed)
+            self.ui_vm.error_message.subscribe(self._on_error_message_changed)
+            self.ui_vm.info_message.subscribe(self._on_info_message_changed)
+            self.ui_vm.warning_message.subscribe(self._on_warning_message_changed)
 
         # Инициализируем UI с текущим состоянием
         self._update_display()

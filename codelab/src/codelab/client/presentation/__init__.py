@@ -10,7 +10,6 @@
 - SessionViewModel: ViewModel для управления сессиями
 - ChatViewModel: ViewModel для управления чатом
 - UIViewModel: ViewModel для общего UI состояния
-- ViewModelFactory: Factory для регистрации ViewModels в DIContainer
 """
 
 from codelab.client.presentation.base_view_model import BaseViewModel
@@ -21,7 +20,6 @@ from codelab.client.presentation.permission_view_model import PermissionViewMode
 from codelab.client.presentation.plan_view_model import PlanViewModel
 from codelab.client.presentation.terminal_log_view_model import TerminalLogViewModel
 from codelab.client.presentation.terminal_view_model import TerminalViewModel
-from codelab.client.presentation.view_model_factory import ViewModelFactory
 
 __all__ = [
     'Observable',
@@ -33,5 +31,4 @@ __all__ = [
     'PlanViewModel',
     'TerminalLogViewModel',
     'TerminalViewModel',
-    'ViewModelFactory',
 ]

@@ -19,10 +19,16 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import structlog
 
+from codelab.client.infrastructure.events.bus import EventBus
+from codelab.client.infrastructure.events.permission_events import (
+    PermissionCallbackRegistry,
+    PermissionRequestReceivedEvent,
+    PermissionResponseReadyEvent,
+)
 from codelab.client.messages import (
     ACPMessage,
     CancelledPermissionOutcome,
@@ -33,12 +39,6 @@ from codelab.client.messages import (
     RequestPermissionRequest,
     SelectedPermissionOutcome,
 )
-
-if TYPE_CHECKING:
-    from codelab.client.application.session_coordinator import SessionCoordinator
-    from codelab.client.infrastructure.services.acp_transport_service import (
-        ACPTransportService,
-    )
 
 
 @dataclass
@@ -357,57 +357,63 @@ class PermissionHandler:
     """Основной обработчик permission requests на стороне клиента.
 
     Координирует полный цикл обработки permission request:
-    1. Получение session/request_permission от сервера
+    1. Получение session/request_permission от сервера (через EventBus)
     2. Создание и регистрация PermissionRequest
     3. Показ модального окна пользователю через ViewModel
     4. Ожидание выбора пользователя
-    5. Отправка session/request_permission_response на сервер
+    5. Отправка session/request_permission_response на сервер (через EventBus)
     6. Cleanup
 
     Архитектура:
     - Использует PermissionRequestManager для state management
-    - Интегрируется с UI через PermissionViewModel
-    - Отправляет response через transport
+    - Интегрируется с UI через PermissionCallbackRegistry
+    - Отправляет response через EventBus (PermissionResponseReadyEvent)
 
     Пример использования:
         handler = PermissionHandler(
-            coordinator=coordinator,
-            transport=transport,
+            event_bus=event_bus,
+            permission_callback_registry=registry,
             logger=logger,
         )
         
-        # Обработать входящий request
-        outcome = await handler.handle_request(request_message)
-        
-        # Response автоматически отправляется на сервер
+        # Обработка происходит автоматически через EventBus подписки
     """
 
     def __init__(
         self,
-        coordinator: SessionCoordinator,
-        transport: ACPTransportService,
+        event_bus: EventBus,
+        permission_callback_registry: PermissionCallbackRegistry,
         logger: Any,
     ) -> None:
         """Инициализировать PermissionHandler.
 
         Args:
-            coordinator: SessionCoordinator для доступа к активным сессиям
-            transport: ACPTransportService для отправки response
+            event_bus: EventBus для подписки на permission события
+            permission_callback_registry: Реестр callback для UI modal
             logger: Logger для структурированного логирования
 
         Пример:
             handler = PermissionHandler(
-                coordinator=coordinator,
-                transport=transport,
+                event_bus=event_bus,
+                permission_callback_registry=registry,
                 logger=structlog.get_logger("permission_handler"),
             )
         """
-        self._coordinator = coordinator
-        self._transport = transport
+        self._event_bus = event_bus
+        self._permission_callback_registry = permission_callback_registry
         self._logger = logger
+
+        # Регистрируем себя в реестре для ACPTransportService
+        self._permission_callback_registry.set_permission_handler(self)
 
         # Менеджер для управления всеми активными requests
         self._request_manager = PermissionRequestManager()
+
+        # Подписываемся на события permission requests
+        self._event_bus.subscribe(
+            PermissionRequestReceivedEvent,
+            self._on_permission_request_received,
+        )
 
     def get_request_manager(self) -> PermissionRequestManager:
         """Получить менеджер requests (для интеграции с UI/другими компонентами).
@@ -420,6 +426,36 @@ class PermissionHandler:
             request = manager.get_request("perm_1")
         """
         return self._request_manager
+
+    async def _on_permission_request_received(self, event: PermissionRequestReceivedEvent) -> None:
+        """Обработчик события PermissionRequestReceivedEvent.
+
+        Вызывается автоматически когда ACPTransportService публикует
+        событие о получении permission request от сервера.
+
+        Args:
+            event: Событие с данными permission request
+        """
+        tool_call_id = (
+            event.tool_call.toolCallId
+            if hasattr(event.tool_call, 'toolCallId')
+            else None
+        )
+        self._logger.info(
+            "permission_request_received_via_event_bus",
+            request_id=event.request_id,
+            session_id=event.session_id,
+            tool_call_id=tool_call_id,
+        )
+
+        # Получаем callback из реестра
+        callback = self._permission_callback_registry.permission_callback
+
+        # Создаём типизированный request для handle_request
+        request = RequestPermissionRequest.model_validate(event.raw_message)
+
+        # Обрабатываем request
+        await self.handle_request(request, callback)
 
     async def handle_request(
         self,
@@ -594,22 +630,27 @@ class PermissionHandler:
             )
             outcome = CancelledPermissionOutcome(outcome="cancelled")
 
-        # Отправить response на сервер
+        # Отправить response на сервер через EventBus
         try:
-            # Отправить response на сервер
             response = self.build_response(request_id, outcome)
             self._logger.info(
-                "sending_permission_response_to_server",
+                "publishing_permission_response_to_event_bus",
                 request_id=request_id,
                 session_id=session_id,
                 tool_call_id=tool_call.toolCallId,
                 outcome=outcome.outcome,
                 option_id=getattr(outcome, 'optionId', None),
             )
-            await self._transport.send(response.to_dict())
+
+            # Публикуем событие для отправки response
+            response_event = PermissionResponseReadyEvent(
+                request_id=request_id,
+                response_message=response.to_dict(),
+            )
+            await self._event_bus.publish(response_event)
 
             self._logger.info(
-                "permission_response_sent_successfully",
+                "permission_response_published_successfully",
                 request_id=request_id,
                 session_id=session_id,
                 tool_call_id=tool_call.toolCallId,
@@ -618,7 +659,7 @@ class PermissionHandler:
 
         except Exception as e:
             self._logger.error(
-                "permission_response_send_failed",
+                "permission_response_publish_failed",
                 request_id=request_id,
                 session_id=session_id,
                 tool_call_id=tool_call.toolCallId,

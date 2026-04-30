@@ -5,11 +5,10 @@
 - Парсеры сообщений
 - Обработчики ошибок
 - Структурированное логирование
-- DI контейнер
+- DI контейнер (dishka)
 - Repositories
 """
 
-from .di_container import ContainerBuilder, DIContainer, DIError, Scope
 from .handler_registry import (
     FsReadHandler,
     FsWriteHandler,
@@ -49,11 +48,6 @@ __all__ = [
     "setup_logging",
     "get_logger",
     "OperationTimer",
-    # DI
-    "DIContainer",
-    "ContainerBuilder",
-    "Scope",
-    "DIError",
     # Repositories
     "InMemorySessionRepository",
     # Services
