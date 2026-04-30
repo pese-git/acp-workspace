@@ -92,7 +92,7 @@ class ACPClientApp(App[None]):
         host: str,
         port: int,
         cwd: str | None = None,
-        history_dir: str | None = None,
+        container: AsyncContainer,
     ) -> None:
         """Инициализирует приложение с Clean Architecture.
 
@@ -102,7 +102,7 @@ class ACPClientApp(App[None]):
             host: Адрес сервера ACP
             port: Порт сервера ACP
             cwd: Путь к проекту (если None, используется текущая рабочая директория)
-            history_dir: Путь к директории локальной истории чата (опционально)
+            container: Готовый dishka AsyncContainer, управляемый caller-ом
         """
         super().__init__()
         self._host = host
@@ -121,13 +121,13 @@ class ACPClientApp(App[None]):
 
         # ThemeManager для переключения тем
         self._theme_manager = ThemeManager(app=self)
-        
+
         # Флаг видимости sidebar
         self._sidebar_visible = True
 
         # NavigationManager будет инициализирован в on_mount
         self._navigation_manager: NavigationManager | None = None
-        
+
         # MainLayout будет инициализирован в compose()
         self._main_layout: MainLayout | None = None
 
@@ -135,15 +135,9 @@ class ACPClientApp(App[None]):
         # перемешивать `session/update` между конкурентными запросами.
         self._session_history_load_lock = asyncio.Lock()
 
-        # Инициализируем dishka контейнер
-        self._container: AsyncContainer | None = None
-        self._provider = AppProvider(
-            host=host,
-            port=port,
-            cwd=cwd,
-            history_dir=history_dir,
-        )
-        self._app_logger.info("app_provider_created", cwd=cwd)
+        # Контейнер создан и управляется caller-ом через `async with`
+        self._container: AsyncContainer = container
+        self._app_logger.info("app_initialized", cwd=cwd)
 
         # ViewModels будут разрешены в on_mount
         self._ui_vm: UIViewModel | None = None
@@ -160,11 +154,7 @@ class ACPClientApp(App[None]):
         """Инициализирует приложение при монтировании."""
         self._app_logger.info("app_mounting")
 
-        # Создаём dishka контейнер
-        self._container = make_async_container(self._provider)
-        self._app_logger.info("dishka_container_created")
-
-        # Разрешаем все ViewModels
+        # Разрешаем все ViewModels из контейнера
         try:
             self._ui_vm = await self._container.get(UIViewModel)
             self._session_vm = await self._container.get(SessionViewModel)
@@ -838,16 +828,26 @@ class ACPClientApp(App[None]):
     async def on_unmount(self) -> None:
         """Очистка ресурсов при завершении приложения."""
         self._app_logger.info("app_unmounting")
-
-        # Закрываем dishka контейнер (автоматически закроет все async ресурсы)
-        if self._container is not None:
-            try:
-                await self._container.close()
-                self._app_logger.info("dishka_container_closed")
-            except Exception as e:
-                self._app_logger.error("dishka_container_close_failed", error=str(e))
-
+        # Контейнер закрывается caller-ом через `async with` после завершения run_async().
+        # Это гарантирует cleanup даже при исключении в on_mount.
         self._app_logger.info("app_unmounted")
+
+
+async def _run_tui_app_async(
+    *,
+    host: str,
+    port: int,
+    cwd: str | None,
+    history_dir: str | None,
+) -> None:
+    resolved_cwd = os.getcwd() if cwd is None else os.path.abspath(os.path.expanduser(cwd))
+    if not os.path.exists(resolved_cwd) or not os.path.isdir(resolved_cwd):
+        raise ValueError(f"Путь {resolved_cwd} не является доступной директорией")
+
+    provider = AppProvider(host=host, port=port, cwd=resolved_cwd, history_dir=history_dir)
+    async with make_async_container(provider) as container:
+        app = ACPClientApp(host=host, port=port, cwd=resolved_cwd, container=container)
+        await app.run_async()
 
 
 def run_tui_app(
@@ -866,5 +866,11 @@ def run_tui_app(
         history_dir: Путь к директории локальной истории чата (опционально)
     """
     resolved_host, resolved_port = resolve_tui_connection(host=host, port=port)
-    app = ACPClientApp(host=resolved_host, port=resolved_port, cwd=cwd, history_dir=history_dir)
-    app.run()
+    asyncio.run(
+        _run_tui_app_async(
+            host=resolved_host,
+            port=resolved_port,
+            cwd=cwd,
+            history_dir=history_dir,
+        )
+    )
