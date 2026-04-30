@@ -3119,3 +3119,75 @@ async def test_session_load_uses_shared_mcp_setup():
     assert loaded.response is not None
     assert loaded.response.error is None
 
+
+# ---------------------------------------------------------------------------
+# Тесты инъекции PromptOrchestrator (2.7-inject-prompt-orchestrator)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_created_once():
+    """PromptOrchestrator должен создаваться единожды."""
+    from unittest.mock import MagicMock
+
+    from codelab.server.tools.registry import ToolRegistry
+
+    tool_registry = MagicMock(spec=ToolRegistry)
+    protocol = ACPProtocol(tool_registry=tool_registry)
+
+    orch1 = await protocol._get_prompt_orchestrator()
+    orch2 = await protocol._get_prompt_orchestrator()
+
+    assert orch1 is orch2
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_can_be_injected():
+    """Внешний PromptOrchestrator должен использоваться вместо создания нового."""
+    from unittest.mock import MagicMock
+
+    from codelab.server.protocol.handlers.prompt_orchestrator import PromptOrchestrator
+
+    mock_orchestrator = MagicMock(spec=PromptOrchestrator)
+    protocol = ACPProtocol(prompt_orchestrator=mock_orchestrator)
+
+    result = await protocol._get_prompt_orchestrator()
+    assert result is mock_orchestrator
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_reset_after_policy_manager_init():
+    """После инициализации GlobalPolicyManager оркестратор должен пересоздаться."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from codelab.server.tools.registry import ToolRegistry
+
+    tool_registry = MagicMock(spec=ToolRegistry)
+    protocol = ACPProtocol(tool_registry=tool_registry)
+
+    orch_before = await protocol._get_prompt_orchestrator()
+    assert orch_before is not None
+
+    # Мокаем GlobalPolicyManager для теста
+    mock_gpm = AsyncMock()
+    mock_gpm.initialize = AsyncMock()
+    with patch(
+        "codelab.server.protocol.handlers.global_policy_manager.GlobalPolicyManager.get_instance",
+        return_value=mock_gpm,
+    ):
+        await protocol.initialize_global_policy_manager()
+
+    orch_after = await protocol._get_prompt_orchestrator()
+
+    # Оркестратор пересоздан с новым policy manager
+    assert orch_before is not orch_after
+
+
+@pytest.mark.asyncio
+async def test_get_prompt_orchestrator_returns_none_without_tool_registry():
+    """_get_prompt_orchestrator возвращает None, если tool_registry не настроен."""
+    protocol = ACPProtocol()
+
+    result = await protocol._get_prompt_orchestrator()
+    assert result is None
+
